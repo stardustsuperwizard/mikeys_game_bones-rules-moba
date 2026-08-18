@@ -8,10 +8,9 @@ assignees: ''
 ---
 ## Primary Criteria
 ### Goal
-<!--
- What should exist when this issue is complete?
 
-Describe the player-facing or system-facing outcome, not the implementation. 
+<!--
+ What should exist when this issue is complete? Describe the player-facing or system-facing outcome, not the implementation. 
 -->
 ### Expected Behavior
 
@@ -26,16 +25,16 @@ Describe the player-facing or system-facing outcome, not the implementation.
 - <feature-specific architectural constraints>
 -->
 ### Acceptance Criteria
-<!--
-- [ ] Observable requirement 1
-- [ ] Observable requirement 2
+
 - [ ] Relevant automated tests exist
 - [ ] Existing tests pass
 - [ ] Godot headless validation passes
+<!--
+- [ ] Observable requirement 1
+- [ ] Observable requirement 2
 -->
 ### Out of Scope
 
-Explicitly state things that sound related but should NOT be implemented.
 <!--
 - Player character
 - Input
@@ -47,6 +46,7 @@ Explicitly state things that sound related but should NOT be implemented.
 -->
 ## Supporting Criteria
 ### Context
+
 <!-- 
 Why does this feature exist?
 
@@ -54,6 +54,7 @@ Link any relevant design or architecture documentation.
  -->
 
 #### Scenario: <normal/happy path>
+
 <!-- 
 1. Starting condition...
 2. Actor performs...
@@ -61,6 +62,7 @@ Link any relevant design or architecture documentation.
 4. Final state... 
 -->
 #### Scenario: <invalid/boundary case>
+
 <!--
 1. Starting condition...
 2. Actor attempts...
@@ -79,6 +81,7 @@ What, if anything, must be checked manually in Godot?
 - [ ] Other: ...
 -->
 ## Notes
+
 <!--
 References, sketches, examples, or additional context.
 -->
