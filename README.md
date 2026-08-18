@@ -1,5 +1,5 @@
 # Sword and Planet
-**Sword and Planet Roleplaying Game** featuring a setting that is based around 20th century pulp adventure stories as well as original content. This is an open source project that is being made to have fun!
+**Sword and Planet Roleplaying Game** features a default setting that is based around 20th century pulp adventure stories as well as original content. This is an open source project that is being made to have fun!
 
 ## About the Project
 
