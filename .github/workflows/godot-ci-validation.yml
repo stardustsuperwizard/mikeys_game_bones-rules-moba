@@ -27,6 +27,17 @@ jobs:
           godot \
             --headless \
             --path "$GITHUB_WORKSPACE" \
+            --import \
+            --log-file "$RUNNER_TEMP/godot-import.log" || {
+              status=$?
+              echo "Godot import pass failed."
+              cat "$RUNNER_TEMP/godot-import.log"
+              exit "$status"
+            }
+
+          godot \
+            --headless \
+            --path "$GITHUB_WORKSPACE" \
             --quit \
             --log-file "$RUNNER_TEMP/godot-headless.log" || {
               status=$?
