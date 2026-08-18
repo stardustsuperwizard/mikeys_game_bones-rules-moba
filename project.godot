@@ -12,3 +12,7 @@ config_version=5
 
 config/name="Sword and Planet"
 run/main_scene="res://scenes/main.tscn"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/mikeys_basic_ai/plugin.cfg", "res://addons/mikeys_basic_networking/plugin.cfg", "res://addons/mikeys_game_bones/plugin.cfg")
