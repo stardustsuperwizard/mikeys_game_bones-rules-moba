@@ -48,12 +48,10 @@ assignees: ''
 ### Context
 
 <!-- 
-Why does this feature exist?
-
-Link any relevant design or architecture documentation.
+Why does this feature exist? Link any relevant design or architecture documentation.
  -->
 
-#### Scenario: <normal/happy path>
+#### Scenario: <normal/happy_path/invalid/boundary_case>
 
 <!-- 
 1. Starting condition...
@@ -61,14 +59,8 @@ Link any relevant design or architecture documentation.
 3. System responds...
 4. Final state... 
 -->
-#### Scenario: <invalid/boundary case>
+<!-- Copy and paste as needed to generate more scenarios. -->
 
-<!--
-1. Starting condition...
-2. Actor attempts...
-3. System responds...
-4. Final state...
--->
 
 ### Human Validation
 
