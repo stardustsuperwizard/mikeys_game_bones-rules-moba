@@ -1,0 +1,45 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://addons/mikeys_game_bones/actors/actor.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_body_3d.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/player_controller_3d.gd" id="3"]
+[ext_resource type="Resource" path="res://resources/player_character_sheet.tres" id="4"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+height = 2.0
+radius = 0.4
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_1"]
+height = 2.0
+radius = 0.4
+
+[sub_resource type="BoxMesh" id="BoxMesh_1"]
+size = Vector3(0.25, 0.25, 0.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1"]
+albedo_color = Color(1, 0.2, 0.2, 1)
+
+[node name="Player" type="Node" script=ExtResource("1")]
+character_sheet = ExtResource("4")
+color = Color(0.2, 0.5, 1.0, 1.0)
+hostile = false
+
+[node name="Body" type="CharacterBody3D" parent="." script=ExtResource("2")]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Body"]
+shape = SubResource("CapsuleShape3D_1")
+position = Vector3(0, 1, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Body"]
+mesh = SubResource("CapsuleMesh_1")
+position = Vector3(0, 1, 0)
+
+[node name="FrontIndicator" type="MeshInstance3D" parent="Body"]
+mesh = SubResource("BoxMesh_1")
+material_override = SubResource("StandardMaterial3D_1")
+position = Vector3(0, 1, -0.55)
+
+[node name="Camera3D" type="Camera3D" parent="Body"]
+transform = Transform3D(1, 0, 0, 0, 0.894427, -0.447214, 0, 0.447214, 0.894427, 0, 4, 6)
+
+[node name="Controller" type="Node" parent="." script=ExtResource("3")]
