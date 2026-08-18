@@ -33,6 +33,19 @@ It is okay if you do not wish to play a game that has been made this way. You do
 ### Human made content
 While generative AI is used to produce the game infrastructure to play the game, this to made the "promise" of AI a reality, more time for creative art by humans. This game is not being created to be a second job that has to debugged late at night, it is to create interactive stories to explore! To that end, generative AI's role is story telling should mostly be helping humans make their ideas coherent and real, not writing content.
 
+## Player Controls
+
+| Action | Key |
+|---|---|
+| Move Forward | W |
+| Move Back | S |
+| Turn Left | A |
+| Turn Right | D |
+| Strafe Left | Q |
+| Strafe Right | E |
+| Jump | Space |
+| Recenter Camera | C |
+
 ---
 
 This project is designed with heart :heart: by humans and built with speed :fast_forward: by machines.
