@@ -27,3 +27,6 @@ jobs:
     # If you do not check out your code, Copilot will do this for you.
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-godot
+        with:
+          godot-version: 4.7.1-stable

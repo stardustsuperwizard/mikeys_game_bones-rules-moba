@@ -1,0 +1,44 @@
+name: Setup Godot
+description: Download and install a Godot editor build on the runner
+
+inputs:
+  godot-version:
+    description: Godot release tag to install
+    required: false
+    default: 4.7.1-stable
+
+runs:
+  using: composite
+  steps:
+    - name: Install Godot engine
+      shell: bash
+      env:
+        GODOT_VERSION: ${{ inputs.godot-version }}
+      run: |
+        set -euo pipefail
+
+        mkdir -p "$RUNNER_TEMP/godot"
+        curl -fsSL \
+          -o "$RUNNER_TEMP/godot/godot.zip" \
+          "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+
+        python - <<'PY'
+        import os
+        import stat
+        import zipfile
+        from pathlib import Path
+
+        version = os.environ["GODOT_VERSION"]
+        install_dir = Path(os.environ["RUNNER_TEMP"]) / "godot"
+        archive = install_dir / "godot.zip"
+        executable = install_dir / f"Godot_v{version}_linux.x86_64"
+        target = install_dir / "godot"
+
+        with zipfile.ZipFile(archive) as archive_file:
+            archive_file.extractall(install_dir)
+
+        executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        executable.rename(target)
+        PY
+
+        echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
