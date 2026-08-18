@@ -10,9 +10,12 @@ var state: Dictionary
 func _init(p_id: StringName, p_definition: ObjectDefinition) -> void:
 	id = p_id
 	definition = p_definition
-	traits = definition.traits if definition else []
-	capabilities = definition.capabilities if definition else []
-	state = definition.default_state.duplicate() if definition else {}
+	# Left at their empty defaults when there's no definition -- an untyped
+	# `[]` fallback can't be assigned to these typed fields.
+	if definition:
+		traits = definition.traits
+		capabilities = definition.capabilities
+		state = definition.default_state.duplicate()
 
 func has_trait(trait_name: StringName) -> bool:
 	return traits.has(trait_name)
