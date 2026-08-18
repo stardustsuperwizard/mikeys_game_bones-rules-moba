@@ -1,26 +1,120 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=20 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="1"]
+[ext_resource type="Script" path="res://scripts/isometric_camera_3d.gd" id="2"]
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_1"]
+; --- Floor ---
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(20, 0.2, 20)
 
-[sub_resource type="BoxMesh" id="BoxMesh_1"]
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
 size = Vector3(20, 0.2, 20)
+
+[sub_resource type="StandardMaterial3D" id="Mat_floor"]
+albedo_color = Color(0.5, 0.5, 0.5, 1)
+
+; --- Walls (beige) ---
+[sub_resource type="StandardMaterial3D" id="Mat_wall"]
+albedo_color = Color(0.96, 0.9, 0.78, 1)
+
+; North wall (Z = -10)
+[sub_resource type="BoxShape3D" id="BoxShape3D_north"]
+size = Vector3(20, 4, 0.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_north"]
+size = Vector3(20, 4, 0.2)
+
+; South wall (Z = +10)
+[sub_resource type="BoxShape3D" id="BoxShape3D_south"]
+size = Vector3(20, 4, 0.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_south"]
+size = Vector3(20, 4, 0.2)
+
+; West wall (X = -10)
+[sub_resource type="BoxShape3D" id="BoxShape3D_west"]
+size = Vector3(0.2, 4, 20)
+
+[sub_resource type="BoxMesh" id="BoxMesh_west"]
+size = Vector3(0.2, 4, 20)
+
+; East wall (X = +10)
+[sub_resource type="BoxShape3D" id="BoxShape3D_east"]
+size = Vector3(0.2, 4, 20)
+
+[sub_resource type="BoxMesh" id="BoxMesh_east"]
+size = Vector3(0.2, 4, 20)
 
 [node name="Main" type="Node"]
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.5, -0.866025, 0, 0.866025, 0.5, 0, 0, 0)
 
+; --- Floor ---
 [node name="Floor" type="StaticBody3D" parent="."]
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
-shape = SubResource("BoxShape3D_1")
+shape = SubResource("BoxShape3D_floor")
 position = Vector3(0, -0.1, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
-mesh = SubResource("BoxMesh_1")
+mesh = SubResource("BoxMesh_floor")
+material_override = SubResource("Mat_floor")
 position = Vector3(0, -0.1, 0)
+
+; --- North wall ---
+[node name="WallNorth" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallNorth"]
+shape = SubResource("BoxShape3D_north")
+position = Vector3(0, 2, -10)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallNorth"]
+mesh = SubResource("BoxMesh_north")
+material_override = SubResource("Mat_wall")
+position = Vector3(0, 2, -10)
+
+; --- South wall ---
+[node name="WallSouth" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallSouth"]
+shape = SubResource("BoxShape3D_south")
+position = Vector3(0, 2, 10)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallSouth"]
+mesh = SubResource("BoxMesh_south")
+material_override = SubResource("Mat_wall")
+position = Vector3(0, 2, 10)
+
+; --- West wall ---
+[node name="WallWest" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallWest"]
+shape = SubResource("BoxShape3D_west")
+position = Vector3(-10, 2, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallWest"]
+mesh = SubResource("BoxMesh_west")
+material_override = SubResource("Mat_wall")
+position = Vector3(-10, 2, 0)
+
+; --- East wall ---
+[node name="WallEast" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallEast"]
+shape = SubResource("BoxShape3D_east")
+position = Vector3(10, 2, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallEast"]
+mesh = SubResource("BoxMesh_east")
+material_override = SubResource("Mat_wall")
+position = Vector3(10, 2, 0)
+
+; --- Isometric Camera ---
+[node name="IsometricCamera" type="Camera3D" parent="." script=ExtResource("2")]
+target_path = NodePath("Player/Body")
+distance = 14.0
+height = 12.0
+angle_degrees = 45.0
 
 [node name="Player" parent="." instance=ExtResource("1")]
