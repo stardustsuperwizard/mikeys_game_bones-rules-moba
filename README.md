@@ -4,6 +4,8 @@
 ## About the Project
 
 ### Philosophy
+**Game Style**: This is a 3D game that will feature "low poly" or "stylized graphics" made popular by the game [World of Warcraft](https://worldofwarcraft.blizzard.com/en-us/), the game rules will be based on the popular and free [5e SRD](https://www.dndbeyond.com/srd) and feature the ability to play as character or the literal all powerful Game Master in the style of [Neverwinter Nights](https://en.wikipedia.org/wiki/Neverwinter_Nights).
+
 **Goals:**  
 The following are the main, but certainly not the only, soft goals of the project (ie not time boxed or SMART).  
 * Produce an open-source computer role-play game for both single player and multiplayer play.
@@ -11,8 +13,6 @@ The following are the main, but certainly not the only, soft goals of the projec
 * Foster creative story telling and "bring to life" story ideas.
 * Learn to develop automated and AI workflows to build an end product using natural language (currently, English).
 * Enable game development for a busy dad, during his limited downtime.
-
-**Game Style**: This is a 3D game that will feature "low poly" or "stylized graphics" made popular by the game [World of Warcraft](https://worldofwarcraft.blizzard.com/en-us/), the game rules will be based on the popular and free [5e SRD](https://www.dndbeyond.com/srd) and feature the ability to play as character or the literal all powerful Game Master in the style of [Neverwinter Nights](https://en.wikipedia.org/wiki/Neverwinter_Nights).
 
 ### Technical
 **Game Engine:** [Godot 4](https://godotengine.org) (client and server)
