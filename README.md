@@ -45,7 +45,7 @@ This was a deliberate choice due to limited time and a desire to design and play
 It is okay if you do not wish to play a game that has been made this way. You do not have to play this game. It was made for someone else. If you like the concept of the game and would like to contribute you can fork the repo and replace the AI code with human written code and play the game your way. You can also submit a PR with human written code in it that either replaces or enhances machine written code.
 
 ### Human made content
-While generative AI is used to produce the code infrastructure to play the game, the "promise" of AI is more time for creative art by humans. This game is not being created to be a second job that has to be debugged late at night, it is to create interactive stories to explore! To that end, generative AI's role in story telling should minimal and mostly around helping humans make their ideas coherent and real, not writing content.
+While generative AI is used to produce the code infrastructure to play the game, the "promise" of AI is to enable creative pursuits by and for humans. This game is not being created to be a second job that has to be debugged late at night, it is to create interactive stories to explore! To that end, generative AI's role in story telling should minimal and mostly around helping humans make their ideas coherent and real, not writing content.
 
 ---
 
