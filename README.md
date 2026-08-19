@@ -25,6 +25,8 @@ These assets are not yet a part of the project but have been scoped in the past 
 
 ## Player Controls
 
+### Keyboard
+
 | Action | Key |
 |---|---|
 | Move Forward | W |
@@ -35,6 +37,31 @@ These assets are not yet a part of the project but have been scoped in the past 
 | Strafe Right | E |
 | Jump | Space |
 | Recenter Camera | C |
+
+### Mouse
+
+| Action | Input |
+|---|---|
+| Contextual action | Left click |
+| Look around | Right click and drag |
+| Zoom in / out | Scroll wheel |
+
+Left click is a single contextual action button — what it does depends on what
+you clicked:
+
+| Clicked | Result |
+|---|---|
+| Ground | Walk there |
+| Hostile character | Walk into melee range, then attack |
+| Door or other interactable | Walk into range, then use it |
+| Wall | Walk up to it and stop against it |
+| Sky, or anything else | Nothing |
+
+Each click issues one order that the character carries out on its own, turning
+to face where it is headed. A new click replaces the order, any keyboard
+movement cancels it, and an order the character cannot reach is abandoned
+rather than walked into forever. There is no pathfinding yet, so orders only
+work along a clear line to the destination.
 
 
 ## A note about Generative AI
