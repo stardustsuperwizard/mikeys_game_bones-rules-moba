@@ -28,6 +28,7 @@ each one. They are not open for an implementation session to revisit.
 | `rules/data/generated/` is gitignored and regenerated on demand | Nothing stored means nothing can go stale. Godot is assumed present wherever the Python tests run — this is a Godot game, not a Python project |
 | The balance pipeline is path-filtered to `rules/**` and `sim/**` | An asset or scene change cannot move a balance number, so it should not pay for a Godot download, an export, and a pytest run. Godot import/boot validation stays unfiltered and runs on everything. See #22 |
 | Godot exports; Python never parses `.tres` | Godot serializes enums as integers. A Python-side int-to-name map mirroring five GDScript enums, with nothing verifying they agree, would be a silent wrong-numbers drift vector worse than the formula drift §65 is about |
+| Combat kit is 4 action slots + 1 dedicated passive slot; passives never compete for an action slot | §62's open question, answered on #43. A dedicated slot makes `occupies_equipped_slot` a field with one legal value, so it is never added |
 | Ruleset UI lives in `rules/ui/` | A ruleset whose HUD lives elsewhere is not portable. Signals in, nothing out; no rules logic in UI |
 | Game-flow UI is out of scope for the entire backlog | Main menu, pause, settings, host/join, character creation, loadout editor — a third-party addon is intended for these |
 | Networking follows the existing `Actor.try_attack` / `_resolve_attack` shape | Server-authoritative resolve with client request already exists in the framework; #47 makes it real rather than retrofitting |
@@ -142,10 +143,11 @@ camera, so a gamepad player cannot aim independently of where they are walking.
 
 Covers §19, §42, §53, §62, and the `DASHING` row of §56. §66 item 8.
 
-**Human decision needed in #43, before implementation starts:** §62 asks explicitly
-whether passives are always-on traits tied to *learned* abilities, or whether some occupy
-one of the four equipped slots. This changes the §50 build-generation combinatorics. The
-Issue proposes an answer and says not to guess.
+**§62's design question is answered** (2026-08-20, recorded on #43): a passive never
+occupies an action slot, and the player **selects one** into a dedicated fifth slot. The
+combat kit is *basic attack + 4 action abilities + 1 selected passive*, with temporary
+passives rendering beside the selected one. This makes the §50 build space a product,
+`(N choose 4) x (M choose 1)`, rather than a single combination — #51 reflects that.
 
 **At the end of this batch:** the §53 first prototype exists and is playable. This is the
 point at which the question "is this combat model any good" can be answered.
