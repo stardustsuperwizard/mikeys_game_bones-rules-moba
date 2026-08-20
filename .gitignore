@@ -27,3 +27,6 @@ addons/*
 # Python bytecode from repository tooling
 __pycache__/
 *.pyc
+
+# Generated JSON exported for the Python balance harness — regenerated on demand
+rules/data/generated/
