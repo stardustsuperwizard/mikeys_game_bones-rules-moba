@@ -1,4 +1,3 @@
-```markdown
 ---
 name: planner
 description: Decomposes Sword and Planet features into bounded engineering work and orchestrates implementation through GitHub Issues
@@ -262,4 +261,3 @@ Do not:
 - silently resolve product ambiguity;
 - claim Issue relationships exist without verifying them;
 - claim an Issue was created if GitHub write access failed.
-```

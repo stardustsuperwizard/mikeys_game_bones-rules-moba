@@ -1,4 +1,3 @@
-```markdown
 ---
 name: Implementation Task
 about: A bounded engineering task emitted by the planner. Not for human-authored feature requests.
@@ -119,4 +118,3 @@ The implementation pull request must include:
 
 It must not close the parent Feature unless explicitly instructed by the
 planner because that pull request completes the entire Feature.
-```
