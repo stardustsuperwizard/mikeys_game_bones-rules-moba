@@ -2,7 +2,7 @@
 name: Task
 about: Not every issue needs to pretend to be a “feature.”
 title: ''
-labels: task, machine
+labels: task
 assignees: ''
 
 ---

@@ -2,7 +2,7 @@
 name: Bug Report
 about: Document identified bug for fixing.
 title: ''
-labels: bug, machine
+labels: bug
 assignees: ''
 
 ---

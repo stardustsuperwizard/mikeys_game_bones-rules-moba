@@ -2,21 +2,27 @@
 name: Implementation Task
 about: A bounded unit of work emitted by the planner session. Not for humans filing features.
 title: '[impl] '
-labels: implementation, machine, agent:implement
+labels: implementation, agent:implement
 assignees: ''
 
 ---
 <!--
-Opened by the planner session, one per task in the implementation plan.
-Assign to Copilot with the model picker set to Claude Haiku 4.5.
-See docs/AGENT_WORKFLOW.md.
+Opened by the planner session, one per promoted task in the implementation
+plan. Create this as a direct GitHub sub-issue of the parent Feature and copy
+the parent's milestone. A Parent Issue line in the body does not establish the
+GitHub relationship. Assign only this sub-issue to Copilot with the model
+picker set to Claude Haiku 4.5. See docs/AGENT_WORKFLOW.md.
 -->
 
 ## Plan Reference
 
 - Plan: `docs/plans/<issue-number>-<slug>.md`
 - Task: <task number and title from the plan>
-- Parent Issue: #<issue-number>
+- Parent Feature: #<issue-number>
+- Milestone: <same milestone as the parent Feature>
+
+> This Issue must be attached as a GitHub sub-issue of the Parent Feature.
+> Confirm the relationship in GitHub before assigning the implementer.
 
 ## Scope
 
@@ -52,4 +58,5 @@ See docs/AGENT_WORKFLOW.md.
 
 ## Depends On
 
-<!-- #<issue-number>, or "none" -->
+<!-- A sibling implementation sub-issue number, or "none". Record the
+     dependency using GitHub's blocked-by relationship as well as here. -->

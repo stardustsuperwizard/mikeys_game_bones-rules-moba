@@ -95,10 +95,10 @@ Human Issue (Feature template)
 ┌─────────────────────────────────────────┐
 │ 1. PLANNING SESSION    Opus 5, high      │
 │    agent: planner                        │
-│    reads repo, writes plan, opens Issues │
+│ reads repo, writes plan, opens sub-issues│
 └─────────────────────────────────────────┘
         │  docs/plans/<n>-<slug>.md
-        │  + one Issue per task
+        │  + one sub-issue per promoted task
         ▼
 ┌─────────────────────────────────────────┐
 │ 2. IMPLEMENTATION      Haiku 4.5         │
@@ -131,8 +131,8 @@ The planner produces:
 
 - `docs/plans/<issue-number>-<slug>.md` from
   `.github/templates/implementation-plan.md`
-- One **Implementation Task** Issue per task in the plan, per the Issue
-  Promotion Criteria in `.github/agents/planner.agent.md`
+- One **Implementation Task** sub-issue per promoted task in the plan, per
+  the Issue Promotion Criteria in `.github/agents/planner.agent.md`
 
 The plan file matters more than it looks. Implementation sessions start cold
 and never see the planner's reasoning — the plan is the only handoff. If a
@@ -142,9 +142,31 @@ If the planner records anything under **Escalations**, resolve it before
 starting implementation. Do not let a cheap model resolve architectural
 ambiguity.
 
+### Issue hierarchy
+
+The Feature Issue is the parent and remains the source of truth for intended
+behavior. Every promoted Implementation Task is a direct GitHub sub-issue of
+that Feature. Writing the parent number in an Issue body is not sufficient;
+the GitHub sub-issue relationship must exist.
+
+Each implementation sub-issue:
+
+- uses the **Implementation Task** template;
+- has the same milestone as its parent Feature;
+- carries `implementation`, `machine`, and `agent:implement`;
+- records sibling ordering with GitHub issue dependencies;
+- is the only Issue assigned to the implementation agent; and
+- is closed by its own implementation PR.
+
+The parent Feature stays open while its sub-issues are implemented. Close it
+only after all required sub-issues are integrated, validation passes, and the
+reviewer returns `PASS`. The Project's Parent issue and Sub-issue progress
+fields provide the rollup; the parent and children retain their separate
+Planner Status and Implementation Status values.
+
 ### Step 2 — Implementation
 
-For each Implementation Task Issue, in dependency order:
+For each Implementation Task sub-issue, in dependency order:
 
 1. Assign the Issue to Copilot.
 2. Set the model picker to **Claude Haiku 4.5**. Not Auto.
@@ -155,8 +177,11 @@ command and result. Work it finds but was not asked to do goes in the PR's
 **Discovered out-of-scope work** section — it does not file Issues and does
 not implement them.
 
-Tasks with `Depends on:` set wait for their dependency to merge. Per
-CONTRIBUTING.md, new work starts from the latest `main`; do not stack PRs.
+Tasks with `Depends on:` set wait for their dependency to merge. Record the
+same relationship using GitHub's blocked-by link so it is visible outside the
+Issue body. Per CONTRIBUTING.md, new work starts from the latest `main`; do
+not stack PRs. Each implementation PR closes only its assigned sub-issue, not
+the parent Feature.
 
 ### Step 3 — Review
 
