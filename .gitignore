@@ -27,3 +27,6 @@ addons/*
 # Python bytecode from repository tooling
 __pycache__/
 *.pyc
+
+# Generated output from the balance / data harness — never committed
+rules/data/generated/
