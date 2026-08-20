@@ -3,7 +3,7 @@ name: godot-implementer
 description: Implements bounded Sword and Planet engineering tasks
 model: Claude Haiku 4.5
 tools: ["read", "search", "edit", "execute"]
-user-invocable: false
+user-invocable: true
 ---
 
 You are an implementation worker for Sword and Planet.
