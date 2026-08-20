@@ -17,6 +17,8 @@ The design goals are:
 
 This is intentionally a baseline. The objective is not to solve every RPG design problem before implementation. The rules should first produce enjoyable combat and then be iterated through playtesting and simulation.
 
+Sections 1–54 are the original baseline design. Sections 55+ are implementation-readiness enhancements layered on top — closing gaps a coding agent will hit immediately when turning the baseline into an engine (gamepad targeting, ability data schema, state machine, stacking rules, PvE AI, and networking authority).
+
 ---
 
 # 1. Core Design Philosophy
@@ -1740,6 +1742,11 @@ Expert
 
 This prevents the game from being balanced only around mathematically perfect execution.
 
+Note (see §55): once gamepad soft-lock targeting is defined, `skillshot_accuracy` alone
+is no longer a sufficient proxy for execution. Profiles should separate raw aim
+precision from the assist tier applied, since assist narrows the gap between skill
+tiers by design.
+
 ---
 
 # 41. 1v1 Is Not Enough
@@ -1817,6 +1824,8 @@ def test_standard_enemy_fight_duration():
 
     assert 8 <= duration <= 25
 ```
+
+See §63 for the enemy behavior/threat model these stat blocks assume.
 
 ---
 
@@ -1995,6 +2004,7 @@ Examples:
 - Ability legality
 - 100–1,000 duel simulations
 - Known regression scenarios
+- Ability data schema validation (§57)
 
 ## Deep Balance Suite
 
@@ -2194,7 +2204,7 @@ That is enough to start discovering whether the fundamental combat model works.
 
 ---
 
-# 54. Summary
+# 54. Summary of Baseline Design
 
 The baseline design is:
 
@@ -2256,3 +2266,408 @@ Regression testing
 The goal is not to allow Python to decide what is fun.
 
 The goal is to make the rules measurable enough that human design decisions can be informed by repeatable evidence.
+
+---
+
+# 55. Gamepad Targeting Model (Soft-Lock / Aim Assist)
+
+The baseline design goal is explicit: engaging combat without requiring twitch-FPS
+reflexes. The Skillshot definition in §11 ("travels or resolves along an aimed path")
+is written for a mouse. On a stick, raw aim without assistance produces exactly the
+reflex-dependent experience the design is trying to avoid.
+
+Introduce three targeting assist tiers, selectable per-ability:
+
+## Free Aim
+No assistance. Reserved for high-power, high-skill-expression abilities (rare).
+
+## Soft Lock (default for most Skillshots)
+```text
+Aim Cone: ±X degrees around cursor/reticle direction
+Magnetism: nearest valid target within cone is used to bend trajectory toward it
+Magnetism Strength: 0.0–1.0 (0 = cosmetic nudge, 1 = effectively targeted)
+Acquisition Range: distance at which magnetism begins to apply
+```
+
+```python
+def resolve_skillshot_direction(aim_direction, candidates, cone_degrees, magnetism):
+    target = nearest_in_cone(candidates, aim_direction, cone_degrees)
+    if target is None:
+        return aim_direction
+    return lerp_direction(aim_direction, direction_to(target), magnetism)
+```
+
+## Hard Lock (Targeted type abilities only)
+Right Bumper cycles/holds a lock; ability auto-resolves to the locked unit if still valid
+and in range at cast resolution.
+
+Recommended defaults for the initial ability set:
+```text
+Skillshots (Aimed Shot, Energy Bolt, Deadeye): Soft Lock, 8° cone, 0.5 magnetism
+Charge / Lunge (dash-to-target): Soft Lock, 12° cone, 0.7 magnetism
+Cataclysm (ground-targeted AoE): Free Aim (no single target to assist toward)
+```
+
+Magnetism strength becomes a first-class tunable, and should be included in the
+`PlayerProfile` skill simulation (§40) as a variable independent from raw accuracy —
+it lets you simulate "gamepad + assist" separately from "theoretical mouse precision."
+
+---
+
+# 56. Character State Machine
+
+Every character needs one authoritative state at any instant. This resolves the
+"movement or another action may cancel or interrupt" ambiguity in §9.
+
+```text
+States:
+  Idle
+  Moving
+  BasicAttackWindup
+  BasicAttackRecovery
+  AbilityCast        (has Cast Time > 0)
+  AbilityChannel      (see §58)
+  Dashing             (movement-locked mobility ability, e.g. Lunge, Charge)
+  CrowdControlled     (Stunned / Rooted / Feared / Taunted — see §14)
+  Dead
+```
+
+Legal interrupts per state (baseline — override per-ability via `Interrupt Rules`):
+
+| State | Movement | New Basic Attack | New Ability | Interruptible by hard CC |
+|---|---|---|---|---|
+| Idle / Moving | ✅ | ✅ | ✅ | ✅ |
+| BasicAttackWindup | ❌ (cancels attack) | ❌ | ❌ | ✅ |
+| BasicAttackRecovery | ✅ | ❌ | ✅ | ✅ |
+| AbilityCast | ❌ (cancels cast, resource refunded per §59) | ❌ | ❌ | ✅ |
+| AbilityChannel | ❌ | ❌ | ❌ | ✅ (breaks channel) |
+| Dashing | ❌ (locked to dash path) | ❌ | ❌ | only by displacement effects |
+| CrowdControlled | per CC type (§14) | per CC type | per CC type | n/a |
+
+This table is itself a good candidate for a data file (`state_transitions.json`) rather
+than hardcoded logic, so balance/CC changes don't require touching state-machine code.
+
+---
+
+# 57. Formal Ability Data Schema
+
+§10 lists fields in prose. Coding agents need a validated schema so every ability file
+is structurally guaranteed correct before it reaches the simulator or the engine.
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ability",
+  "type": "object",
+  "required": ["id", "name", "discipline", "targeting_type", "damage_type",
+               "resource_cost", "cooldown"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "discipline": { "enum": ["warrior", "guardian", "slayer", "marksman", "mystic", "adventurer"] },
+    "targeting_type": { "enum": ["self", "targeted", "skillshot", "ground", "area", "toggle"] },
+    "aim_assist": { "enum": ["free", "soft_lock", "hard_lock", "none"] },
+    "damage_type": { "enum": ["physical", "magical", "true", "none"] },
+    "base_damage": { "type": "number", "default": 0 },
+    "scaling": { "type": "object", "additionalProperties": { "type": "number" } },
+    "resource_cost": { "type": "number" },
+    "cooldown": { "type": "number" },
+    "cast_time": { "type": "number", "default": 0 },
+    "channel_duration": { "type": "number", "default": 0 },
+    "range": { "type": "number", "default": 0 },
+    "projectile_speed": { "type": "number" },
+    "area_radius": { "type": "number" },
+    "duration": { "type": "number" },
+    "charges": { "type": "integer", "default": 1 },
+    "crowd_control": {
+      "type": "object",
+      "properties": {
+        "type": { "enum": ["stun", "root", "slow", "silence", "disarm",
+                            "knockback", "pull", "knock_up", "fear", "taunt", "blind"] },
+        "magnitude": { "type": "number" },
+        "duration": { "type": "number" },
+        "affected_by_tenacity": { "type": "boolean", "default": true }
+      }
+    },
+    "buffs": { "type": "array", "items": { "$ref": "#/definitions/statModifier" } },
+    "debuffs": { "type": "array", "items": { "$ref": "#/definitions/statModifier" } },
+    "interrupt_rules": {
+      "type": "object",
+      "properties": {
+        "cancellable_by_movement": { "type": "boolean" },
+        "cancellable_by_hard_cc": { "type": "boolean", "default": true },
+        "refund_resource_on_cancel": { "type": "number", "default": 0 }
+      }
+    },
+    "on_cancel": { "enum": ["full_refund", "partial_refund", "no_refund", "cooldown_still_applies"] }
+  },
+  "definitions": {
+    "statModifier": {
+      "type": "object",
+      "properties": {
+        "stat": { "type": "string" },
+        "amount": { "type": "number" },
+        "is_percentage": { "type": "boolean", "default": false },
+        "duration": { "type": "number" },
+        "stacking": { "enum": ["refresh", "stack", "ignore", "replace_if_stronger"] }
+      }
+    }
+  }
+}
+```
+
+Validate every ability file against this schema in the **Fast Suite** (§48) before any
+duel simulation runs — a malformed ability should fail CI in milliseconds, not surface
+as a confusing simulation result.
+
+This same schema is what both the Python balance harness and GDScript combat code
+should load ability data from (as JSON or converted Godot `Resource` files), rather
+than either side hardcoding numbers. See §66 for how this keeps the two
+implementations in sync.
+
+---
+
+# 58. Channeled Abilities (missing Targeting/Casting type)
+
+§11 covers Self/Targeted/Skillshot/Ground/Area/Toggle but not **Channeled** — abilities
+that deal effect continuously while held and can be interrupted mid-effect (distinct
+from Cast Time, which is a delay *before* the effect resolves).
+
+```text
+Channeled
+Effect applies continuously (tick or continuous) while character remains in
+AbilityChannel state. Broken by hard CC, by movement (if flagged), or by
+completing full channel_duration.
+
+Example:
+  Suppressing Fire
+  Channel Duration: 2.5 sec
+  Tick Damage: 20 Physical / 0.25 sec
+  Effect: Target Slowed 30% while channel active
+  Broken by: Stun, Silence, Displacement
+  Cost: 10 Mana / tick
+```
+
+Add `channel_duration` and `on_channel_break` (`no_effect_remaining` /
+`partial_effect_already_applied`) to the schema in §57 (already included above).
+
+---
+
+# 59. Cast Cancellation & Resource Refund Rules
+
+§9 mentions cancellation is possible but doesn't define the economic consequence. This
+matters for balance testing (§28 Resource Efficiency assumes resource is *spent*, not
+*attempted*).
+
+```text
+Default rule:
+  Cancelled before cast completes → full resource refund, cooldown NOT applied
+  Interrupted by hard CC during cast → resource refunded, cooldown NOT applied
+  Interrupted after channel begins damage/effect application → no refund,
+      cooldown applies (partial value was already delivered)
+```
+
+This default should be overridable per-ability via `on_cancel` (§57 schema) — some
+kits may intentionally punish cancelled casts (e.g., a wind-up ability meant to bait CC).
+
+---
+
+# 60. Status Effect Stacking Rules
+
+Neither §14 (Crowd Control) nor §17 (Buffs/Debuffs) defines what happens when the same
+or related effects overlap. This is a frequent source of exploit-class bugs (§47).
+
+```text
+Per stat modifier, declare a stacking policy (see statModifier.stacking in §57):
+
+  refresh            New application resets duration; magnitude unchanged.
+  stack              Magnitude sums (or duration extends), up to max_stacks if defined.
+  ignore             New application does nothing if one is already active.
+  replace_if_stronger  Keep whichever instance has higher magnitude.
+
+Hard CC (Stun/Root/Fear/Taunt) default policy: DO NOT stack durations.
+  A second Stun applied during an active Stun sets duration to
+  max(remaining, new_duration) — never sums. This prevents "perma-stun"
+  combos from multiple characters chaining CC on one target (a known MOBA
+  genre failure mode) and should be an explicit regression test (§47):
+
+  def test_stacked_stuns_do_not_sum_duration():
+      target = apply_stun(target, duration=1.0)
+      advance_time(0.3)
+      target = apply_stun(target, duration=1.0)
+      assert target.cc_remaining("stun") == pytest.approx(1.0)
+```
+
+Consider a **diminishing-returns CC scaling** as an optional later system (used by
+several live MOBAs): each subsequent hard-CC application on the same target within a
+rolling window (e.g. 8 sec) has its duration multiplied by 0.5, then 0.25, floor at 0.
+
+---
+
+# 61. Armor/Magic Penetration and Ability Haste Formulas
+
+These stats are listed in §6 but never defined mathematically.
+
+```python
+def effective_armor(target_armor, flat_pen, percent_pen):
+    # Percent pen applies to remaining armor after flat pen, standard MOBA convention
+    reduced = max(0.0, target_armor - flat_pen)
+    return reduced * (1.0 - percent_pen)
+
+def physical_damage(raw_damage, target_armor, attacker_flat_pen=0, attacker_percent_pen=0.0):
+    eff_armor = effective_armor(target_armor, attacker_flat_pen, attacker_percent_pen)
+    return raw_damage * mitigation_multiplier(eff_armor)
+```
+
+```python
+def effective_cooldown(base_cooldown, ability_haste):
+    # Standard MOBA-genre haste formula: haste is a percent-CDR-equivalent stat
+    # that avoids the diminishing-returns awkwardness of stacking flat % CDR.
+    return base_cooldown * (100.0 / (100.0 + ability_haste))
+```
+
+Add regression/property tests mirroring §46 (e.g., "increasing Ability Haste never
+increases effective cooldown").
+
+---
+
+# 62. Passive Ability Type
+
+§10/§57 define active ability anatomy only. Character Design (§2) references "Passive
+effects" as a first-class concept but no schema exists for them.
+
+```json
+{
+  "id": "passive_example",
+  "name": "Battle Fury",
+  "discipline": "warrior",
+  "trigger": "on_basic_attack_hit",
+  "effect": { "stat": "attack_speed", "amount": 0.02, "is_percentage": true,
+              "duration": 3, "stacking": "stack", "max_stacks": 5 },
+  "occupies_equipped_slot": false
+}
+```
+
+Decide explicitly: are Passives always-on traits tied to *learned* (not equipped)
+abilities, or do some occupy one of the four equipped slots? This changes the
+"24 choose 4" combinatorics in §50 and should be pinned down before build-generation
+tooling is built.
+
+---
+
+# 63. PvE AI / Threat Model
+
+§42 defines enemy stat blocks but no behavior model, and §41 assumes party content
+exists. A minimal data-driven AI spec:
+
+```text
+Threat Table (per enemy):
+  threat[character_id] += damage_dealt_to_enemy
+  threat[character_id] += flat_threat_from_ability (e.g., Taunt sets threat to max)
+  threat decays: threat *= 0.95 per second out of combat
+
+Target Selection (baseline):
+  target = highest_threat_valid_target
+  valid = alive, in aggro_range, not stealthed (unless enemy has true_sight)
+
+Ability Usage (baseline enemy AI):
+  Use highest-priority ability off cooldown whose precondition is met, else Basic Attack.
+  Preconditions are simple data: {"if": "target_hp_pct < 0.3", "then": "execute_ability"}
+```
+
+This should be simulate-able the same way player builds are (§36-39) so PvE tuning
+gets the same regression-test discipline as PvP.
+
+---
+
+# 64. Networking / Hit-Resolution Authority
+
+Not addressed in the baseline, but decision-critical before any multiplayer combat
+code is written, since it determines what "the player's execution" (§1 core
+philosophy) actually means under latency.
+
+```text
+Recommended baseline: Server-authoritative hit resolution with client-side prediction.
+
+  - Client predicts local movement + ability activation immediately (no input delay feel).
+  - Client sends aim direction / target id + timestamp to server.
+  - Server resolves collision/targeting using server-side entity positions,
+    with a bounded rewind window (e.g. 100–150ms) for skillshot fairness
+    ("favor the shooter" lag compensation).
+  - Server is final authority on damage, CC application, and death.
+  - Skillshot soft-lock/magnetism (§55) is computed client-side for feel,
+    but hit confirmation is always server-side.
+
+Cooldowns and resource are server-authoritative; client displays a predicted
+local copy that reconciles on server correction.
+```
+
+This single decision affects animation cancel windows, whether Dash abilities need
+server-side path validation, and how aim-assist interacts with rewind. Worth locking
+in before §55–59 get implemented in the engine layer, since retrofitting authority
+models is expensive.
+
+---
+
+# 65. Python vs. Godot/GDScript: Division of Testing Responsibility
+
+The implementation language for the game itself is GDScript in Godot. This does not
+change where balance testing should live.
+
+```text
+Python (balance/ project, §21) owns:
+  - Exploratory and statistical balance work: Monte Carlo simulation (§33),
+    build-vs-build matchup matrices (§37), 1v1/3v3/5v5 scenario testing (§41),
+    automated build generation across thousands of loadout combinations (§50),
+    property-based testing (§46).
+  - This is a search/statistics problem. Fast headless iteration and a mature
+    stats/testing ecosystem (pytest, Hypothesis, numpy) matter more here than
+    engine fidelity. Running thousands of simulated fights through the actual
+    engine — even headless — is far slower than a plain Python loop, and GDScript
+    has no equivalent to Hypothesis-style property testing.
+
+GDScript / Godot headless (GUT or similar) owns:
+  - Correctness tests of the shipped combat code: does the actual implementation
+    compute damage, cooldowns, and CC the way the formulas specify.
+  - Integration-level behavior: animation timing, input handling, actual
+    collision detection for skillshots, network sync (§64).
+```
+
+The risk this split introduces is not "wrong tool" — it's **two independent
+implementations of the same formulas silently drifting apart** (GDScript hardcodes
+`100.0 / (100.0 + armor)` in one place, Python in another, and someone tunes one
+without the other). Two safeguards:
+
+1. **Shared data, not shared code.** Ability stats and formula constants live in the
+   JSON schema (§57), loaded by both Python and Godot `Resource` files — neither side
+   hardcodes ability numbers.
+2. **A conformance suite.** A fixed set of scenarios (specific characters, seeded RNG,
+   expected outcomes) that both the Python harness and an in-Godot GUT test execute
+   and must match within tolerance. Run this in CI whenever either side's combat math
+   changes — it's the canary for formula drift between the two languages.
+
+---
+
+# 66. Suggested Priority Order for Implementation
+
+Given the existing Python-first testing culture (§20-51), sequence new work so
+schema/state-machine land before content:
+
+```text
+1. Ability JSON Schema (§57) + validation in Fast Suite
+2. Character State Machine (§56) + interrupt table as data
+3. Cast cancellation / refund rules (§59)
+4. Stacking rules (§60) — write the anti-perma-stun regression test immediately
+5. Armor/Magic Pen + Ability Haste formulas (§61)
+6. Gamepad soft-lock targeting (§55) — prototype early, this is core to the stated
+   design goal and hardest to bolt on later
+7. Passive ability schema (§62)
+8. Networking authority decision (§64) — decide before writing engine-side netcode
+9. PvE AI/threat model (§63)
+10. Conformance suite between Python and GDScript (§65) — set up as soon as both
+    sides have any combat math implemented, not after
+```
+
+Items 1–5 are pure data-model/formula work and can be fully unit-tested in Python
+before any Godot integration, consistent with the existing "keep combat calculations
+independent from Godot" principle (§21).
