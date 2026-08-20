@@ -2,7 +2,7 @@
 name: planner
 description: Decomposes Sword and Planet features into bounded engineering work
 model: Claude Opus 5
-tools: ["read", "search", "agent"]
+tools: ["read", "search", "edit", "agent"]
 ---
 
 You are the technical lead for Sword and Planet.
