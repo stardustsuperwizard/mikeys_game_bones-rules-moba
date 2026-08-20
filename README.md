@@ -4,7 +4,7 @@
 ## About the Project
 
 ### Philosophy
-**Game Style**: This is a single player and multiplayer 3D game that will feature "low poly" or "stylized graphics" made popular by the game [World of Warcraft](https://worldofwarcraft.blizzard.com/en-us/) and game rules will be based on the popular and free [5e SRD](https://www.dndbeyond.com/srd). Players will have the ability to be both player characters or as a literal all powerful Game Master in the style of [Neverwinter Nights](https://en.wikipedia.org/wiki/Neverwinter_Nights).
+**Game Style**: This is a single player and multiplayer 3D game that will feature "low poly" or "stylized graphics" made popular by the game [World of Warcraft](https://worldofwarcraft.blizzard.com/en-us/) and game rules will be based on the popular and fast [MOBA](https://en.wikipedia.org/wiki/Multiplayer_online_battle_arena) gameplay. Players will have the ability to be both player characters or as a literal all powerful Game Master in the style of [Neverwinter Nights](https://en.wikipedia.org/wiki/Neverwinter_Nights).
 
 **Goals:**  
 The following are the main, but certainly not the only, soft goals of the project (ie not time boxed or SMART).  
