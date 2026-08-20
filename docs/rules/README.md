@@ -20,7 +20,7 @@ each one. They are not open for an implementation session to revisit.
 | All ruleset code lives in `rules/` at the repository root | Lifted wholesale into `addons/mikeys_game_bones` as `mikeys_game_rules_moba` later, without editing a file inside it |
 | Nothing in `rules/` references `res://scripts/`, `res://scenes/`, or `res://resources/` | The dependency arrow points one way. Enforced by an automated contract test in #20 |
 | `rules/` depends only on Godot 4 and the public `mikeys_game_bones` API | `addons/` is never modified by a ruleset Issue |
-| Global `class_name` identifiers are prefixed `Moba` | Godot's class registry is flat and global; `Ability`, `Buff`, and `StatusEffect` would collide with the third-party addons this project intends to adopt |
+| Global `class_name` identifiers are prefixed `Moba` | Godot has no namespaces — one flat global registry shared with every addon. `Ability`, `Buff`, and `StatModifier` would collide with the third-party addons goal 4 commits to adopting, and this module ships into other projects. Accepted cost: two naming conventions in the repo. `.tres` authoring requires a registered `class_name`, so `preload()` constants are not an available dodge |
 | All rules state hangs off one `MobaCombatant` node, a child of `Actor` | Keeps the whole ruleset behind a single attachment point, and keeps game rules out of framework code per `AGENTS.md` |
 | Combat math is pure and node-free, in `MobaFormulas` only | Unit-testable headless, and mirrorable by the Python harness |
 | Game content is authored as `.tres` in the Godot inspector; a headless export produces JSON for Python only | §57 permits "JSON **or** converted Godot `Resource` files"; §65 requires shared *data*, not a shared format. Serves bones design goal 3, and typed `@export` fields make invalid enums unrepresentable rather than caught-by-test |
@@ -59,8 +59,9 @@ other Issue:
 Godot loads `.tres` directly and never reads the generated JSON. The export exists solely
 so the Python harness needs no `.tres` parser.
 
-**Human decision needed in #20:** confirm the `Moba` class name prefix before 33 Issues
-adopt it.
+**Confirmed 2026-08-20 on #20:** the `Moba` prefix is adopted. The repository now carries
+two naming conventions deliberately — `addons/mikeys_game_bones/` and `scripts/` keep their
+bare names (`Actor`, `Rules`, `Door`, `CharacterSheet`) and are not renamed.
 
 ---
 
