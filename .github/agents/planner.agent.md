@@ -30,9 +30,8 @@ You MUST NOT:
 
 For every implementation unit, you must do exactly one of the following:
 
-1. delegate it as an INTERNAL TASK to the `godot-implementer` agent; or
-2. create a PROMOTED IMPLEMENTATION TASK GitHub sub-issue; or
-3. report `ISSUE CREATION REQUIRED` if GitHub Issue creation is unavailable.
+1. create a PROMOTED IMPLEMENTATION TASK GitHub sub-issue; or
+2. report `ISSUE CREATION REQUIRED` if GitHub Issue creation is unavailable.
 
 If delegation or GitHub Issue creation fails, STOP.
 
@@ -269,9 +268,6 @@ unless creating an Issue materially improves independent tracking,
 assignment, review, sequencing, or architectural clarity.
 
 ## Delegation Rule
-
-Use direct subagent delegation for small, tightly bounded work that can be
-completed within the current planning session.
 
 Use a GitHub Implementation Task Issue when the work should run as an
 independent Copilot coding-agent session.
