@@ -1,0 +1,759 @@
+name: Plan Feature
+
+on:
+  issues:
+    types:
+      - labeled
+
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Feature Issue number to plan"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  models: read
+
+concurrency:
+  group: plan-feature-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan Feature
+    runs-on: ubuntu-latest
+
+    # Automatically run when agent:plan is applied.
+    # workflow_dispatch allows manual testing/re-running against an Issue.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'agent:plan'
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+
+      # Change this to another model in the GitHub Models catalog if desired.
+      PLANNER_MODEL: openai/gpt-4.1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Feature Issue
+        id: issue
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ISSUE_NUMBER="${{ inputs.issue_number }}"
+          else
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+          fi
+
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+          gh issue view "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json number,title,body,milestone,url \
+            > issue.json
+
+          echo "Planning Issue #$ISSUE_NUMBER"
+
+      - name: Stop if already planned
+        id: duplicate_check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ steps.issue.outputs.issue_number }}"
+
+          if gh api \
+              --paginate \
+              "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments" \
+              --jq '.[].body' |
+              grep -q '<!-- automated-planner-complete -->'
+          then
+            echo "Issue #$ISSUE_NUMBER already has an automated plan."
+            echo "already_planned=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_planned=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build planner context
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        shell: python
+        run: |
+          import json
+          import pathlib
+          import re
+
+          root = pathlib.Path(".")
+          issue = json.loads(pathlib.Path("issue.json").read_text())
+
+          sections = []
+
+          sections.append(
+              "# FEATURE ISSUE\n\n"
+              f"Number: #{issue['number']}\n"
+              f"Title: {issue['title']}\n\n"
+              f"{issue.get('body') or ''}"
+          )
+
+          # These are the repository-wide planning contracts.
+          important_files = [
+              "AGENTS.md",
+              ".github/copilot-instructions.md",
+              ".github/ISSUE_TEMPLATE/07-implementation.md",
+              ".github/templates/implementation-plan.md",
+              "docs/AGENT_WORKFLOW.md",
+          ]
+
+          seen = set()
+
+          for filename in important_files:
+              path = root / filename
+
+              if path.exists() and path.is_file():
+                  text = path.read_text(errors="replace")
+
+                  # Protect the model context from unexpectedly huge files.
+                  text = text[:40000]
+
+                  sections.append(
+                      f"# REPOSITORY FILE: {filename}\n\n{text}"
+                  )
+
+                  seen.add(filename)
+
+          # Include a repository file inventory so the planner can see the
+          # current architecture without receiving every source file.
+          tracked_files = []
+
+          for path in root.rglob("*"):
+              if not path.is_file():
+                  continue
+
+              relative = path.as_posix()
+
+              if relative.startswith(".git/"):
+                  continue
+
+              tracked_files.append(relative)
+
+          tracked_files.sort()
+
+          sections.append(
+              "# REPOSITORY FILE INVENTORY\n\n"
+              + "\n".join(tracked_files[:1500])
+          )
+
+          # If the Feature Issue explicitly references repository paths inside
+          # backticks, include those files automatically.
+          issue_body = issue.get("body") or ""
+
+          referenced_paths = re.findall(r"`([^`\n]+)`", issue_body)
+
+          for candidate in referenced_paths:
+              candidate = candidate.strip()
+
+              if candidate in seen:
+                  continue
+
+              # Avoid commands, URLs, constants, etc.
+              if "/" not in candidate:
+                  continue
+
+              path = root / candidate
+
+              if not path.exists() or not path.is_file():
+                  continue
+
+              try:
+                  text = path.read_text(errors="replace")
+              except Exception:
+                  continue
+
+              sections.append(
+                  f"# ISSUE-REFERENCED FILE: {candidate}\n\n"
+                  + text[:40000]
+              )
+
+              seen.add(candidate)
+
+              # Keep context bounded.
+              if len(seen) >= 15:
+                  break
+
+          pathlib.Path("planner-context.txt").write_text(
+              "\n\n---\n\n".join(sections)
+          )
+
+      - name: Generate implementation plan
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        shell: python
+        run: |
+          import json
+          import os
+          import pathlib
+          import urllib.request
+          import urllib.error
+
+          context = pathlib.Path("planner-context.txt").read_text()
+
+          schema = {
+              "type": "object",
+              "additionalProperties": False,
+              "required": [
+                  "plan_summary",
+                  "architecture_notes",
+                  "tasks"
+              ],
+              "properties": {
+                  "plan_summary": {
+                      "type": "string"
+                  },
+                  "architecture_notes": {
+                      "type": "array",
+                      "items": {
+                          "type": "string"
+                      }
+                  },
+                  "tasks": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "items": {
+                          "type": "object",
+                          "additionalProperties": False,
+                          "required": [
+                              "id",
+                              "title",
+                              "objective",
+                              "scope",
+                              "expected_files",
+                              "architecture_constraints",
+                              "acceptance_criteria",
+                              "out_of_scope",
+                              "depends_on"
+                          ],
+                          "properties": {
+                              "id": {
+                                  "type": "string"
+                              },
+                              "title": {
+                                  "type": "string"
+                              },
+                              "objective": {
+                                  "type": "string"
+                              },
+                              "scope": {
+                                  "type": "string"
+                              },
+                              "expected_files": {
+                                  "type": "array",
+                                  "items": {
+                                      "type": "string"
+                                  }
+                              },
+                              "architecture_constraints": {
+                                  "type": "array",
+                                  "items": {
+                                      "type": "string"
+                                  }
+                              },
+                              "acceptance_criteria": {
+                                  "type": "array",
+                                  "minItems": 1,
+                                  "items": {
+                                      "type": "string"
+                                  }
+                              },
+                              "out_of_scope": {
+                                  "type": "array",
+                                  "items": {
+                                      "type": "string"
+                                  }
+                              },
+                              "depends_on": {
+                                  "type": "array",
+                                  "items": {
+                                      "type": "string"
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          system_prompt = """
+          You are the technical planning agent for Sword and Planet, a Godot
+          game project.
+
+          You are NOT an implementation agent.
+
+          Your job is to decompose the supplied Feature Issue into bounded,
+          independently executable Implementation Tasks.
+
+          HARD RULES:
+
+          - Do not implement the Feature.
+          - Do not propose repository changes outside the Feature's scope.
+          - Do not redesign established architecture.
+          - Every task must be independently understandable by an implementation
+            agent that does not share your context.
+          - Acceptance criteria must be observable or mechanically testable.
+          - Use existing repository architecture and conventions.
+          - Prefer a small number of coherent tasks over many coding-step issues.
+          - Do not create an issue merely because multiple files change.
+          - Dependencies must refer to task IDs in this same response.
+          - Tasks must not overlap in implementation responsibility.
+          - No task may depend on an unspecified architectural decision.
+          - If architecture is already determined in the Feature or repository
+            instructions, preserve it.
+
+          The resulting task descriptions are contracts for separate Copilot
+          coding-agent sessions.
+
+          Output only the requested structured JSON.
+          """
+
+          payload = {
+              "model": os.environ["PLANNER_MODEL"],
+              "messages": [
+                  {
+                      "role": "system",
+                      "content": system_prompt
+                  },
+                  {
+                      "role": "user",
+                      "content": context
+                  }
+              ],
+              "temperature": 0.2,
+              "max_tokens": 10000,
+              "response_format": {
+                  "type": "json_schema",
+                  "json_schema": {
+                      "name": "implementation_plan",
+                      "strict": True,
+                      "schema": schema
+                  }
+              }
+          }
+
+          request = urllib.request.Request(
+              "https://models.github.ai/inference/chat/completions",
+              data=json.dumps(payload).encode(),
+              headers={
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "Accept": "application/vnd.github+json",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2026-03-10"
+              },
+              method="POST"
+          )
+
+          try:
+              with urllib.request.urlopen(request) as response:
+                  result = json.load(response)
+          except urllib.error.HTTPError as error:
+              print(error.read().decode())
+              raise
+
+          content = result["choices"][0]["message"]["content"]
+
+          plan = json.loads(content)
+
+          # Basic semantic validation beyond the JSON schema.
+          task_ids = [task["id"] for task in plan["tasks"]]
+
+          if len(task_ids) != len(set(task_ids)):
+              raise RuntimeError("Planner returned duplicate task IDs")
+
+          known_ids = set(task_ids)
+
+          for task in plan["tasks"]:
+              for dependency in task["depends_on"]:
+                  if dependency not in known_ids:
+                      raise RuntimeError(
+                          f"{task['id']} depends on unknown task "
+                          f"{dependency}"
+                      )
+
+                  if dependency == task["id"]:
+                      raise RuntimeError(
+                          f"{task['id']} depends on itself"
+                      )
+
+          pathlib.Path("plan.json").write_text(
+              json.dumps(plan, indent=2)
+          )
+
+          print(
+              f"Planner generated {len(plan['tasks'])} "
+              "Implementation Task(s)."
+          )
+
+      - name: Ensure orchestration labels exist
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ensure_label () {
+            NAME="$1"
+            COLOR="$2"
+            DESCRIPTION="$3"
+
+            if ! gh label list \
+                --repo "$GITHUB_REPOSITORY" \
+                --limit 200 \
+                --json name \
+                --jq '.[].name' |
+                grep -Fxq "$NAME"
+            then
+              gh label create "$NAME" \
+                --repo "$GITHUB_REPOSITORY" \
+                --color "$COLOR" \
+                --description "$DESCRIPTION"
+            fi
+          }
+
+          ensure_label \
+            "implementation" \
+            "1D76DB" \
+            "Bounded implementation task"
+
+          ensure_label \
+            "machine" \
+            "70A8BD" \
+            "Intended for AI agent execution"
+
+          ensure_label \
+            "agent:implement" \
+            "8250DF" \
+            "Ready for implementation agent"
+
+          ensure_label \
+            "planned" \
+            "0E8A16" \
+            "Feature has been decomposed into implementation tasks"
+
+      - name: Create Implementation Task sub-issues
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        shell: python
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
+        run: |
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import tempfile
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          parent = os.environ["ISSUE_NUMBER"]
+
+          plan = json.loads(pathlib.Path("plan.json").read_text())
+          issue = json.loads(pathlib.Path("issue.json").read_text())
+
+          milestone = None
+
+          if issue.get("milestone"):
+              milestone = issue["milestone"].get("title")
+
+          created = {}
+
+          def bullets(items, empty="None"):
+              if not items:
+                  return f"- {empty}"
+
+              return "\n".join(f"- {item}" for item in items)
+
+          def checks(items):
+              return "\n".join(f"- [ ] {item}" for item in items)
+
+          # First pass: create all sub-issues.
+          for task in plan["tasks"]:
+              body = f"""\
+          <!--
+          Generated by the automated Feature planning workflow.
+          planner-parent: #{parent}
+          planner-task-id: {task["id"]}
+          -->
+
+          ## Plan Reference
+
+          - Parent Feature: #{parent}
+          - Planner Task: {task["id"]}
+
+          ## Objective
+
+          {task["objective"]}
+
+          ## Scope
+
+          {task["scope"]}
+
+          ## Files or Subsystems Expected to Change
+
+          {bullets(task["expected_files"], "Planner did not identify specific files")}
+
+          ## Architecture Constraints
+
+          {bullets(task["architecture_constraints"])}
+
+          ## Acceptance Criteria
+
+          {checks(task["acceptance_criteria"])}
+
+          - [ ] Existing tests pass
+          - [ ] `.github/scripts/validate-godot.sh` passes
+
+          ## Out of Scope
+
+          {bullets(task["out_of_scope"])}
+
+          ## Dependencies
+
+          {bullets(task["depends_on"])}
+
+          ## Implementation Agent Contract
+
+          Implement only the Scope and Acceptance Criteria above.
+
+          Do not:
+
+          - broaden this task;
+          - redesign architecture;
+          - implement sibling tasks;
+          - make speculative improvements;
+          - create additional GitHub Issues;
+          - close the parent Feature.
+
+          If additional work is discovered, report it as
+          `Discovered out-of-scope work`.
+
+          The implementation PR must close this Implementation Task Issue,
+          not the parent Feature.
+          """
+
+              with tempfile.NamedTemporaryFile(
+                  mode="w",
+                  suffix=".md",
+                  delete=False
+              ) as body_file:
+                  body_file.write(body)
+                  body_path = body_file.name
+
+              command = [
+                  "gh",
+                  "issue",
+                  "create",
+                  "--repo",
+                  repo,
+                  "--title",
+                  f"[impl] {task['title']}",
+                  "--body-file",
+                  body_path,
+                  "--label",
+                  "implementation",
+                  "--label",
+                  "machine",
+                  "--label",
+                  "agent:implement",
+                  "--parent",
+                  parent
+              ]
+
+              if milestone:
+                  command.extend([
+                      "--milestone",
+                      milestone
+                  ])
+
+              result = subprocess.run(
+                  command,
+                  check=True,
+                  capture_output=True,
+                  text=True
+              )
+
+              url = result.stdout.strip().splitlines()[-1]
+              number = int(url.rstrip("/").split("/")[-1])
+
+              created[task["id"]] = {
+                  "number": number,
+                  "url": url,
+                  "title": task["title"]
+              }
+
+              print(
+                  f"Created {task['id']} as #{number}: "
+                  f"{task['title']}"
+              )
+
+          # Second pass: establish native GitHub dependency relationships.
+          for task in plan["tasks"]:
+              dependencies = task["depends_on"]
+
+              if not dependencies:
+                  continue
+
+              child_number = created[task["id"]]["number"]
+
+              dependency_numbers = [
+                  str(created[dependency]["number"])
+                  for dependency in dependencies
+              ]
+
+              subprocess.run(
+                  [
+                      "gh",
+                      "issue",
+                      "edit",
+                      str(child_number),
+                      "--repo",
+                      repo,
+                      "--add-blocked-by",
+                      ",".join(dependency_numbers)
+                  ],
+                  check=True
+              )
+
+              print(
+                  f"Set dependencies for #{child_number}: "
+                  + ", ".join(
+                      f"#{number}"
+                      for number in dependency_numbers
+                  )
+              )
+
+          pathlib.Path("created-issues.json").write_text(
+              json.dumps(created, indent=2)
+          )
+
+      - name: Publish plan to parent Feature
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        shell: python
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
+        run: |
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import tempfile
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          parent = os.environ["ISSUE_NUMBER"]
+
+          plan = json.loads(pathlib.Path("plan.json").read_text())
+
+          created = json.loads(
+              pathlib.Path("created-issues.json").read_text()
+          )
+
+          lines = [
+              "<!-- automated-planner-complete -->",
+              "",
+              "## Automated Implementation Plan",
+              "",
+              plan["plan_summary"],
+              ""
+          ]
+
+          if plan["architecture_notes"]:
+              lines.extend([
+                  "### Architecture Notes",
+                  ""
+              ])
+
+              for note in plan["architecture_notes"]:
+                  lines.append(f"- {note}")
+
+              lines.append("")
+
+          lines.extend([
+              "### Implementation Tasks",
+              ""
+          ])
+
+          for task in plan["tasks"]:
+              child = created[task["id"]]
+
+              dependencies = [
+                  created[dependency]["number"]
+                  for dependency in task["depends_on"]
+              ]
+
+              dependency_text = (
+                  ", ".join(f"#{number}" for number in dependencies)
+                  if dependencies
+                  else "none"
+              )
+
+              lines.append(
+                  f"- **{task['id']} — "
+                  f"[#{child['number']}]({child['url']}) "
+                  f"{task['title']}** "
+                  f"— blocked by: {dependency_text}"
+              )
+
+          lines.extend([
+              "",
+              "The parent Feature remains open until all required "
+              "Implementation Tasks are completed and reviewed.",
+              "",
+              "Implementation Tasks are ready for assignment to the "
+              "`godot-implementer` Copilot profile."
+          ])
+
+          body = "\n".join(lines)
+
+          with tempfile.NamedTemporaryFile(
+              mode="w",
+              suffix=".md",
+              delete=False
+          ) as comment_file:
+              comment_file.write(body)
+              comment_path = comment_file.name
+
+          subprocess.run(
+              [
+                  "gh",
+                  "issue",
+                  "comment",
+                  parent,
+                  "--repo",
+                  repo,
+                  "--body-file",
+                  comment_path
+              ],
+              check=True
+          )
+
+      - name: Mark Feature planned
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ steps.issue.outputs.issue_number }}"
+
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --add-label "planned"
+
+          # Removing agent:plan makes the state transition visible.
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "agent:plan" || true
+
+          echo "Feature #$ISSUE_NUMBER planned successfully."
