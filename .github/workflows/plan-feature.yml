@@ -39,7 +39,7 @@ jobs:
       PLANNER_MODEL: gpt-5.4
 
       # Soft cap for this planning session.
-      PLANNER_MAX_AI_CREDITS: "1.00"
+      PLANNER_MAX_AI_CREDITS: "30"
 
     steps:
       - name: Checkout Repository
