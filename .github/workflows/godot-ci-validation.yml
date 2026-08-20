@@ -19,29 +19,4 @@ jobs:
 
       - name: Validate Godot project loads headlessly
         shell: bash
-        run: |
-          set -euo pipefail
-
-          godot --version
-
-          godot \
-            --headless \
-            --path "$GITHUB_WORKSPACE" \
-            --import \
-            --log-file "$RUNNER_TEMP/godot-import.log" || {
-              status=$?
-              echo "Godot import pass failed."
-              cat "$RUNNER_TEMP/godot-import.log"
-              exit "$status"
-            }
-
-          godot \
-            --headless \
-            --path "$GITHUB_WORKSPACE" \
-            --quit \
-            --log-file "$RUNNER_TEMP/godot-headless.log" || {
-              status=$?
-              echo "Godot headless validation failed."
-              cat "$RUNNER_TEMP/godot-headless.log"
-              exit "$status"
-            }
+        run: .github/scripts/validate-godot.sh "$GITHUB_WORKSPACE"
