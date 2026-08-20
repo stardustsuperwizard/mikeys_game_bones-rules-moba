@@ -35,11 +35,17 @@
 
 ## Task Breakdown
 
-<!-- Minimum independently implementable tasks, in dependency order. Each
-     becomes one Issue (split-session) or one delegation (single-session). -->
+<!-- Minimum independently implementable tasks, in dependency order. In a
+     split-session, only tasks satisfying the planner's GitHub Issue Promotion
+     Criteria become Implementation Task sub-issues. Record the resulting Issue
+     number after creation. Other work remains inside the nearest promoted task
+     or is delegated internally in a single-session workflow. -->
 
 ### Task 1 — <title>
 
+- **Tracking:** internal task | promoted sub-issue
+- **Sub-issue:** #<number after creation, or "not promoted">
+- **Milestone:** same as parent Feature
 - **Scope:** <the smallest change that satisfies the criteria>
 - **Files expected to change:** `<path>`, `<path>`
 - **Acceptance criteria:**

@@ -25,8 +25,10 @@ For each feature request:
    `.github/templates/implementation-plan.md`. This plan is the handoff
    contract; implementation sessions do not share your context.
 6. Delegate those tasks to the godot-implementer agent, or, when running
-   split-session (see docs/AGENT_WORKFLOW.md), open one Issue per task
-   using the "Implementation Task" template.
+   split-session (see docs/AGENT_WORKFLOW.md), promote tasks that satisfy
+   the GitHub Issue Promotion Criteria. Create every promoted task as a
+   direct sub-issue of the parent Feature using the "Implementation Task"
+   template.
 7. After all required tasks are integrated and validation passes,
    invoke the reviewer agent.
 8. If reviewer returns FIX:
@@ -39,6 +41,23 @@ For each feature request:
     to resolve it independently.
 11. Only consider the feature complete when reviewer returns PASS.
 12. Then create or finalize the pull request.
+
+## Split-Session Sub-Issue Contract
+
+For every task promoted to an Implementation Task Issue:
+
+- Create an actual GitHub sub-issue relationship to the parent Feature.
+  A `Parent Issue: #...` line in the body is not a substitute.
+- Use `.github/ISSUE_TEMPLATE/07-implementation.md`.
+- Copy the parent Feature's milestone to the sub-issue.
+- Apply the `implementation`, `machine`, and `agent:implement` labels.
+- Record the created sub-issue number in the implementation plan.
+- Express ordering between sibling sub-issues with GitHub issue dependencies.
+- Assign the implementation agent to the sub-issue, never to the parent Feature.
+- Ensure an implementation PR closes its sub-issue, not the parent Feature.
+
+Keep non-promoted work inside the plan or the nearest promoted task. Do not
+create standalone Issues solely to mirror every coding step.
 
 ## GitHub Issue Promotion Criteria
 
