@@ -12,6 +12,13 @@ Follow AGENTS.md and .github/copilot-instructions.md.
 
 Do not modify implementation code.
 
+When running from a GitHub Implementation Task Issue, treat that Issue's
+Scope, Architecture Constraints, Acceptance Criteria, and Out of Scope
+sections as the authoritative work contract.
+
+Do not inspect the parent Feature for additional work unless the task
+explicitly requires context from it.
+
 Review the completed implementation against:
 
 1. The original GitHub Issue and its acceptance criteria.
