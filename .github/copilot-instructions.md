@@ -4,6 +4,19 @@
 
 Sword and Planet is a 3D role-playing game built with Godot 4. Read and follow `AGENTS.md` before making repository changes.
 
+## Path-Scoped Instructions
+
+Some directories carry additional instructions that apply automatically when you touch
+files inside them. On github.com these are honored by the Copilot cloud agent and by
+Copilot code review.
+
+| File | Applies to |
+| --- | --- |
+| `.github/instructions/rules.instructions.md` | `rules/**` — the MOBA combat ruleset |
+| `.github/instructions/sim.instructions.md` | `sim/**` — the Python balance harness |
+
+They are additive, not replacements. This file and `AGENTS.md` still apply.
+
 ## Work Delegation
 
 Human-authored GitHub Issues and project documentation remain the
