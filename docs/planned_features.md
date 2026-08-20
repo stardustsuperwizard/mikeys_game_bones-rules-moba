@@ -28,6 +28,8 @@ further along than the game is.
 What works today:
 
 - Movement — keyboard (W/S/Q/E/A/D/Space) and left-click contextual action.
+  This is one of the three schemes the ruleset now requires (§5); gamepad and
+  touch have no bindings yet.
 - Third-person camera — free-look, zoom, wall collision, recenter.
 - The Action -> Authority -> Rules pipeline, in principle.
 - Headless CI validation (import pass + boot pass).
@@ -132,7 +134,49 @@ regardless of what the player is pressing.
 The ruleset's "small equipped combat kit" rather than an MMO-style action bar.
 Also the prerequisite for loot and any sense of reward.
 
-### 1.6 Character creation
+### 1.6 Control schemes and the input layer
+
+Ruleset section 5. Only keyboard + mouse exists, and it reads `Input` actions
+directly in `../scripts/player_controller_3d.gd`.
+
+Needs, in order:
+
+- A device-agnostic intent layer (§5.4) sitting between Godot `InputEvent` and
+  the controllers, so `Controller.get_move_direction()` and ability activation
+  never branch on device.
+- Gamepad bindings for the existing actions, plus `ability_1`–`ability_4`,
+  which have no `InputMap` entries at all today.
+- Touch HUD — floating virtual stick, ability arc, drag-to-aim, and cast
+  cancellation (§5.3).
+- Remapping UI and scheme hot-swap for prompt glyphs.
+
+**Implementation note:** the intent layer is the cheap part and the part that
+gets expensive if deferred. Two schemes hardcoded into `PlayerController3D` is
+already enough branching to make the third painful.
+
+### 1.7 Jump as a defined mechanic
+
+Ruleset section 5.5. `jump` is bound and handled in
+`../scripts/player_controller_3d.gd:75`, but the ruleset now gives it actual
+rules: an `Airborne` state (§56), no i-frames, 60% air control, no casting
+while airborne unless the ability sets `usable_in_air`.
+
+Depends on the state machine landing (part of 1.2/1.4).
+
+### 1.8 Mobile platform support
+
+Distinct from 1.6 — the touch HUD is input, this is everything else: Android
+and iOS export presets, renderer and performance budget, HUD scaling for safe
+areas and notches, and touch-appropriate defaults for aim assist (§55).
+
+A paired gamepad on mobile is nearly free once 1.6 exists, since it reuses the
+gamepad scheme unchanged.
+
+**Not a Tier 1 blocker.** It is listed here because the ruleset now treats touch
+as a first-class scheme, so the cost of ignoring it grows with every UI screen
+built mouse-first.
+
+### 1.9 Character creation
 
 The classless discipline system. The initial ruleset has no leveling, but
 players still need a way to choose and configure a build.
@@ -256,6 +300,8 @@ with the "smallest playable systems" principle in `DESIGN.md`:
 3. Minimum viable UI (0.2)
 4. Expanded `CharacterSheet` and real damage resolution (1.1)
 5. Abilities, cooldowns, and resources (1.2)
+6. Device-agnostic input layer and gamepad bindings (1.6) — before a second
+   scheme's worth of input branching accumulates
 
 Everything after that depends on how the combat prototype actually feels in
 play.

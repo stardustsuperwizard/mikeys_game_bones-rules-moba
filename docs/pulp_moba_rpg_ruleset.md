@@ -8,7 +8,7 @@ The design goals are:
 
 - Fast-paced real-time combat.
 - MOBA-style movement, positioning, targeting, skillshots, cooldowns, and crowd control.
-- Gamepad-friendly controls.
+- Gamepad-first controls, with full parity on keyboard + mouse and touch.
 - Classless character development.
 - A small equipped combat kit rather than large MMO-style action bars.
 - A pulp-adventure tone, with Barsoom as the primary inspiration while remaining flexible enough to support other public-domain adventure, fantasy, science-fiction, occult, lost-world, and weird-fiction settings.
@@ -18,6 +18,9 @@ The design goals are:
 This is intentionally a baseline. The objective is not to solve every RPG design problem before implementation. The rules should first produce enjoyable combat and then be iterated through playtesting and simulation.
 
 Sections 1–54 are the original baseline design. Sections 55+ are implementation-readiness enhancements layered on top — closing gaps a coding agent will hit immediately when turning the baseline into an engine (gamepad targeting, ability data schema, state machine, stacking rules, PvE AI, and networking authority).
+
+Section 5 has since been expanded from a gamepad-only mapping into the full three-scheme
+control model (gamepad, keyboard + mouse, touch) that the implementation targets.
 
 ---
 
@@ -263,11 +266,13 @@ Example:
 ```text
 Basic Attack — Longsword
 
-A — Power Strike      [Warrior]
-B — Parry             [Warrior]
-X — Lunge             [Slayer]
-Y — Shield Bash       [Guardian]
+Slot 1 (A / key 1) — Power Strike      [Warrior]
+Slot 2 (B / key 2) — Parry             [Warrior]
+Slot 3 (X / key 3) — Lunge             [Slayer]
+Slot 4 (Y / key 4) — Shield Bash       [Guardian]
 ```
+
+Slots are positional and identical across control schemes (§5).
 
 This character is not assigned a class.
 
@@ -277,16 +282,33 @@ Another loadout using the same learned abilities might completely alter that com
 
 ---
 
-# 5. Gamepad-Oriented Combat
+# 5. Control Schemes
 
-The ruleset should be designed around a controller rather than adapting controller input after the combat system has already been built.
+The ruleset is designed around a controller rather than adapting controller input
+after the combat system has already been built. Keyboard + mouse and touch are not
+afterthoughts, however: all three schemes are first-class, and any combat mechanic
+that cannot be executed comfortably on all three is a rules problem, not an input
+problem.
 
-A possible baseline mapping:
+Supported schemes:
+
+```text
+Gamepad          — console, computer, and mobile with a paired controller
+Keyboard + Mouse — computer
+Touch            — mobile
+```
+
+The exact mappings can change during implementation. The rules constraint that must
+not change is that the primary combat kit (basic attack + four abilities + jump)
+remains directly accessible on every scheme without modifier-button gymnastics.
+
+## 5.1 Gamepad Mapping
 
 | Input | Action |
 |---|---|
 | Left Stick | Movement |
 | Right Stick | Camera / aiming |
+| Left Stick Click (L3) | Jump |
 | Right Trigger | Basic attack |
 | A | Ability 1 |
 | B | Ability 2 |
@@ -295,10 +317,131 @@ A possible baseline mapping:
 | Left Bumper | Contextual defense / utility |
 | Right Bumper | Targeting / lock-on |
 | D-Pad | Items, weapon swap, or non-core utility |
+| Right Stick Click (R3) | Camera recenter |
 
-The exact mapping can change during implementation.
+Jump is on L3 rather than A because the four face buttons are reserved for the
+ability slots. If playtesting shows L3 is uncomfortable during sustained movement,
+the fallback is D-Pad Up, not stealing a face button.
 
-The important rules constraint is that the primary combat kit remains easily accessible without modifier-button gymnastics.
+## 5.2 Keyboard + Mouse Mapping
+
+Deliberately classic: WASD to move, Q/E to strafe, abilities on the number row,
+jump on the space bar. This matches the bindings already present in
+`project.godot`.
+
+| Input | Action |
+|---|---|
+| W / S | Move forward / back |
+| A / D | Turn left / right |
+| Q / E | Strafe left / right |
+| Space | Jump |
+| Mouse Move / Right Mouse drag | Camera / aiming |
+| Left Mouse | Basic attack / contextual primary action |
+| Middle Mouse or Tab | Targeting / lock-on |
+| 1 / 2 / 3 / 4 | Abilities 1–4 |
+| Shift | Contextual defense / utility |
+| C | Camera recenter |
+| Mouse Wheel | Camera zoom |
+| R / F | Items, weapon swap, non-core utility |
+
+Three details worth stating explicitly because they are easy to get wrong later:
+
+- **Ability slots are positional.** Key `1` is always loadout slot 1. Slots are
+  never re-ordered by cooldown state, weapon, or context.
+- **A/D turn, Q/E strafe.** The mouse drives the camera independently, so turn and
+  strafe stay separate bindings rather than collapsing A/D into strafe.
+- **Right mouse stays camera, not lock-on.** The current build uses right-drag to
+  look around (see `README.md`), so lock-on takes Middle Mouse / Tab instead of
+  overloading a button players already use for the camera.
+
+## 5.3 Touch Mapping (Mobile)
+
+The touch scheme follows established mobile-MOBA conventions rather than inventing
+a new grammar.
+
+| Input | Action |
+|---|---|
+| Left thumb — floating virtual stick | Movement (stick spawns where the thumb lands) |
+| Right thumb — large primary button | Basic attack |
+| Four buttons in an arc around primary | Abilities 1–4 |
+| Small button above primary | Jump |
+| Drag from an ability button | Aim that ability; release to cast |
+| Drag back onto the button | Cancel the queued cast (no cost, no cooldown) |
+| Drag on empty screen area | Camera |
+| Pinch | Camera zoom |
+| Double-tap empty area | Camera recenter |
+| Tap an enemy | Lock-on / target select |
+
+Rules-relevant constraints:
+
+- **Drag-to-aim replaces the right stick.** A skillshot is pressed, aimed, and
+  released as one gesture. Any ability that would require simultaneous independent
+  movement *and* precision aiming for the full cast duration is not touch-viable and
+  should be reworked or given a stronger assist tier (§55).
+- **Touch defaults to the strongest assist tier.** See §55 for the per-device
+  magnetism defaults.
+- **Cast cancellation is a first-class gesture**, so §59 cancellation and refund
+  rules must exist on every platform, not just as a mobile affordance.
+- **Layout must be mirrorable** for left-handed play, respect device safe areas
+  and notches, and keep every combat control at least 9 mm across.
+- **A paired gamepad on mobile uses §5.1 unchanged** and hides the touch HUD.
+
+## 5.4 Device-Agnostic Input Layer
+
+The combat rules must never see a device. The input layer resolves a scheme into
+intents, and only intents reach the state machine (§56) and the rules:
+
+```text
+MoveIntent(direction)          # stick vector | WASD/QE composite | virtual stick
+AimIntent(direction | point)   # right stick | mouse ray | touch drag vector
+JumpIntent()
+BasicAttackIntent(held)
+AbilityIntent(slot: 1–4, phase: press | aim | release | cancel)
+LockOnIntent(press | release | cycle)
+UtilityIntent(id)
+```
+
+This is what makes the Python balance harness (§21) meaningful: simulations consume
+intents, so a duel simulation is device-independent, and device differences enter
+the math only through assist tiers (§55) and player profiles (§40).
+
+Requirements that follow from the intent layer:
+
+- Every binding is remappable on every scheme.
+- Schemes hot-swap. Receiving gamepad input while keyboard is active switches the
+  prompts immediately, with no restart and no menu.
+- No scheme may be given an action the others lack.
+
+## 5.5 Jump
+
+Jump exists on all three schemes and is a **traversal action, not a combat ability**.
+
+```text
+Jump Height:        1.2 m
+Jump Duration:      ~0.7 sec
+Air Control:        60% of Movement Speed
+Resource Cost:      0
+Cooldown:           0 (landing recovery only)
+```
+
+Baseline rules:
+
+- Jump occupies no ability slot and has no entry in the cooldown system (§12).
+- Jump grants **no** invulnerability frames, damage reduction, or CC immunity. It is
+  not a dodge. Dodging is what mobility abilities are for, and they are budgeted as
+  such (§32).
+- Being airborne does **not** avoid ground-targeted AoE in the baseline. Allowing it
+  would quietly make AoE damage a reflex check, which §55 exists to prevent.
+- Jump is legal from Idle, Moving, and BasicAttackRecovery only (§56).
+- Rooted, Stunned, Feared, and Taunted characters cannot jump, and jumping does not
+  break an existing Root (§14).
+- Basic attacks and abilities are disallowed while airborne unless the ability sets
+  `usable_in_air` (§57).
+- Knock-up (§14) is a separate forced-displacement effect and always overrides a
+  player-initiated jump.
+
+These are starting test values in the same sense as §6 — jump height and air control
+are level-geometry decisions as much as combat ones.
 
 ---
 
@@ -1468,6 +1611,10 @@ Mobility also carries qualitative value:
 
 Those should be recorded separately.
 
+Jump (§5.5) is deliberately excluded from this budget. It is universal, free, and
+grants no invulnerability, so it differentiates no build and should never be traded
+against a mobility ability during balance work.
+
 ---
 
 # 33. Monte Carlo Simulation
@@ -1746,6 +1893,18 @@ Note (see §55): once gamepad soft-lock targeting is defined, `skillshot_accurac
 is no longer a sufficient proxy for execution. Profiles should separate raw aim
 precision from the assist tier applied, since assist narrows the gap between skill
 tiers by design.
+
+Because §5 supports three control schemes, a profile should also carry the device it
+represents:
+
+```python
+    input_device: str  # "gamepad" | "mouse" | "touch"
+```
+
+The device does not change the combat math directly. It selects the default assist
+tier (§55) and sets a realistic ceiling on raw aim precision, which is why an
+"Expert on touch" and an "Expert on mouse" are different profiles rather than the
+same profile with a different number.
 
 ---
 
@@ -2200,6 +2359,17 @@ Elite
 Boss
 ```
 
+## Control schemes
+
+```text
+Keyboard + Mouse  — the development scheme; already bound in project.godot
+Gamepad           — must be playable in the first prototype, not deferred
+Touch             — HUD can come later, but the intent layer (§5.4) ships now
+```
+
+Touch layout work does not have to happen in the first prototype, but nothing in
+the first prototype may assume a keyboard, a mouse cursor, or a hover state.
+
 That is enough to start discovering whether the fundamental combat model works.
 
 ---
@@ -2217,7 +2387,7 @@ Basic Attack
 +
 Four equipped active abilities
 +
-Gamepad-first controls
+Gamepad-first controls, with keyboard + mouse and touch parity
 +
 Equipment and statistics
 +
@@ -2269,7 +2439,7 @@ The goal is to make the rules measurable enough that human design decisions can 
 
 ---
 
-# 55. Gamepad Targeting Model (Soft-Lock / Aim Assist)
+# 55. Targeting Model (Soft-Lock / Aim Assist)
 
 The baseline design goal is explicit: engaging combat without requiring twitch-FPS
 reflexes. The Skillshot definition in §11 ("travels or resolves along an aimed path")
@@ -2308,9 +2478,29 @@ Charge / Lunge (dash-to-target): Soft Lock, 12° cone, 0.7 magnetism
 Cataclysm (ground-targeted AoE): Free Aim (no single target to assist toward)
 ```
 
+## Per-Device Assist Scaling
+
+An ability declares its assist *tier*; the input device (§5) scales the magnetism
+applied within that tier. Same ability, same tier, different pointing precision:
+
+| Device | Magnetism multiplier | Rationale |
+|---|---:|---|
+| Mouse | 0.35x | Fine pointing available; heavy assist feels like the game is playing for you |
+| Gamepad | 1.0x | The baseline the tiers are tuned against |
+| Touch | 1.5x | Drag-to-aim is the coarsest input; the thumb also occludes the target |
+
+```text
+effective_magnetism = clamp(ability.magnetism * device_multiplier, 0.0, 1.0)
+```
+
+Free Aim stays free aim on every device — a multiplier of anything times zero is
+still zero. Abilities deliberately marked Free Aim are the ones where precision is
+the point, so they should be rare and should not be load-bearing for any build.
+
 Magnetism strength becomes a first-class tunable, and should be included in the
 `PlayerProfile` skill simulation (§40) as a variable independent from raw accuracy —
-it lets you simulate "gamepad + assist" separately from "theoretical mouse precision."
+it lets you simulate "gamepad + assist," "touch + assist," and "theoretical mouse
+precision" as separate populations.
 
 ---
 
@@ -2328,6 +2518,7 @@ States:
   AbilityCast        (has Cast Time > 0)
   AbilityChannel      (see §58)
   Dashing             (movement-locked mobility ability, e.g. Lunge, Charge)
+  Airborne            (jump in progress or knock-up — see §5.5, §14)
   CrowdControlled     (Stunned / Rooted / Feared / Taunted — see §14)
   Dead
 ```
@@ -2342,7 +2533,13 @@ Legal interrupts per state (baseline — override per-ability via `Interrupt Rul
 | AbilityCast | ❌ (cancels cast, resource refunded per §59) | ❌ | ❌ | ✅ |
 | AbilityChannel | ❌ | ❌ | ❌ | ✅ (breaks channel) |
 | Dashing | ❌ (locked to dash path) | ❌ | ❌ | only by displacement effects |
+| Airborne | ✅ air control only (60%) | ❌ | ❌ (unless `usable_in_air`) | ✅ |
 | CrowdControlled | per CC type (§14) | per CC type | per CC type | n/a |
+
+Airborne is entered by a player jump (§5.5) or a knock-up (§14) and is the one state
+with two distinct causes, so it should carry a flag for which. A player jump is exited
+on landing; a knock-up is exited on landing *and* applies whatever CC follows it. A
+character cannot jump out of an Airborne state — no double jump in the baseline.
 
 This table is itself a good candidate for a data file (`state_transitions.json`) rather
 than hardcoded logic, so balance/CC changes don't require touching state-machine code.
@@ -2379,6 +2576,8 @@ is structurally guaranteed correct before it reaches the simulator or the engine
     "area_radius": { "type": "number" },
     "duration": { "type": "number" },
     "charges": { "type": "integer", "default": 1 },
+    "usable_in_air": { "type": "boolean", "default": false },
+    "touch_viable": { "type": "boolean", "default": true },
     "crowd_control": {
       "type": "object",
       "properties": {
@@ -2415,6 +2614,16 @@ is structurally guaranteed correct before it reaches the simulator or the engine
   }
 }
 ```
+
+Two fields exist purely to keep §5 honest:
+
+- `usable_in_air` — whether the ability may be cast from the Airborne state (§5.5).
+  Defaults to `false`, so jump stays a traversal tool rather than a free reposition
+  mid-combo.
+- `touch_viable` — set to `false` only when an ability genuinely cannot be executed
+  with drag-to-aim (§5.3). This should be treated as a design smell rather than a
+  supported configuration: assert in the Fast Suite that no *default* loadout (§53)
+  contains an ability with `touch_viable: false`.
 
 Validate every ability file against this schema in the **Fast Suite** (§48) before any
 duel simulation runs — a malformed ability should fail CI in milliseconds, not surface
@@ -2659,12 +2868,14 @@ schema/state-machine land before content:
 3. Cast cancellation / refund rules (§59)
 4. Stacking rules (§60) — write the anti-perma-stun regression test immediately
 5. Armor/Magic Pen + Ability Haste formulas (§61)
-6. Gamepad soft-lock targeting (§55) — prototype early, this is core to the stated
-   design goal and hardest to bolt on later
-7. Passive ability schema (§62)
-8. Networking authority decision (§64) — decide before writing engine-side netcode
-9. PvE AI/threat model (§63)
-10. Conformance suite between Python and GDScript (§65) — set up as soon as both
+6. Device-agnostic input layer (§5.4) — intents, not devices, reach the rules;
+   cheap now, expensive after two schemes have been hardcoded
+7. Soft-lock targeting + per-device assist scaling (§55) — prototype early, this is
+   core to the stated design goal and hardest to bolt on later
+8. Passive ability schema (§62)
+9. Networking authority decision (§64) — decide before writing engine-side netcode
+10. PvE AI/threat model (§63)
+11. Conformance suite between Python and GDScript (§65) — set up as soon as both
     sides have any combat math implemented, not after
 ```
 

@@ -25,6 +25,11 @@ These assets are not yet a part of the project but have been scoped in the past 
 
 ## Player Controls
 
+These are the bindings that exist in the current build. The full three-scheme
+control design — gamepad, keyboard + mouse, and touch, plus ability slots and
+lock-on — is specified in [docs/pulp_moba_rpg_ruleset.md](docs/pulp_moba_rpg_ruleset.md)
+§5 and is not implemented yet.
+
 ### Keyboard
 
 | Action | Key |
