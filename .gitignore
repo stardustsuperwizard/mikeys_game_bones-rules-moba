@@ -23,3 +23,7 @@ addons/*
 # Additional ignores
 .claude/
 .DS_Store
+
+# Python bytecode from repository tooling
+__pycache__/
+*.pyc

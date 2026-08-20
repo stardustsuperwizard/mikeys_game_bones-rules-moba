@@ -2,11 +2,25 @@
 
 ## Project Context
 
-Sword and Planet is a 3D role-playing game built with Godot 4.
+Sword and Planet is a 3D role-playing game built with Godot 4. Read and follow `AGENTS.md` before making repository changes.
 
-Read and follow `AGENTS.md` before making repository changes.
-Human-authored GitHub Issues and project documentation are the source of
-truth for intended behavior.
+## Work Delegation
+
+Human-authored GitHub Issues and project documentation remain the
+source of truth for intended behavior.
+
+Roles, model routing, and the session flow are defined in
+`docs/AGENT_WORKFLOW.md`. Implementation sessions start cold: the
+implementation plan in `docs/plans/` and the task Issue are the only
+context carried across the handoff.
+
+When work is delegated by a planning agent:
+
+- Treat the delegated task as a bounded subset of the parent Issue.
+- Do not expand the delegated task beyond its stated acceptance criteria.
+- If the delegated task conflicts with the parent Issue, AGENTS.md,
+  or these instructions, stop and report the conflict rather than
+  resolving it by changing scope.
 
 ## Godot
 
@@ -100,11 +114,18 @@ In particular:
 
 ## Validation
 
-When changing Godot scripts, scenes, or resources:
+When changing Godot scripts, scenes, or resources, run:
 
-- Run the repository's available Godot headless validation.
-- Ensure scripts parse successfully.
-- Ensure referenced scenes and resources load.
-- Report any validation that could not be performed.
+```
+.github/scripts/validate-godot.sh
+```
+
+This is the same validation CI runs. It performs an import pass (scenes and
+resources resolve) and a headless boot (scripts parse, autoloads initialize).
+
+- Report the exact command and its result.
+- Report any validation that could not be performed, rather than omitting it.
+- Exit code 127 means Godot was not on PATH — that is "could not validate",
+  not "validated successfully".
 
 Do not weaken validation to make a change pass.

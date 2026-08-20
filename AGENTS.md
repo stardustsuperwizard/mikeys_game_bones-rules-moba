@@ -26,6 +26,12 @@ for intended behavior.
 - If the requested feature conflicts with the documented architecture, explain
   the conflict rather than silently working around it.
 
+## Agent Roles
+
+Planning, implementation, and review run as separate sessions on different
+models. See `docs/AGENT_WORKFLOW.md` for role definitions, model routing,
+and the handoff contract.
+
 ## Testing
 
 - Existing tests represent established behavior.
@@ -38,6 +44,6 @@ for intended behavior.
 Before declaring a task complete:
 
 1. Verify the acceptance criteria in the Issue.
-2. Run available automated validation.
+2. Run `.github/scripts/validate-godot.sh`.
 3. Summarize what changed.
 4. Call out assumptions, limitations, or unresolved design questions in the PR.
