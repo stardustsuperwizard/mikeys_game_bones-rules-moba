@@ -405,6 +405,22 @@ This is what makes the Python balance harness (§21) meaningful: simulations con
 intents, so a duel simulation is device-independent, and device differences enter
 the math only through assist tiers (§55) and player profiles (§40).
 
+The Godot `InputMap` in `project.godot` is the binding half of this. Action names
+map onto intents one-for-one, so the layer stays a translation and not a second
+place where control decisions get made:
+
+```text
+move_forward / move_back / strafe_left / strafe_right  → MoveIntent
+turn_left / turn_right                                 → MoveIntent (facing)
+jump                                                   → JumpIntent
+basic_attack                                           → BasicAttackIntent
+ability_1 … ability_4                                  → AbilityIntent(slot)
+lock_on                                                → LockOnIntent
+defend                                                 → UtilityIntent
+action_primary                                         → click-to-order (mouse only)
+camera_recenter                                        → camera, not combat
+```
+
 Requirements that follow from the intent layer:
 
 - Every binding is remappable on every scheme.

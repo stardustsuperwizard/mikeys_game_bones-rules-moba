@@ -28,8 +28,9 @@ further along than the game is.
 What works today:
 
 - Movement — keyboard (W/S/Q/E/A/D/Space) and left-click contextual action.
-  This is one of the three schemes the ruleset now requires (§5); gamepad and
-  touch have no bindings yet.
+- Gamepad movement, jump, and camera recenter — bound in `../project.godot`,
+  driven through the same `Controller` contract as the keyboard. Touch has no
+  bindings. This covers two of the three schemes the ruleset requires (§5).
 - Third-person camera — free-look, zoom, wall collision, recenter.
 - The Action -> Authority -> Rules pipeline, in principle.
 - Headless CI validation (import pass + boot pass).
@@ -136,16 +137,23 @@ Also the prerequisite for loot and any sense of reward.
 
 ### 1.6 Control schemes and the input layer
 
-Ruleset section 5. Only keyboard + mouse exists, and it reads `Input` actions
-directly in `../scripts/player_controller_3d.gd`.
+Ruleset section 5. The `InputMap` in `../project.godot` now carries both
+keyboard + mouse and gamepad bindings, including `basic_attack`,
+`ability_1`–`ability_4`, `lock_on`, and `defend`. Only movement, jump, and
+camera recenter are actually consumed — by `../scripts/player_controller_3d.gd`
+and `../scripts/third_person_camera_3d.gd`, which read `Input` actions directly.
 
 Needs, in order:
 
+- Consumers for the new actions. They arrive with 1.2 (abilities) and 1.3
+  (targeting); until then they are bindings with nothing behind them.
+- Gamepad camera look. `ThirdPersonCamera3D` orbits on mouse motion only, so
+  the right stick is bound to `turn_left`/`turn_right` — it turns the body
+  rather than the camera. §5.1 wants the right stick on the camera, which
+  needs a stick-driven orbit and a matching aim direction first.
 - A device-agnostic intent layer (§5.4) sitting between Godot `InputEvent` and
   the controllers, so `Controller.get_move_direction()` and ability activation
   never branch on device.
-- Gamepad bindings for the existing actions, plus `ability_1`–`ability_4`,
-  which have no `InputMap` entries at all today.
 - Touch HUD — floating virtual stick, ability arc, drag-to-aim, and cast
   cancellation (§5.3).
 - Remapping UI and scheme hot-swap for prompt glyphs.
@@ -300,7 +308,7 @@ with the "smallest playable systems" principle in `DESIGN.md`:
 3. Minimum viable UI (0.2)
 4. Expanded `CharacterSheet` and real damage resolution (1.1)
 5. Abilities, cooldowns, and resources (1.2)
-6. Device-agnostic input layer and gamepad bindings (1.6) — before a second
+6. Device-agnostic input layer and gamepad camera look (1.6) — before a second
    scheme's worth of input branching accumulates
 
 Everything after that depends on how the combat prototype actually feels in

@@ -25,10 +25,11 @@ These assets are not yet a part of the project but have been scoped in the past 
 
 ## Player Controls
 
-These are the bindings that exist in the current build. The full three-scheme
-control design — gamepad, keyboard + mouse, and touch, plus ability slots and
-lock-on — is specified in [docs/pulp_moba_rpg_ruleset.md](docs/pulp_moba_rpg_ruleset.md)
-§5 and is not implemented yet.
+These are the bindings that exist in the current build. The full control design
+— gamepad, keyboard + mouse, and touch — is specified in
+[docs/pulp_moba_rpg_ruleset.md](docs/pulp_moba_rpg_ruleset.md) §5. Touch is not
+bound at all yet, and the combat actions listed below as *bound, not yet used*
+are waiting on the ability system.
 
 ### Keyboard
 
@@ -50,6 +51,32 @@ lock-on — is specified in [docs/pulp_moba_rpg_ruleset.md](docs/pulp_moba_rpg_r
 | Contextual action | Left click |
 | Look around | Right click and drag |
 | Zoom in / out | Scroll wheel |
+
+### Gamepad
+
+| Action | Input |
+|---|---|
+| Move forward / back | Left stick, up / down |
+| Strafe left / right | Left stick, left / right |
+| Turn left / right | Right stick, left / right |
+| Jump | Left stick click (L3) |
+| Recenter camera | Right stick click (R3) |
+
+The right stick turns the character rather than orbiting the camera, because
+camera look is currently mouse-only. Ruleset §5.1 puts the right stick on the
+camera; that swap happens once stick-driven camera orbit exists.
+
+### Bound, not yet used
+
+These actions exist in the `InputMap` so the ability system has something to
+bind against when it lands. Nothing reads them today.
+
+| Action | Keyboard / Mouse | Gamepad |
+|---|---|---|
+| Basic attack | Left click | Right trigger |
+| Ability 1–4 | 1 / 2 / 3 / 4 | A / B / X / Y |
+| Targeting lock-on | Tab or middle click | Right bumper |
+| Contextual defense | Shift | Left bumper |
 
 Left click is a single contextual action button — what it does depends on what
 you clicked:
