@@ -58,11 +58,10 @@ jobs:
       PROJECT_OWNER: stardustsuperwizard
       PROJECT_NUMBER: "1"
 
-      # docs/AGENT_WORKFLOW.md routes review to the stronger model. Change
-      # this to the Copilot CLI id for Claude Opus 5 once you have confirmed
-      # the id against `copilot --help`; it is left on the planner's known-good
-      # model so the first run does not fail on an unrecognised name.
-      REVIEWER_MODEL: gpt-5.4
+      # Review is the correctness gate, so it gets the strong model.
+      # Overridable without a commit via the REVIEWER_MODEL repository
+      # variable.
+      REVIEWER_MODEL: ${{ vars.REVIEWER_MODEL || 'claude-opus-5' }}
 
       REVIEWER_MAX_AI_CREDITS: "20"
 
@@ -298,6 +297,23 @@ jobs:
           pathlib.Path("reviewer-prompt.txt").write_text(prompt)
 
           print(f"Prompt built: {len(prompt)} chars, truncated={truncated}")
+
+      # Copilot CLI model ids are not published as a stable list; they are
+      # shown in the --model help text. Dumping them costs nothing and means
+      # a rejected id is self-diagnosing instead of a mystery failure.
+      - name: Show Available Models
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          {
+            echo "<details><summary>Copilot CLI model ids</summary>"
+            echo ""
+            echo '```'
+            copilot --help 2>&1 | sed -n '/--model/,/^[[:space:]]*$/p'
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run Reviewer with Copilot CLI
         shell: bash

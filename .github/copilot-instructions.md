@@ -27,13 +27,72 @@ Roles, model routing, and the session flow are defined in
 is the only context carried across the handoff. If a constraint is not
 written in the Issue, it does not exist.
 
-When work is delegated by a planning agent:
+## Executing an Implementation Task
 
-- Treat the delegated task as a bounded subset of the parent Issue.
-- Do not expand the delegated task beyond its stated acceptance criteria.
-- If the delegated task conflicts with the parent Issue, AGENTS.md,
-  or these instructions, stop and report the conflict rather than
-  resolving it by changing scope.
+This section applies whenever you are working an Issue titled `[impl]`, or
+any Issue carrying the `implementation` label. It is the same contract as
+`.github/agents/02-executor.agent.md`, restated here because the cloud agent
+cannot select a custom agent profile and so never loads that file.
+
+### The contract
+
+Treat the Issue's **Objective**, **Scope**, **Architecture Constraints**,
+**Acceptance Criteria**, and **Out of Scope** sections as the authoritative
+implementation contract.
+
+The parent Feature provides context only. It does not expand your scope.
+Neither do sibling tasks, and neither does anything you notice in passing.
+
+### Procedure
+
+1. Read the complete contract before changing anything.
+2. Inspect the existing code and tests relevant to the task.
+3. Implement the smallest change that satisfies the acceptance criteria.
+4. Follow existing repository architecture and conventions.
+5. Add or update tests when the acceptance criteria require it, or when they
+   are needed to demonstrate the requested behavior.
+6. Run `.github/scripts/validate-godot.sh`.
+7. Fix defects that validation surfaces **within** the task's scope.
+8. Stop and report anything you cannot resolve inside the contract.
+
+### Guardrails
+
+Do not:
+
+- broaden the requested scope;
+- redesign architecture;
+- implement adjacent or sibling tasks;
+- make speculative improvements;
+- create GitHub Issues;
+- modify unrelated systems because you spotted an opportunity;
+- silently resolve architectural or product ambiguity;
+- inherit additional work from the parent Feature;
+- close the parent Feature.
+
+If you find work outside the contract, do not implement it and do not file an
+Issue for it. Report it under **Discovered out-of-scope work** and let the
+planner decide.
+
+If the task genuinely cannot be implemented without making an architectural
+or product decision the contract does not already settle, stop and report the
+ambiguity rather than deciding it. Minor choices that follow established
+repository patterns do not need escalation.
+
+### Completion report
+
+The pull request must close the Implementation Task Issue — `Closes #<n>` —
+and must not close the parent Feature. Report:
+
+1. **Files changed** — each file and why.
+2. **Acceptance criteria** — each one, and whether it is satisfied.
+3. **Validation** — the exact command run and its result.
+4. **Discovered out-of-scope work** — or `None`.
+5. **Unresolved issues** — anything that blocked complete implementation,
+   or `None`.
+
+Do not report the task complete if required validation failed. If validation
+fails for a pre-existing or clearly out-of-scope reason, say so explicitly
+rather than expanding the task to fix it.
 
 ## Godot
 

@@ -3,7 +3,7 @@
 How Sword and Planet uses GitHub Copilot agents, and which model runs which
 role. Optimized for cost and quality; latency is explicitly not a goal.
 
-Verified against GitHub documentation on 2026-08-19. Model availability and
+Verified against GitHub documentation on 2026-08-21. Model availability and
 pricing change often — re-check the sources at the bottom before assuming
 this document is current.
 
@@ -27,23 +27,54 @@ maintained — they take effect when the same profiles are run from VS Code.
 
 ## Model routing
 
-| Role | Model | Reasoning | Where the model is set |
+| Role | Model | Where the model is set |
+| --- | --- | --- |
+| Planner | Claude Opus 5 | `PLANNER_MODEL` env / `vars.PLANNER_MODEL` in `agent-01-planner.yml` |
+| Executor | Claude Haiku 4.5 | The picker, when **you** assign Copilot. Auto in label mode. |
+| Reviewer | Claude Opus 5 | `REVIEWER_MODEL` env / `vars.REVIEWER_MODEL` in `agent-03-review.yml` |
+
+Planner and reviewer are Copilot CLI sessions, so their model is a string in
+version control rather than a dropdown someone has to remember. Both are
+overridable with a repository variable, so changing one does not need a
+commit.
+
+### The executor cannot have both a model and a custom agent
+
+This is the one hard constraint in the pipeline, and it decides how execution
+is triggered.
+
+**No programmatic path can select a model.** Three independent confirmations,
+checked 2026-08-21:
+
+- `AgentAssignmentInput` — the only input to `replaceActorsForAssignable`, the
+  mutation that assigns Copilot — has exactly four fields:
+  `targetRepositoryId`, `baseRef`, `customInstructions`, `customAgent`. No
+  model.
+- `gh agent-task create` has `--custom-agent` but no `--model`.
+- [cli/cli#13222](https://github.com/cli/cli/issues/13222) is an open request
+  to add exactly that flag.
+
+And the model documentation states: *"Where a model picker is not available,
+Auto will be used automatically."*
+
+**The picker cannot select a custom agent.** It selects a model only.
+
+So the two are mutually exclusive, and the choice is per task:
+
+| | Model | Custom agent | Blocked-by check |
 | --- | --- | --- | --- |
-| Planner | Claude Opus 5 | High | `PLANNER_MODEL` in `agent-01-planner.yml` |
-| Executor | Claude Haiku 4.5 | Default | Cloud agent default — **not currently controllable**, see below |
-| Reviewer | Claude Opus 5 | High | `REVIEWER_MODEL` in `agent-03-review.yml` |
+| You assign Copilot from the UI | **Your choice** | none | after the fact |
+| `agent:execute` label | Auto | `executor` | before dispatch |
 
-Two of these are now set in workflow env rather than a picker, which is the
-main practical gain from moving planning and review into Actions: the model is
-version-controlled instead of chosen by hand each time.
+The default path is the first one. GitHub Mobile is a supported entrypoint for
+model selection, so picking Claude Haiku 4.5 from a phone works — it is only
+the *agent* picker that mobile lacks. Losing the custom agent costs little
+because the same contract lives in two places the cloud agent always reads:
+the Issue body's scope and acceptance criteria, and *Executing an
+Implementation Task* in `.github/copilot-instructions.md`.
 
-The executor is the exception and the open problem. `agent-02-execute.yml`
-assigns Copilot through the API, which does not go through the model picker,
-so the session takes whatever the cloud agent defaults to. Verify this on the
-first run. If the default is not Haiku 4.5, the options are to accept it, to
-assign by hand from a desktop browser where the picker exists, or to rebuild
-the executor as a Copilot CLI session — which means owning branch, commit,
-push, and PR plumbing that the cloud agent currently handles for free.
+Label mode remains for mechanical work where the model does not matter. Avoid
+it for anything touching `.tscn`, `.tres`, `project.godot`, or `addons/`.
 
 Rationale: reasoning is worth paying for where decisions are made, not where
 they are executed. The planner and reviewer read a lot and write little, so
@@ -62,19 +93,46 @@ are gone; you pay per token, so a cheaper model is a real saving.
 | GPT-5.6 Luna | $0.20 | $0.02 | $1.20 | Picker |
 | GPT-5.4 mini | $0.75 | $0.075 | $4.50 | Picker |
 | **Claude Haiku 4.5** | $1.00 | $0.10 | $5.00 | Picker only |
-| Claude Sonnet 5 | $2.00 | $0.20 | $10.00 | Not listed |
-| Claude Sonnet 4.6 | $3.00 | $0.30 | $15.00 | Auto — retiring |
+| Claude Sonnet 5 | $2.00 | $0.20 | $10.00 | Neither |
+| Claude Sonnet 4.6 | $3.00 | $0.30 | $15.00 | Auto only |
 | **Claude Opus 5** | $5.00 | $0.50 | $25.00 | Picker |
 
-Opus 5 costs 5× Haiku 4.5. Sonnet 5 — the natural middle tier — is not
-currently listed for the cloud agent in either the Auto pool or the picker,
-so this project routes around it.
+Opus 5 costs 5× Haiku 4.5.
 
-### Do not use Auto for implementation
+### The cloud agent has no Anthropic middle tier
 
-Haiku 4.5 is selectable in the picker but is **not in the Auto pool**.
-Selecting Auto for an implementation task silently yields Sonnet 4.6 at 3×
-the input cost of Haiku.
+Verified 2026-08-21 against GitHub's model docs. Two different tables get
+confused with each other, so both are recorded here.
+
+**Auto pool for the cloud agent** — from *Supported AI models in Auto model
+selection*, which is the table people misread as an availability list:
+
+> GPT-5.3-Codex · GPT-5.4 · Claude Sonnet 4.6 · MAI-Code-1.1-Flash
+
+**Cloud agent picker** — from *Changing the AI model for Copilot cloud agent*,
+which is the actual availability list:
+
+> Auto · Claude Sonnet 4.5 · Claude Opus 4.7 · Claude Opus 5 ·
+> Claude Haiku 4.5 · Gemini 3.1 Pro · Gemini 3.5/3.6/3.7 Flash ·
+> GPT-5.4 mini · GPT-5.6 Luna/Sol/Terra · Grok 4.5/4.6 ·
+> MAI-Code-1-Flash · MAI-Code-1.1-Flash
+
+Two consequences:
+
+1. **Claude Haiku 4.5 and Claude Opus 5 are both pickable** for the cloud
+   agent. Reading the Auto table alone suggests otherwise; it is not an
+   availability list.
+2. **Claude Sonnet 5 is in neither.** For the executor the Anthropic choice is
+   Haiku 4.5 or Opus 5 — cheap or 5×, with nothing in between. Sonnet 4.6 is
+   reachable only by taking Auto, which means accepting a random draw from a
+   pool that is three-quarters non-Anthropic.
+
+### Auto is a measurement problem, not just a cost one
+
+Auto picks one of four models per session and does not tell you which. That
+makes `agent-metrics.py`'s whole premise — cost per merged task, attributed
+per model — unanswerable for any task dispatched that way. If you care about
+the routing experiment, pick the model.
 
 ### Models retiring 2026-09-01
 
@@ -116,12 +174,17 @@ Intake Issue        [plan] in title, `plan` + type label
         ▼                        Status: In Progress
 Implementation Task     Status: Ready
         │
-        │  you add  agent:execute
-        ▼
+        ├── you assign Copilot, picking the model   ← default path
+        │        (works from GitHub Mobile)
+        │
+        └── or you add  agent:execute               ← one tap, Auto model
+                 │
+                 ▼
 ┌────────────────────────────────────────────────┐
 │ agent-02-execute.yml       Status: In Progress │
-│ thin dispatch, no AI credits                   │
-│ assigns copilot-swe-agent + customAgent        │
+│ board plumbing, no AI credits                  │
+│ assign mode: observes, checks blockers         │
+│ label mode:  assigns + customAgent (Auto)      │
 └────────────────────────────────────────────────┘
         │
    Copilot Cloud Agent ──▶ draft PR ──▶ ready for review
@@ -147,26 +210,29 @@ Implementation Task     Status: Ready
    you do the human checks and close the Feature → Done
 ```
 
-### Everything is label-driven, on purpose
+### Mostly label-driven, on purpose
 
-Every stage starts because a label was added, and each workflow **removes the
-label it consumed**. That gives three properties worth keeping:
+Every stage but execution starts because a label was added, and each workflow
+**removes the label it consumed**. That gives three properties worth keeping:
 
-- **It works from a phone.** The GitHub mobile apps do not expose the
-  custom-agent picker, which is the whole reason `agent-02-execute.yml`
-  exists — see *Step 2*. Adding a label is something every GitHub client can
-  do.
+- **It works from a phone.** Adding a label is something every GitHub client
+  can do, including ones with no agent controls at all.
 - **Re-adding a consumed label is a clean retry.** No separate re-run verb.
 - **No workflow fires on its own output**, so there are no dispatch loops.
 
-| Label | Added by | Consumed by | Means |
+Execution is the exception: its default trigger is *assigning Copilot*, not a
+label, because that is the only way to choose the model. See
+*The executor cannot have both a model and a custom agent* above.
+
+| Trigger | Added by | Consumed by | Means |
 | --- | --- | --- | --- |
-| `plan` | Issue template | — | Intake ticket, type marker |
-| `agent:plan` | You | `agent-01-planner.yml` | This Issue is ready to be planned |
-| `agent:execute` | You | `agent-02-execute.yml` | Dispatch this task to Copilot |
-| `agent:review` | You | `agent-03-review.yml` | Re-review this PR |
-| `planned` | Planner | — | Feature has been decomposed |
-| `review:*` | Reviewer | — | Last verdict on a PR |
+| `plan` label | Issue template | — | Intake ticket, type marker |
+| `agent:plan` label | You | `agent-01-planner.yml` | This Issue is ready to be planned |
+| **assigning Copilot** | You | `agent-02-execute.yml` | Run this task on the model you picked |
+| `agent:execute` label | You | `agent-02-execute.yml` | Run this task on Auto, with the `executor` agent |
+| `agent:review` label | You | `agent-03-review.yml` | Re-review this PR |
+| `planned` label | Planner | — | Feature has been decomposed |
+| `review:*` label | Reviewer | — | Last verdict on a PR |
 
 ### Why planning and review are CLI sessions, not cloud agents
 
@@ -245,30 +311,51 @@ the stale sub-issues yourself first, because nothing removes them for you.
 
 ### Step 2 — Execution
 
-For each Implementation Task, in dependency order, add **`agent:execute`**.
+Work tasks in dependency order. `agent-02-execute.yml` spends no AI credits in
+either mode; it is board plumbing and a dependency check.
 
-`agent-02-execute.yml` is deliberately thin — it spends no AI credits:
+#### Assign mode — the default
 
-1. Refuses if the task has open `blocked-by` Issues, parks it at **Blocked**,
-   and removes the label. Override with the workflow's `ignore_blockers`
-   input.
+Open the Implementation Task and assign it to Copilot, picking
+**Claude Haiku 4.5** in the model picker. This works from GitHub Mobile.
+
+The workflow fires on the `assigned` event and:
+
+1. Moves the task to **In Progress**.
+2. Checks `blocked-by`. Because the session has already started, an open
+   blocker is reported as a warning comment rather than a refusal — the
+   session is deliberately *not* cancelled, since unassigning a live agent
+   orphans its branch rather than reliably stopping it. Decide whether to let
+   it finish.
+
+You get the model you chose and no custom agent. The scope contract still
+applies: it is in the Issue body, and in *Executing an Implementation Task* in
+`.github/copilot-instructions.md`, which the cloud agent always reads.
+
+#### Label mode — one tap, Auto model
+
+Add **`agent:execute`**. The workflow:
+
+1. **Refuses** if the task has open `blocked-by` Issues, parks it at
+   **Blocked**, and removes the label. This is the only mode that can gate
+   before work starts. Override with the `ignore_blockers` dispatch input.
 2. Moves the task to **In Progress**.
-3. Assigns `copilot-swe-agent` through GraphQL
-   `replaceActorsForAssignable`, passing `agentAssignment.customAgent` so the
-   session runs `.github/agents/02-executor.agent.md`.
+3. Assigns `copilot-swe-agent` via `replaceActorsForAssignable` with
+   `agentAssignment.customAgent`, so the session runs
+   `.github/agents/02-executor.agent.md`.
 4. Removes `agent:execute` so re-adding it retries.
 
-**This workflow exists because of the mobile apps.** Assigning Copilot by hand
-from a phone gives you the default agent with no way to select a custom one.
-Going through the API is the only way to pin the executor profile from a
-client that has no picker.
+The model is **Auto**. Use this for mechanical work where that does not
+matter; avoid it for anything touching `.tscn`, `.tres`, `project.godot`, or
+`addons/`.
 
-Caveat worth checking on the first run: programmatic assignment does not go
-through the model picker, so the session may not use Haiku 4.5. If the credit
-line looks wrong, that is the first thing to inspect. `customAgent` must match
-the `name:` frontmatter (`executor`), not the filename; if GitHub rejects it
-the workflow logs a warning and falls back to the default agent rather than
-stranding the task.
+How a custom agent is named in the API is not precisely documented —
+`gh agent-task create --help` implies the filename stem, the file's own
+frontmatter says `executor`, and with `02-executor.agent.md` those differ. The
+workflow tries `executor`, `02-executor`, and `02-executor.agent` in turn and
+logs which one GitHub accepted. If none is accepted it falls back to the
+default agent rather than stranding the task. **Check the first run's log and
+pin `EXECUTOR_AGENT_CANDIDATES` to the winner.**
 
 ### Step 3 — Review
 
@@ -329,8 +416,9 @@ Each implementation sub-issue:
 
 - follows `.github/ISSUE_TEMPLATE/99-execute_task.md`;
 - has the same milestone as its parent Feature;
-- carries `implementation` and `machine`, and gets `agent:execute` from you
-  when it is time to run;
+- carries `implementation` and `machine`, and nothing else — the planner
+  deliberately does not pre-apply `agent:execute`, because that label is a
+  trigger and a pre-applied trigger is a spent one;
 - records sibling ordering with GitHub issue dependencies;
 - is the only Issue assigned to the executor; and
 - is closed by its own implementation PR.
@@ -377,10 +465,10 @@ auto-add sets it when an Issue first lands on the board.
 
 The full pipeline costs four workflow runs of overhead. For small, mechanical,
 fully specified work — a rename, a doc fix, a Task-template Issue with no
-architectural content — skip planning: file the Issue, add `agent:execute`
-directly, and let `agent-02-execute.yml` dispatch it. Review still applies if
-the change touches `.tscn`, `.tres`, `project.godot`, or anything under
-`addons/`.
+architectural content — skip planning: file the Issue and either assign
+Copilot directly or add `agent:execute`. This is the case label mode is for.
+Review still applies if the change touches `.tscn`, `.tres`, `project.godot`,
+or anything under `addons/`.
 
 `agent-02-execute.yml` does not require an Issue to have come from the
 planner. It only requires that the Issue be open and unblocked.
@@ -513,3 +601,17 @@ example schema — do not expect clean per-model cost.
 - [Supported AI models in GitHub Copilot](https://docs.github.com/en/copilot/reference/ai-models/supported-models)
 - [Models and pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing)
 - [Copilot usage-based billing](https://github.blog/news-insights/company-news/github-copilot-is-moving-to-usage-based-billing/)
+- [Customize the reasoning level for Copilot cloud agent](https://github.blog/changelog/2026-08-03-customize-the-reasoning-level-for-copilot-cloud-agent/)
+- [cli/cli#13222 — add `--model` to `gh agent-task create`](https://github.com/cli/cli/issues/13222) — open; why no programmatic path can pick a model
+
+### Things checked directly against the API, not the docs
+
+Re-check these with the commands rather than trusting this table.
+
+| Claim | How to re-check |
+| --- | --- |
+| `AgentAssignmentInput` has no model field | `gh api graphql -f query='{__type(name:"AgentAssignmentInput"){inputFields{name}}}'` |
+| `customAgent` exists on that input | same command |
+| Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"sword-and-planet"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
+| `gh agent-task create` has no `--model` | `gh agent-task create --help` |
+| Project field names and options | `gh project field-list 1 --owner stardustsuperwizard` |

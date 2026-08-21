@@ -10,6 +10,16 @@ You are an implementation worker for Sword and Planet.
 
 Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 
+> **Where this file is actually used.** The Copilot cloud agent cannot select
+> a custom agent from the model picker, so a session you start by assigning
+> Copilot from the UI never loads this file. It is loaded when you run the
+> `executor` profile in VS Code, and when `agent-02-execute.yml` runs in label
+> mode and passes `agentAssignment.customAgent`.
+>
+> Because the common path does not load it, this contract is mirrored in
+> `.github/copilot-instructions.md` under *Executing an Implementation Task*.
+> **Keep the two in sync.** The mirror is what most sessions will read.
+
 You receive narrowly scoped implementation work from either:
 
 1. direct delegation by the planning agent; or

@@ -49,9 +49,10 @@ jobs:
       PROJECT_OWNER: stardustsuperwizard
       PROJECT_NUMBER: "1"
 
-      # Good reasoning model for planning.
-      # You can later change this to auto or another supported Copilot model.
-      PLANNER_MODEL: gpt-5.4
+      # Planning is where the decisions are made, so it gets the strong
+      # model. Overridable without a commit via the PLANNER_MODEL repository
+      # variable; see docs/AGENT_WORKFLOW.md for the exact id caveat.
+      PLANNER_MODEL: ${{ vars.PLANNER_MODEL || 'claude-opus-5' }}
 
       # Soft cap for this planning session.
       PLANNER_MAX_AI_CREDITS: "30"
@@ -337,6 +338,23 @@ jobs:
           """
 
           pathlib.Path("planner-prompt.txt").write_text(prompt)
+
+      # Copilot CLI model ids are not published as a stable list; they are
+      # shown in the --model help text. Dumping them costs nothing and means
+      # a rejected id is self-diagnosing instead of a mystery failure.
+      - name: Show Available Models
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          {
+            echo "<details><summary>Copilot CLI model ids</summary>"
+            echo ""
+            echo '```'
+            copilot --help 2>&1 | sed -n '/--model/,/^[[:space:]]*$/p'
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate Implementation Plan with Copilot CLI
         if: steps.duplicate_check.outputs.already_planned != 'true'
@@ -723,8 +741,6 @@ jobs:
                   "implementation",
                   "--label",
                   "machine",
-                  "--label",
-                  "agent:execute",
                   "--parent",
                   parent,
               ]
@@ -893,9 +909,10 @@ jobs:
               "required Implementation Tasks are completed "
               "and reviewed.",
               "",
-              "Add the `agent:execute` label to an unblocked "
-              "Implementation Task to dispatch it to the Copilot "
-              "coding agent via `agent-02-execute.yml`.",
+              "To run one, open an unblocked Implementation Task "
+              "and assign it to Copilot, choosing the model in the "
+              "picker. Adding the `agent:execute` label instead "
+              "dispatches it on Auto with the `executor` agent.",
           ])
 
           body = "\n".join(lines)

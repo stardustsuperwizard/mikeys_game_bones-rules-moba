@@ -1,29 +1,47 @@
 name: Execute Task
 
-# Thin dispatch wrapper around the Copilot cloud coding agent.
+# Board plumbing and dependency checking around the Copilot cloud agent.
 #
-# Why this exists rather than assigning Copilot by hand: the GitHub mobile
-# apps do not expose the custom-agent picker, so a hand-assigned task runs the
-# default agent. This workflow assigns Copilot through the API with
-# agentAssignment.customAgent, which selects .github/agents/02-executor.agent.md
-# regardless of the client the label was added from.
+# There are two ways in, because model selection and custom-agent selection
+# are mutually exclusive on GitHub and you should pick per task:
 #
-# Adding the label is the whole interface. Remove-and-re-add to retry.
+#   ASSIGN MODE  (preferred)  -- you assign Copilot yourself, from any client
+#     including GitHub Mobile, and pick the model in the picker. This workflow
+#     observes the assignment and does the plumbing. You get a chosen
+#     Anthropic model; you do not get a custom agent.
+#
+#   LABEL MODE  (one tap)     -- you add `agent:execute` and this workflow
+#     assigns Copilot for you with agentAssignment.customAgent. You get the
+#     executor profile; the model is Auto, because no API path can set one
+#     (AgentAssignmentInput has no model field, `gh agent-task create` has no
+#     --model, and "where a model picker is not available, Auto will be used").
+#     Reasonable for mechanical work; avoid for anything touching .tscn,
+#     .tres, project.godot, or addons/.
+#
+# Only LABEL MODE can refuse a blocked task before work starts. In ASSIGN MODE
+# the session has already begun, so a blocked task is reported after the fact.
 
 on:
   issues:
     types:
       - labeled
+      - assigned
 
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Implementation Task Issue number to execute"
+        description: "Implementation Task Issue number"
         required: true
         type: number
 
+      assign_copilot:
+        description: "Assign Copilot too (label-mode behaviour, Auto model)"
+        required: false
+        type: boolean
+        default: false
+
       ignore_blockers:
-        description: "Dispatch even if blocked-by Issues are still open"
+        description: "Proceed even if blocked-by Issues are still open"
         required: false
         type: boolean
         default: false
@@ -43,7 +61,11 @@ jobs:
 
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.label.name == 'agent:execute'
+      (github.event.action == 'labeled' &&
+       github.event.label.name == 'agent:execute') ||
+      (github.event.action == 'assigned' &&
+       (github.event.assignee.login == 'copilot-swe-agent' ||
+        github.event.assignee.login == 'Copilot'))
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -53,13 +75,43 @@ jobs:
       PROJECT_OWNER: stardustsuperwizard
       PROJECT_NUMBER: "1"
 
-      # Must match the `name:` frontmatter in
-      # .github/agents/02-executor.agent.md, not the filename.
-      EXECUTOR_AGENT: executor
+      # How a custom agent is named in the API is not documented precisely.
+      # `gh agent-task create --help` implies the filename stem ("use
+      # 'my-agent' for the 'my-agent.md' agent"), while the agent file's own
+      # `name:` frontmatter says `executor`. With a numbered, double-suffixed
+      # filename all three readings differ, so label mode tries each in turn
+      # and reports which one GitHub accepted.
+      EXECUTOR_AGENT_CANDIDATES: "executor 02-executor 02-executor.agent"
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Determine Mode
+        id: mode
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.assign_copilot }}" = "true" ]; then
+              MODE=label
+            else
+              MODE=assign
+            fi
+          elif [ "${{ github.event.action }}" = "labeled" ]; then
+            MODE=label
+          else
+            MODE=assign
+          fi
+
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
+          if [ "$MODE" = "label" ]; then
+            echo "LABEL MODE: this workflow will assign Copilot (Auto model)."
+          else
+            echo "ASSIGN MODE: Copilot was assigned externally; doing plumbing only."
+          fi
 
       - name: Resolve Implementation Task
         id: issue
@@ -69,7 +121,7 @@ jobs:
 
           gh issue view "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --json number,title,url,state,labels,blockedBy,parent \
+            --json number,title,url,state,labels,blockedBy,parent,assignees \
             > issue.json
 
           STATE=$(jq -r '.state' issue.json)
@@ -83,8 +135,6 @@ jobs:
             echo "url=$(jq -r '.url' issue.json)"
             echo "title=$(jq -r '.title' issue.json)"
           } >> "$GITHUB_OUTPUT"
-
-          echo "Dispatching Issue #$ISSUE_NUMBER"
 
       - name: Check Blocking Dependencies
         id: blockers
@@ -101,15 +151,11 @@ jobs:
             ' issue.json
           )
 
-          if [ -z "$OPEN_BLOCKERS" ]; then
+          if [ -z "$OPEN_BLOCKERS" ] \
+             || [ "${IGNORE_BLOCKERS:-false}" = "true" ]; then
             echo "blocked=false" >> "$GITHUB_OUTPUT"
-            echo "No open blocking Issues."
-            exit 0
-          fi
-
-          if [ "${IGNORE_BLOCKERS:-false}" = "true" ]; then
-            echo "blocked=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Dispatching despite open blockers: $OPEN_BLOCKERS"
+            [ -n "$OPEN_BLOCKERS" ] \
+              && echo "::warning::Proceeding despite open blockers: $OPEN_BLOCKERS"
             exit 0
           fi
 
@@ -118,7 +164,12 @@ jobs:
           echo "Blocked by: $OPEN_BLOCKERS"
 
       # ---------------------------------------------------------------
-      # Blocked path: park the Issue and stop without consuming credits.
+      # Blocked.
+      #
+      # In label mode this is a refusal before any work starts. In assign
+      # mode Copilot is already running, so it is a warning -- the session is
+      # deliberately not cancelled, because unassigning a live session
+      # orphans its branch rather than reliably stopping it.
       # ---------------------------------------------------------------
 
       - name: Report Blocked
@@ -127,23 +178,28 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ "${{ steps.mode.outputs.mode }}" = "label" ]; then
+            DETAIL="Dispatch was refused and the \`agent:execute\` label has been removed. Re-add it once the blocking Issues are closed."
+            gh issue edit "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "agent:execute" || true
+          else
+            DETAIL="Copilot has **already been assigned and started**, so this is a warning rather than a refusal. Decide whether to let the session finish or unassign it yourself."
+          fi
+
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --body "$(cat <<EOF
           <!-- agent-execute-blocked -->
 
-          Execution was requested but this task is blocked by:
-          ${{ steps.blockers.outputs.open_blockers }}
+          This task is blocked by: ${{ steps.blockers.outputs.open_blockers }}
 
-          The \`agent:execute\` label has been removed. Re-add it once the
-          blocking Issues are closed, or run the **Execute Task** workflow
-          manually with \`ignore_blockers\` enabled to override.
+          $DETAIL
+
+          To override deliberately, run the **Execute Task** workflow manually
+          with \`ignore_blockers\` enabled.
           EOF
           )"
-
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:execute" || true
 
       - name: Move Blocked Task to Blocked
         if: steps.blockers.outputs.blocked == 'true'
@@ -160,14 +216,18 @@ jobs:
         if: steps.blockers.outputs.blocked == 'true'
         shell: bash
         run: |
-          echo "### Blocked" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Issue #$ISSUE_NUMBER is blocked by ${{ steps.blockers.outputs.open_blockers }}." \
-            >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Blocked"
+            echo ""
+            echo "Issue #$ISSUE_NUMBER is blocked by" \
+                 "${{ steps.blockers.outputs.open_blockers }}."
+            echo ""
+            echo "Mode: \`${{ steps.mode.outputs.mode }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
       # ---------------------------------------------------------------
-      # Dispatch path.
+      # Proceeding.
       # ---------------------------------------------------------------
 
       - name: Move Task to In Progress
@@ -182,7 +242,9 @@ jobs:
           work-type: Implementation
 
       - name: Assign Copilot Coding Agent
-        if: steps.blockers.outputs.blocked != 'true'
+        if: >
+          steps.blockers.outputs.blocked != 'true' &&
+          steps.mode.outputs.mode == 'label'
         shell: bash
         run: |
           set -euo pipefail
@@ -190,7 +252,6 @@ jobs:
           OWNER="${GITHUB_REPOSITORY%%/*}"
           NAME="${GITHUB_REPOSITORY##*/}"
 
-          # Resolve the bot node ID rather than hardcoding it.
           BOT_ID=$(
             gh api graphql \
               -f owner="$OWNER" \
@@ -202,11 +263,7 @@ jobs:
                       capabilities: [CAN_BE_ASSIGNED]
                       first: 100
                     ) {
-                      nodes {
-                        login
-                        __typename
-                        ... on Bot { id }
-                      }
+                      nodes { login __typename ... on Bot { id } }
                     }
                   }
                 }
@@ -220,36 +277,23 @@ jobs:
 
           if [ -z "$BOT_ID" ]; then
             echo "::error::copilot-swe-agent is not assignable on this" \
-                 "repository. Enable the Copilot coding agent in repository" \
-                 "settings."
+                 "repository. Enable the Copilot coding agent in settings."
             exit 1
           fi
 
           ISSUE_ID=$(
             gh issue view "$ISSUE_NUMBER" \
               --repo "$GITHUB_REPOSITORY" \
-              --json id \
-              --jq '.id'
+              --json id --jq '.id'
           )
 
-          # replaceActorsForAssignable replaces every assignee. These Issues
-          # are machine-owned and created unassigned by the planner, so a
-          # straight replace is intended.
           ASSIGN_QUERY='
-            mutation(
-              $assignableId: ID!
-              $actorId: ID!
-              $customAgent: String!
-            ) {
+            mutation($assignableId: ID!, $actorId: ID!, $customAgent: String!) {
               replaceActorsForAssignable(input: {
                 assignableId: $assignableId
                 actorIds: [$actorId]
                 agentAssignment: { customAgent: $customAgent }
-              }) {
-                assignable {
-                  ... on Issue { number url }
-                }
-              }
+              }) { assignable { ... on Issue { number url } } }
             }
           '
 
@@ -258,45 +302,45 @@ jobs:
               replaceActorsForAssignable(input: {
                 assignableId: $assignableId
                 actorIds: [$actorId]
-              }) {
-                assignable {
-                  ... on Issue { number url }
-                }
-              }
+              }) { assignable { ... on Issue { number url } } }
             }
           '
 
-          if gh api graphql \
-              -f assignableId="$ISSUE_ID" \
-              -f actorId="$BOT_ID" \
-              -f customAgent="$EXECUTOR_AGENT" \
-              -f query="$ASSIGN_QUERY"
-          then
-            echo "Assigned Copilot with custom agent '$EXECUTOR_AGENT'."
-            echo "agent_used=$EXECUTOR_AGENT" >> "$GITHUB_ENV"
-          else
-            echo "::warning::Assignment with customAgent='$EXECUTOR_AGENT'" \
-                 "failed. Retrying with the default agent. Check that the" \
-                 "name matches the 'name:' frontmatter in" \
-                 ".github/agents/02-executor.agent.md."
+          ASSIGNED=""
+
+          for CANDIDATE in $EXECUTOR_AGENT_CANDIDATES; do
+            if gh api graphql \
+                -f assignableId="$ISSUE_ID" \
+                -f actorId="$BOT_ID" \
+                -f customAgent="$CANDIDATE" \
+                -f query="$ASSIGN_QUERY" 2>/dev/null
+            then
+              ASSIGNED="$CANDIDATE"
+              echo "Assigned Copilot with custom agent '$CANDIDATE'."
+              break
+            fi
+
+            echo "customAgent='$CANDIDATE' rejected; trying the next form."
+          done
+
+          if [ -z "$ASSIGNED" ]; then
+            echo "::warning::No customAgent form was accepted" \
+                 "($EXECUTOR_AGENT_CANDIDATES). Falling back to the default" \
+                 "agent. The scope contract is also in the Issue body and in" \
+                 "copilot-instructions.md, so this degrades quality rather" \
+                 "than losing the contract."
 
             gh api graphql \
               -f assignableId="$ISSUE_ID" \
               -f actorId="$BOT_ID" \
               -f query="$FALLBACK_QUERY"
 
-            echo "Assigned Copilot with the default agent."
-            echo "agent_used=default (customAgent rejected)" >> "$GITHUB_ENV"
+            ASSIGNED="default (no customAgent form accepted)"
           fi
 
-      - name: Consume the Label
-        if: steps.blockers.outputs.blocked != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
+          echo "agent_used=$ASSIGNED" >> "$GITHUB_ENV"
+          echo "::notice::Model is Auto in label mode; the API cannot set one."
 
-          # Removing the label makes re-adding it a clean retry signal,
-          # which is how a FIX cycle re-enters this workflow.
           gh issue edit "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --remove-label "agent:execute" || true
@@ -306,13 +350,22 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Dispatched to Copilot"
+            echo "### Task in progress"
             echo ""
             echo "- Issue: [#$ISSUE_NUMBER](${{ steps.issue.outputs.url }})"
             echo "- Title: ${{ steps.issue.outputs.title }}"
-            echo "- Agent: ${agent_used:-unknown}"
-            echo ""
-            echo "Copilot opens a draft pull request when it finishes."
+            echo "- Mode: \`${{ steps.mode.outputs.mode }}\`"
+
+            if [ "${{ steps.mode.outputs.mode }}" = "label" ]; then
+              echo "- Agent: ${agent_used:-unknown}"
+              echo "- Model: **Auto** — not selectable via the API"
+              echo ""
+              echo "For a chosen model, assign Copilot from the UI instead" \
+                   "and let this workflow observe the assignment."
+            else
+              echo "- Agent: default (custom agents are not selectable in the picker)"
+              echo "- Model: whatever you chose in the picker"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Move Task to Blocked on Failure
