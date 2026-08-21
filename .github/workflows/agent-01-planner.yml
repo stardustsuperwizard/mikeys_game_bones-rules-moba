@@ -410,6 +410,15 @@ jobs:
           # E2BIG ("Argument list too long", exit 126) before copilot ever
           # started. Copilot CLI reads the prompt from stdin when -p is empty.
 
+          # DEBUG: Check that prompt file exists
+          echo "=== DEBUG: Checking planner-prompt.txt ==="
+          if [ -f planner-prompt.txt ]; then
+            echo "File exists, size: $(wc -c < planner-prompt.txt) bytes"
+          else
+            echo "ERROR: planner-prompt.txt not found!"
+            exit 1
+          fi
+
           resolved=""
 
           IFS=',' read -r -a candidates <<< "$PLANNER_MODELS"
@@ -433,7 +442,17 @@ jobs:
               < planner-prompt.txt \
               > copilot-output.jsonl 2> copilot-error.txt || status=$?
 
+            echo "=== copilot-error.txt ==="
             cat copilot-error.txt
+            echo ""
+
+            echo "=== copilot-output.jsonl (first 1000 bytes) ==="
+            head -c 1000 copilot-output.jsonl
+            echo ""
+            echo "=== copilot-output.jsonl (total size) ==="
+            echo "$(wc -c < copilot-output.jsonl) bytes"
+            echo ""
+
             echo "::endgroup::"
 
             if [ "$status" -eq 0 ]; then
