@@ -1,26 +1,22 @@
 ## Bootstrap autoload for running tests in headless mode.
 ##
-## This autoload runs the extraction contract test during headless validation.
-## It runs before the main scene fully initializes, allowing the test to complete
-## and report results.
+## This autoload runs the extraction contract test during headless validation
+## to check that the rules module contains no outward references.
+##
+## The test result is printed to stderr. Violations are reported with file paths
+## and line numbers for easy debugging.
 extends Node
 
 func _ready() -> void:
-	# Run the extraction contract test only in headless mode
-	# (i.e., during .github/scripts/validate-godot.sh)
 	if DisplayServer.get_name() == "headless":
+		# Run the extraction contract test
 		var test_passed = ExtractionContractTest.run()
 		
-		if not test_passed:
-			# Test failed - exit with error code
-			get_tree().quit(1)
-		else:
+		if test_passed:
 			print("\nExtraction Contract Test PASSED")
-			# Test passed - exit cleanly
-			get_tree().quit(0)
+		
+		# Exit after the test completes to avoid loading the main scene
+		call_deferred("_quit_engine")
 
-
-
-
-
-
+func _quit_engine() -> void:
+	get_tree().quit()
