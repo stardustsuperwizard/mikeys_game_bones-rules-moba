@@ -2,7 +2,7 @@
 name: Implementation Task
 about: A bounded engineering task emitted by the planner. Not for human-authored feature requests.
 title: '[impl] '
-labels: implementation, machine, agent:implement
+labels: implementation, machine, agent:execute
 assignees: ''
 ---
 

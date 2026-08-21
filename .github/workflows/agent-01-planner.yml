@@ -34,6 +34,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GITHUB_TOKEN: ${{ github.token }}
 
+      ISSUE_NUMBER: ${{ inputs.issue_number || github.event.issue.number }}
+
+      # Sword and Planet Workflow project board.
+      # https://github.com/users/stardustsuperwizard/projects/1
+      PROJECT_OWNER: stardustsuperwizard
+      PROJECT_NUMBER: "1"
+
       # Good reasoning model for planning.
       # You can later change this to auto or another supported Copilot model.
       PLANNER_MODEL: gpt-5.4
@@ -42,6 +49,28 @@ jobs:
       PLANNER_MAX_AI_CREDITS: "30"
 
     steps:
+      - name: Move Project Item to Planning
+        env:
+          # Projects v2 is not accessible with the default GITHUB_TOKEN;
+          # this requires a PAT with Projects read/write, stored as
+          # PROJECT_TOKEN.
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ISSUE_URL="https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER"
+
+          gh project item-add "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" \
+            --url "$ISSUE_URL"
+
+          gh project item-edit "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" \
+            --url "$ISSUE_URL" \
+            --field "Status" \
+            --value "Planning"
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -61,12 +90,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            ISSUE_NUMBER="${{ inputs.issue_number }}"
-          else
-            ISSUE_NUMBER="${{ github.event.issue.number }}"
-          fi
 
           echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
 
@@ -869,3 +892,31 @@ jobs:
             --remove-label "agent:plan" || true
 
           echo "Feature #$ISSUE_NUMBER planned successfully."
+
+      - name: Move Project Item to In Progress
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh project item-edit "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" \
+            --url "https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" \
+            --field "Status" \
+            --value "In Progress"
+
+      - name: Move Project Item to Blocked
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh project item-edit "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" \
+            --url "https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" \
+            --field "Status" \
+            --value "Blocked"

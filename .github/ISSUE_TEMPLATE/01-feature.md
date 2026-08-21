@@ -1,8 +1,8 @@
 ---
 name: Feature
 about: Suggest an idea for this project
-title: ''
-labels: planning, agent:planner
+title: '[plan] '
+labels: plan, enhancement
 assignees: ''
 
 ---

@@ -1,8 +1,8 @@
 ---
 name: Bug Report
 about: Document identified bug for fixing.
-title: ''
-labels: bug
+title: '[plan] '
+labels: plan, bug
 assignees: ''
 
 ---

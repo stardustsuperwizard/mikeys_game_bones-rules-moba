@@ -1,8 +1,8 @@
 ---
 name: Infrastrucuture and Tooling
 about: Updating the mechanisms that make the repo run
-title: ''
-labels: infrastructure, machine
+title: '[plan] '
+labels: plan, infrastructure
 assignees: ''
 
 ---

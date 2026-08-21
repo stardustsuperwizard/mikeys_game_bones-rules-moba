@@ -1,8 +1,8 @@
 ---
 name: Task
 about: Not every issue needs to pretend to be a “feature.”
-title: ''
-labels: task
+title: '[plan] '
+labels: plan, task
 assignees: ''
 
 ---

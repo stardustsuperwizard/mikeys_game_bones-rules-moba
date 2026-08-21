@@ -161,8 +161,27 @@ Each implementation sub-issue:
 The parent Feature stays open while its sub-issues are implemented. Close it
 only after all required sub-issues are integrated, validation passes, and the
 reviewer returns `PASS`. The Project's Parent issue and Sub-issue progress
-fields provide the rollup; the parent and children retain their separate
-Planner Status and Implementation Status values.
+fields provide the rollup.
+
+### Project board
+
+Tracked on the [Sword and Planet Workflow](https://github.com/users/stardustsuperwizard/projects/1)
+project. The parent Feature and its Implementation Task sub-issues each carry
+their own item on the board, distinguished by two fields:
+
+- **Status** — one shared single-select field on every item: `Backlog`,
+  `Planning`, `Ready`, `In Progress`, `In review`, `Blocked`, `Done`.
+- **Work Type** — `Planning` or `Implementation`, distinguishing a Feature
+  row from a Task row.
+
+There is no separate Planner Status / Implementation Status pair; both roles
+write the same Status field on their own item.
+
+`planner-feature.yml` drives Status on the Feature item automatically:
+`Backlog` → `Planning` at the start of the run, then `In Progress` if the run
+completes without error, or `Blocked` if it fails. This requires a
+`PROJECT_TOKEN` repository secret (a PAT with Projects read/write) since the
+default `GITHUB_TOKEN` cannot write to Projects v2.
 
 ### Step 2 — Implementation
 
