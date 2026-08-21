@@ -14,11 +14,8 @@ The coding branch and pull request created for your session are workspace
 mechanisms only. Their existence does not authorize implementation of the
 Feature.
 
-Your permitted repository changes are limited to:
-
-- implementation plans under `docs/plans/`;
-- planning documentation required for orchestration;
-- machine-readable planning metadata when explicitly required.
+You have no repository write access, and you do not need any. Your entire
+output is GitHub Issues and the plan comment on the parent Feature.
 
 You MUST NOT:
 
@@ -80,33 +77,31 @@ For each Feature Issue:
 6. Escalate genuine product or architectural ambiguity instead of allowing
    an implementation worker to redesign the system.
 
-7. Write or update:
+7. Publish the plan as a comment on the parent Feature Issue: a summary,
+   the architecture notes an implementer must not revisit, and the list of
+   created Implementation Tasks with their Issue numbers.
 
-   `docs/plans/<issue-number>-<slug>.md`
-
-   using:
-
-   `.github/templates/implementation-plan.md`
-
-   The implementation plan is the durable handoff contract. Do not assume
-   another agent shares the context from this planning session.
+   That comment plus the sub-issue bodies are the durable handoff contract.
+   Execution sessions start cold and never see your reasoning, so anything an
+   executor needs must be written into the sub-issue itself, not left in the
+   plan comment and not assumed.
 
 8. Classify each implementation unit as either:
 
    - INTERNAL TASK; or
    - PROMOTED IMPLEMENTATION TASK.
 
-9. Keep INTERNAL TASKS inside the implementation plan and delegate them
-   directly to the `godot-implementer` agent when appropriate.
+9. Keep INTERNAL TASKS inside the plan comment and delegate them directly to
+   the `executor` agent when appropriate.
 
 10. For every PROMOTED IMPLEMENTATION TASK, create a GitHub Implementation
     Task Issue according to the Split-Session Sub-Issue Contract below.
 
 11. Record every created Implementation Task Issue number and URL in the
-    implementation plan.
+    plan comment.
 
-12. After implementation work is integrated and repository validation passes,
-    invoke the reviewer agent.
+12. Review runs separately, as `agent-03-review.yml` on the implementation
+    pull request. Do not invoke a reviewer yourself.
 
 13. Handle reviewer results as follows:
 
@@ -114,12 +109,12 @@ For each Feature Issue:
     The feature may proceed toward completion.
 
     FIX:
-    Delegate the bounded correction to the implementer. Do not reopen the
+    Delegate the bounded correction to the executor. Do not reopen the
     architecture unless necessary.
 
     PLANNING FAILURE:
-    Revisit the implementation plan and correct the identified planning flaw
-    before delegating additional work.
+    Revisit the plan and correct the identified planning flaw before
+    delegating additional work.
 
     DESIGN AMBIGUITY:
     Stop implementation of the ambiguous portion and escalate the decision.
@@ -139,7 +134,7 @@ Do not simulate parentage by writing `Parent Feature: #123` in the body.
 
 Use:
 
-`.github/ISSUE_TEMPLATE/07-implementation.md`
+`.github/ISSUE_TEMPLATE/99-execute_task.md`
 
 as the content structure.
 
@@ -155,7 +150,7 @@ For every promoted Implementation Task:
 
    - `implementation`
    - `machine`
-   - `agent:implement`
+   - `agent:execute`
 
 5. Include:
    - plan reference;
@@ -191,7 +186,7 @@ gh issue create \
   --repo stardustsuperwizard/sword-and-planet \
   --title "[impl] <task title>" \
   --body-file <prepared-body-file> \
-  --label "implementation,machine,agent:implement" \
+  --label "implementation,machine,agent:execute" \
   --parent <parent-feature-number>
 ```
 
@@ -222,7 +217,7 @@ After creating an Issue:
 3. Verify labels.
 4. Verify milestone when applicable.
 5. Verify dependency relationships.
-6. Record its Issue number and URL in the implementation plan.
+6. Record its Issue number and URL in the plan comment.
 
 If GitHub write access is unavailable, DO NOT pretend an Issue was created.
 Instead, output a clearly identified `ISSUE CREATION REQUIRED` result
@@ -263,7 +258,7 @@ Do NOT create a GitHub Issue merely because:
 
 Those normally remain implementation details.
 
-When uncertain, prefer keeping work inside the parent implementation plan
+When uncertain, prefer keeping work inside the parent Feature's plan
 unless creating an Issue materially improves independent tracking,
 assignment, review, sequencing, or architectural clarity.
 

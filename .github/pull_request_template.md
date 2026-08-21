@@ -5,11 +5,6 @@ See CONTRIBUTING.md and docs/AGENT_WORKFLOW.md.
 
 Closes #<issue-number>
 
-## Plan Reference
-
-- Plan: `docs/plans/<issue-number>-<slug>.md`
-- Task: <task number and title, or "n/a">
-
 ## Changes
 
 <!-- Files changed and what each change does. -->

@@ -12,13 +12,21 @@ on:
         required: true
         type: number
 
+      force:
+        description: >
+          Re-plan even if an automated plan already exists. Existing
+          sub-issues are NOT removed; close stale ones by hand first.
+        required: false
+        type: boolean
+        default: false
+
 permissions:
   contents: read
   issues: write
   copilot-requests: write
 
 concurrency:
-  group: plan-feature-${{ github.event.issue.number || inputs.issue_number }}
+  group: agent-plan-${{ github.event.issue.number || inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
@@ -49,30 +57,18 @@ jobs:
       PLANNER_MAX_AI_CREDITS: "30"
 
     steps:
-      - name: Move Project Item to Planning
-        env:
-          # Projects v2 is not accessible with the default GITHUB_TOKEN;
-          # this requires a PAT with Projects read/write, stored as
-          # PROJECT_TOKEN.
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          ISSUE_URL="https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER"
-
-          gh project item-add "$PROJECT_NUMBER" \
-            --owner "$PROJECT_OWNER" \
-            --url "$ISSUE_URL"
-
-          gh project item-edit "$PROJECT_NUMBER" \
-            --owner "$PROJECT_OWNER" \
-            --url "$ISSUE_URL" \
-            --field "Status" \
-            --value "Planning"
-
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Move Feature to Planning
+        uses: ./.github/actions/set-project-status
+        with:
+          token: ${{ secrets.PROJECT_TOKEN }}
+          owner: ${{ env.PROJECT_OWNER }}
+          project-number: ${{ env.PROJECT_NUMBER }}
+          url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
+          status: Planning
+          work-type: Planning
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -98,7 +94,14 @@ jobs:
             --json number,title,body,milestone,url,labels \
             > issue.json
 
-          echo "Planning Issue #$ISSUE_NUMBER"
+          # Comments carry clarifications and corrections that amend the
+          # original body. --paginate merges the pages into one array.
+          gh api \
+            --paginate \
+            "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments" \
+            > comments.json
+
+          echo "Planning Issue #$ISSUE_NUMBER with $(jq 'length' comments.json) comment(s)"
 
       - name: Stop if Already Planned
         id: duplicate_check
@@ -107,6 +110,12 @@ jobs:
           set -euo pipefail
 
           ISSUE_NUMBER="${{ steps.issue.outputs.issue_number }}"
+
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "Force re-plan requested; skipping the duplicate guard."
+            echo "already_planned=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if gh api \
               --paginate \
@@ -140,10 +149,48 @@ jobs:
               f"{issue.get('body') or ''}"
           )
 
+          # Comments amend the Issue body. Skip this workflow's own output so
+          # a forced re-plan does not read back its previous plan as a
+          # requirement.
+          comments_path = pathlib.Path("comments.json")
+
+          if comments_path.exists():
+              comments = json.loads(comments_path.read_text())
+
+              human_comments = []
+
+              for comment in comments:
+                  body = comment.get("body") or ""
+
+                  if "<!-- automated-planner-complete -->" in body:
+                      continue
+
+                  if "<!-- agent-execute-blocked -->" in body:
+                      continue
+
+                  if "<!-- agent-review-verdict -->" in body:
+                      continue
+
+                  author = (comment.get("user") or {}).get("login", "unknown")
+
+                  human_comments.append(
+                      f"## Comment by {author} "
+                      f"({comment.get('created_at', 'unknown date')})\n\n"
+                      f"{body}"
+                  )
+
+              if human_comments:
+                  sections.append(
+                      "# FEATURE ISSUE COMMENTS\n\n"
+                      "These are clarifications and corrections added after "
+                      "the Issue was filed. Where a comment conflicts with "
+                      "the original body, the later comment wins.\n\n"
+                      + "\n\n".join(human_comments)
+                  )
+
           important_files = [
-              ".github/agents/planner.agent.md",
-              ".github/ISSUE_TEMPLATE/07-implementation.md",
-              ".github/templates/implementation-plan.md",
+              ".github/agents/01-planner.agent.md",
+              ".github/ISSUE_TEMPLATE/99-execute_task.md",
               "docs/AGENT_WORKFLOW.md",
           ]
 
@@ -527,9 +574,9 @@ jobs:
             "Intended for AI agent execution"
 
           ensure_label \
-            "agent:implement" \
+            "agent:execute" \
             "8250DF" \
-            "Ready for implementation agent"
+            "Ready for the execution agent"
 
           ensure_label \
             "planned" \
@@ -591,7 +638,7 @@ jobs:
           planner-task-id: {task["id"]}
           -->
 
-          ## Plan Reference
+          ## Provenance
 
           - Parent Feature: #{parent}
           - Planner Task: {task["id"]}
@@ -677,7 +724,7 @@ jobs:
                   "--label",
                   "machine",
                   "--label",
-                  "agent:implement",
+                  "agent:execute",
                   "--parent",
                   parent,
               ]
@@ -846,9 +893,9 @@ jobs:
               "required Implementation Tasks are completed "
               "and reviewed.",
               "",
-              "Implementation Tasks are labeled "
-              "`agent:implement` and are ready for the "
-              "`godot-implementer` Copilot profile.",
+              "Add the `agent:execute` label to an unblocked "
+              "Implementation Task to dispatch it to the Copilot "
+              "coding agent via `agent-02-execute.yml`.",
           ])
 
           body = "\n".join(lines)
@@ -893,30 +940,54 @@ jobs:
 
           echo "Feature #$ISSUE_NUMBER planned successfully."
 
-      - name: Move Project Item to In Progress
+      - name: Place Implementation Tasks on the Board
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Each created sub-issue gets its own board row so the Feature and
+          # its tasks can hold different Status values.
+          jq -r '.[].url' created-issues.json | while read -r TASK_URL; do
+            gh project item-add "$PROJECT_NUMBER" \
+              --owner "$PROJECT_OWNER" \
+              --url "$TASK_URL"
+
+            gh project item-edit "$PROJECT_NUMBER" \
+              --owner "$PROJECT_OWNER" \
+              --url "$TASK_URL" \
+              --field "Status" \
+              --value "Ready"
+
+            gh project item-edit "$PROJECT_NUMBER" \
+              --owner "$PROJECT_OWNER" \
+              --url "$TASK_URL" \
+              --field "Work Type" \
+              --value "Implementation"
+
+            echo "Board: Ready / Implementation for $TASK_URL"
+          done
+
+      - name: Move Feature to In Progress
         if: success()
-        env:
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
+        uses: ./.github/actions/set-project-status
+        with:
+          token: ${{ secrets.PROJECT_TOKEN }}
+          owner: ${{ env.PROJECT_OWNER }}
+          project-number: ${{ env.PROJECT_NUMBER }}
+          url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
+          status: In Progress
+          work-type: Planning
 
-          gh project item-edit "$PROJECT_NUMBER" \
-            --owner "$PROJECT_OWNER" \
-            --url "https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" \
-            --field "Status" \
-            --value "In Progress"
-
-      - name: Move Project Item to Blocked
+      - name: Move Feature to Blocked
         if: failure()
-        env:
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          gh project item-edit "$PROJECT_NUMBER" \
-            --owner "$PROJECT_OWNER" \
-            --url "https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" \
-            --field "Status" \
-            --value "Blocked"
+        uses: ./.github/actions/set-project-status
+        with:
+          token: ${{ secrets.PROJECT_TOKEN }}
+          owner: ${{ env.PROJECT_OWNER }}
+          project-number: ${{ env.PROJECT_NUMBER }}
+          url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
+          status: Blocked
+          work-type: Planning

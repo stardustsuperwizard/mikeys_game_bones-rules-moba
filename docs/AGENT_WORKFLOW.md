@@ -16,7 +16,7 @@ IDEs, Eclipse, or Xcode."
 
 On github.com the model comes from the **picker at task kickoff**, and that
 single model covers the whole session — the parent agent and every subagent
-it delegates to. A planner that delegates to `godot-implementer` in-session
+it delegates to. A planner that delegates to `executor` in-session
 runs the implementer on the planner's expensive model.
 
 Consequence: per-role model routing on github.com requires **separate
@@ -29,9 +29,21 @@ maintained — they take effect when the same profiles are run from VS Code.
 
 | Role | Model | Reasoning | Where the model is set |
 | --- | --- | --- | --- |
-| Planner | Claude Opus 5 | High | Picker, at task kickoff |
-| Implementer | Claude Haiku 4.5 | Default | Picker, per assigned Issue |
-| Reviewer | Claude Opus 5 | High | Picker, on the `@copilot` review comment |
+| Planner | Claude Opus 5 | High | `PLANNER_MODEL` in `agent-01-planner.yml` |
+| Executor | Claude Haiku 4.5 | Default | Cloud agent default — **not currently controllable**, see below |
+| Reviewer | Claude Opus 5 | High | `REVIEWER_MODEL` in `agent-03-review.yml` |
+
+Two of these are now set in workflow env rather than a picker, which is the
+main practical gain from moving planning and review into Actions: the model is
+version-controlled instead of chosen by hand each time.
+
+The executor is the exception and the open problem. `agent-02-execute.yml`
+assigns Copilot through the API, which does not go through the model picker,
+so the session takes whatever the cloud agent defaults to. Verify this on the
+first run. If the default is not Haiku 4.5, the options are to accept it, to
+assign by hand from a desktop browser where the picker exists, or to rebuild
+the executor as a Copilot CLI session — which means owning branch, commit,
+push, and PR plumbing that the cloud agent currently handles for free.
 
 Rationale: reasoning is worth paying for where decisions are made, not where
 they are executed. The planner and reviewer read a lot and write little, so
@@ -85,83 +97,247 @@ this comparison is possible.
 
 ## The workflow
 
-Three separate sessions per feature. Slower than one continuous session,
-which is the trade this project accepts.
+Four workflows in `.github/workflows/`, numbered in the order work moves
+through them. Two of them spend AI credits; two are plumbing.
 
 ```
-Human Issue (Feature template)
+Intake Issue        [plan] in title, `plan` + type label
+        │
+        │  you add  agent:plan
+        ▼
+┌────────────────────────────────────────────────┐
+│ agent-01-planner.yml         Status: Planning  │
+│ Copilot CLI, edit/execute tools REMOVED        │
+│ reads Issue body + comments + repo inventory   │
+└────────────────────────────────────────────────┘
+        │  validated plan JSON
+        │  → [impl] sub-issues, blocked-by wired
+        │  → plan comment on the Feature
+        ▼                        Status: In Progress
+Implementation Task     Status: Ready
+        │
+        │  you add  agent:execute
+        ▼
+┌────────────────────────────────────────────────┐
+│ agent-02-execute.yml       Status: In Progress │
+│ thin dispatch, no AI credits                   │
+│ assigns copilot-swe-agent + customAgent        │
+└────────────────────────────────────────────────┘
+        │
+   Copilot Cloud Agent ──▶ draft PR ──▶ ready for review
         │
         ▼
-┌─────────────────────────────────────────┐
-│ 1. PLANNING SESSION    Opus 5, high      │
-│    agent: planner                        │
-│ reads repo, writes plan, opens sub-issues│
-└─────────────────────────────────────────┘
-        │  docs/plans/<n>-<slug>.md
-        │  + one sub-issue per promoted task
-        ▼
-┌─────────────────────────────────────────┐
-│ 2. IMPLEMENTATION      Haiku 4.5         │
-│    one session per Issue                 │
-│    smallest change + validation → PR     │
-└─────────────────────────────────────────┘
-        │  draft PR per Issue
-        ▼
-┌─────────────────────────────────────────┐
-│ 3. REVIEW SESSION      Opus 5, high      │
-│    @copilot on the PR                    │
-│    VERDICT: PASS / FIX / …               │
-└─────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│ agent-03-review.yml                            │
+│ Copilot CLI, edit/execute tools REMOVED        │
+│ diff vs. acceptance criteria → VERDICT         │
+└────────────────────────────────────────────────┘
         │
-   PASS ─┴─ FIX → back to step 2 (Haiku)
-              PLANNING FAILURE → back to step 1 (Opus)
-              DESIGN AMBIGUITY → back to the human
+   PASS  → review:pass label,  task Status: In review
+   other → review:* label,     task Status: Blocked
+        │
+        │  you merge; the PR closes the task Issue
+        ▼
+┌────────────────────────────────────────────────┐
+│ agent-04-rollup.yml           task → Done      │
+│ no AI credits                                  │
+│ last sibling closed? parent → In review        │
+└────────────────────────────────────────────────┘
+        │
+   you do the human checks and close the Feature → Done
 ```
+
+### Everything is label-driven, on purpose
+
+Every stage starts because a label was added, and each workflow **removes the
+label it consumed**. That gives three properties worth keeping:
+
+- **It works from a phone.** The GitHub mobile apps do not expose the
+  custom-agent picker, which is the whole reason `agent-02-execute.yml`
+  exists — see *Step 2*. Adding a label is something every GitHub client can
+  do.
+- **Re-adding a consumed label is a clean retry.** No separate re-run verb.
+- **No workflow fires on its own output**, so there are no dispatch loops.
+
+| Label | Added by | Consumed by | Means |
+| --- | --- | --- | --- |
+| `plan` | Issue template | — | Intake ticket, type marker |
+| `agent:plan` | You | `agent-01-planner.yml` | This Issue is ready to be planned |
+| `agent:execute` | You | `agent-02-execute.yml` | Dispatch this task to Copilot |
+| `agent:review` | You | `agent-03-review.yml` | Re-review this PR |
+| `planned` | Planner | — | Feature has been decomposed |
+| `review:*` | Reviewer | — | Last verdict on a PR |
+
+### Why planning and review are CLI sessions, not cloud agents
+
+The Copilot cloud agent is built to produce a diff: it opens a branch and a
+pull request, and its harness pushes toward committing something. An agent
+file that says "do not implement" is arguing with that harness, and it loses —
+which is exactly what happened to the first planner.
+
+The fix is not better prose. It is removing the capability:
+
+```
+--excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent"
+```
+
+Planner and reviewer therefore run as Copilot CLI sessions inside Actions,
+where tools can be taken away. The executor is the one role that runs *with*
+the cloud agent's grain, so it is the one role that runs as a cloud agent.
+
+**Do not run the planner or reviewer as a cloud agent from the Agents tab.**
+Their agent files are for `agent-01-planner.yml`, `agent-03-review.yml`, and
+interactive VS Code use.
+
+### Setup: the PROJECT_TOKEN secret
+
+Projects v2 is not writable with the default `GITHUB_TOKEN`, so every status
+transition needs a PAT in the repository secret `PROJECT_TOKEN`:
+
+```bash
+gh secret set PROJECT_TOKEN --repo stardustsuperwizard/sword-and-planet
+```
+
+Project 1 is **user-owned**, not repo-owned. That changes which permission you
+need:
+
+| PAT type | What to grant |
+| --- | --- |
+| Classic | `project` scope (plus `repo`) |
+| Fine-grained | **Account permissions → Projects: Read and write** — *not* a repository permission |
+
+Without it, the first status step fails and the run stops before spending any
+credits, which is the intended failure mode.
+
+The token is scoped to individual steps through
+`.github/actions/set-project-status`, never to the job. Keep it that way: a
+job-level PAT would sit in the environment of a Copilot CLI session running
+with `--allow-all-tools`.
 
 ### Step 1 — Planning
 
-1. File the feature Issue yourself using the **Feature** template. Human
-   Issues remain the source of truth for intended behavior.
-2. Go to the agents tab, select this repository, choose the **planner**
-   agent, set the model picker to **Claude Opus 5** and reasoning to
-   **high**.
-3. Point it at the Issue.
+1. File the Issue with one of the intake templates. Title starts with
+   `[plan]`; the template applies `plan` plus a type label.
+2. When the Issue is actually ready — not when you file it — add
+   **`agent:plan`**.
 
-The planner produces:
+`agent-01-planner.yml` then:
 
-- `docs/plans/<issue-number>-<slug>.md` from
-  `.github/templates/implementation-plan.md`
-- One **Implementation Task** sub-issue per promoted task in the plan, per
-  the Issue Promotion Criteria in `.github/agents/planner.agent.md`
+- moves the Feature to **Planning**;
+- builds a prompt from the Issue body, **its comments**, the planner agent
+  file, the task template, and a repository file inventory;
+- runs Copilot CLI with implementation tools removed;
+- validates the returned JSON structurally before it is allowed to create
+  anything — task count, required fields, unique IDs, no self-dependency, no
+  dangling `depends_on`, non-empty acceptance criteria;
+- creates one `[impl]` sub-issue per task with native `--parent` and
+  `--add-blocked-by` relationships;
+- posts the plan as a comment on the Feature;
+- moves the Feature to **In Progress** and each task to **Ready**.
 
-The plan file matters more than it looks. Implementation sessions start cold
-and never see the planner's reasoning — the plan is the only handoff. If a
-constraint is not written down, it does not exist.
+Comments are read as amendments to the body, and later comments win over the
+original text. The workflow skips its own machine comments so a re-plan does
+not read back its previous output as a requirement.
 
-If the planner records anything under **Escalations**, resolve it before
-starting implementation. Do not let a cheap model resolve architectural
-ambiguity.
+A second run is blocked by the `<!-- automated-planner-complete -->` marker.
+To genuinely re-plan, run the workflow manually with `force: true` — and close
+the stale sub-issues yourself first, because nothing removes them for you.
+
+### Step 2 — Execution
+
+For each Implementation Task, in dependency order, add **`agent:execute`**.
+
+`agent-02-execute.yml` is deliberately thin — it spends no AI credits:
+
+1. Refuses if the task has open `blocked-by` Issues, parks it at **Blocked**,
+   and removes the label. Override with the workflow's `ignore_blockers`
+   input.
+2. Moves the task to **In Progress**.
+3. Assigns `copilot-swe-agent` through GraphQL
+   `replaceActorsForAssignable`, passing `agentAssignment.customAgent` so the
+   session runs `.github/agents/02-executor.agent.md`.
+4. Removes `agent:execute` so re-adding it retries.
+
+**This workflow exists because of the mobile apps.** Assigning Copilot by hand
+from a phone gives you the default agent with no way to select a custom one.
+Going through the API is the only way to pin the executor profile from a
+client that has no picker.
+
+Caveat worth checking on the first run: programmatic assignment does not go
+through the model picker, so the session may not use Haiku 4.5. If the credit
+line looks wrong, that is the first thing to inspect. `customAgent` must match
+the `name:` frontmatter (`executor`), not the filename; if GitHub rejects it
+the workflow logs a warning and falls back to the default agent rather than
+stranding the task.
+
+### Step 3 — Review
+
+`agent-03-review.yml` runs automatically when a `copilot/*` branch's PR is
+marked ready for review, or any time you add **`agent:review`**.
+
+It answers the question the built-in Copilot code review does not: *is this
+diff complete against the acceptance criteria it was authorized by?* It walks
+the PR's `closingIssuesReferences` back to the Implementation Task, loads that
+contract plus the plan file, and reviews the diff against it criterion by
+criterion.
+
+The first line is machine-readable:
+
+| Verdict | Board effect | PR label | Next action |
+| --- | --- | --- | --- |
+| `PASS` | task → **In review** | `review:pass` | Merge, squash, delete branch |
+| `FIX` | task → **Blocked** | `review:fix` | Bounded correction on the same PR |
+| `PLANNING FAILURE` | task → **Blocked** | `review:planning-failure` | Revise the plan, re-delegate |
+| `DESIGN AMBIGUITY` | task → **Blocked** | `review:design-ambiguity` | Stop, decide it yourself |
+
+Fix cycles are **not** dispatched automatically. Nothing re-summons Copilot on
+an adverse verdict, because an auto-fix loop can burn credits without
+converging. Read the review, then either comment `@copilot` on the PR for a
+bounded correction or re-plan.
+
+If a task takes more than two `FIX` cycles, that is a planning problem, not an
+implementation problem. Record it.
+
+### Step 4 — Rollup
+
+`agent-04-rollup.yml` fires on any Issue closing or reopening. No AI credits.
+
+- A closed sub-issue moves to **Done**; a reopened one returns to **Ready**.
+- When the last open sibling closes, the parent Feature moves to
+  **In review** and gets a comment saying what is left.
+
+What is left is human: confirm the Feature's own acceptance criteria hold end
+to end, do the **Human Validation Required** checks in the Godot editor, then
+close the Feature. Nothing moves a Feature to **Done** automatically — that
+transition is the human sign-off, and automating it would remove the only
+checkpoint in the pipeline.
+
+Child states are read from `subIssues.nodes[].state` rather than the cached
+`subIssuesSummary` counters, which can lag the close event.
 
 ### Issue hierarchy
 
 The Feature Issue is the parent and remains the source of truth for intended
 behavior. Every promoted Implementation Task is a direct GitHub sub-issue of
 that Feature. Writing the parent number in an Issue body is not sufficient;
-the GitHub sub-issue relationship must exist.
+the GitHub sub-issue relationship must exist — `agent-01-planner.yml` creates
+it with `gh issue create --parent`, and sibling ordering with
+`gh issue edit --add-blocked-by`. Both need a recent `gh`; the runner image
+ships one, but pin it if a run ever fails on an unknown flag.
 
 Each implementation sub-issue:
 
-- uses the **Implementation Task** template;
+- follows `.github/ISSUE_TEMPLATE/99-execute_task.md`;
 - has the same milestone as its parent Feature;
-- carries `implementation`, `machine`, and `agent:implement`;
+- carries `implementation` and `machine`, and gets `agent:execute` from you
+  when it is time to run;
 - records sibling ordering with GitHub issue dependencies;
-- is the only Issue assigned to the implementation agent; and
+- is the only Issue assigned to the executor; and
 - is closed by its own implementation PR.
 
-The parent Feature stays open while its sub-issues are implemented. Close it
-only after all required sub-issues are integrated, validation passes, and the
-reviewer returns `PASS`. The Project's Parent issue and Sub-issue progress
-fields provide the rollup.
+The parent Feature stays open while its sub-issues are implemented.
+`agent-04-rollup.yml` moves it to **In review** when the last one closes; you
+close it.
 
 ### Project board
 
@@ -177,63 +353,67 @@ their own item on the board, distinguished by two fields:
 There is no separate Planner Status / Implementation Status pair; both roles
 write the same Status field on their own item.
 
-`planner-feature.yml` drives Status on the Feature item automatically:
-`Backlog` → `Planning` at the start of the run, then `In Progress` if the run
-completes without error, or `Blocked` if it fails. This requires a
-`PROJECT_TOKEN` repository secret (a PAT with Projects read/write) since the
-default `GITHUB_TOKEN` cannot write to Projects v2.
+Every transition goes through the `.github/actions/set-project-status`
+composite action, so the token handling and the field names live in one file
+rather than in four workflows:
 
-### Step 2 — Implementation
-
-For each Implementation Task sub-issue, in dependency order:
-
-1. Assign the Issue to Copilot.
-2. Set the model picker to **Claude Haiku 4.5**. Not Auto.
-3. Let it run to a draft PR.
-
-The implementer must run `.github/scripts/validate-godot.sh` and report the
-command and result. Work it finds but was not asked to do goes in the PR's
-**Discovered out-of-scope work** section — it does not file Issues and does
-not implement them.
-
-Tasks with `Depends on:` set wait for their dependency to merge. Record the
-same relationship using GitHub's blocked-by link so it is visible outside the
-Issue body. Per CONTRIBUTING.md, new work starts from the latest `main`; do
-not stack PRs. Each implementation PR closes only its assigned sub-issue, not
-the parent Feature.
-
-### Step 3 — Review
-
-1. Comment `@copilot` on the draft PR with the review request.
-2. Set the model picker to **Claude Opus 5**, reasoning **high**.
-
-The reviewer opens with a machine-readable verdict line and does not modify
-code:
-
-| Verdict | Next action | Model |
+| Item | Status | Set by |
 | --- | --- | --- |
-| `PASS` | Merge, squash, delete branch | — |
-| `FIX` | Bounded correction on the same PR | Haiku 4.5 |
-| `PLANNING FAILURE` | Revise the plan, re-delegate | Opus 5 |
-| `DESIGN AMBIGUITY` | Stop, ask the human | — |
+| Feature | `Planning` | `agent-01-planner.yml`, at start |
+| Feature | `In Progress` | `agent-01-planner.yml`, on success |
+| Feature | `Blocked` | `agent-01-planner.yml`, on failure |
+| Task | `Ready` | `agent-01-planner.yml`, at creation |
+| Task | `In Progress` | `agent-02-execute.yml`, on dispatch |
+| Task | `Blocked` | `agent-02-execute.yml` when blocked; `agent-03-review.yml` on an adverse verdict |
+| Task | `In review` | `agent-03-review.yml`, on `PASS` |
+| Task | `Done` | `agent-04-rollup.yml`, when the Issue closes |
+| Feature | `In review` | `agent-04-rollup.yml`, when the last sub-issue closes |
+| Feature | `Done` | **You.** Never automated. |
 
-`FIX` returns to the cheap model deliberately. If a task takes more than two
-`FIX` cycles, that is a signal the task was under-specified — treat it as a
-planning problem, not an implementation problem, and record it.
+`Backlog` is the intake state and nothing writes it; the project's built-in
+auto-add sets it when an Issue first lands on the board.
 
 ## When to collapse to one session
 
-Split sessions cost three kickoffs of overhead. For small, mechanical, fully
-specified work — a rename, a doc fix, a Task-template Issue with no
-architectural content — assign it directly to Copilot on **Haiku 4.5** and
-skip planning. Review still applies if the change touches `.tscn`, `.tres`,
-`project.godot`, or anything under `addons/`.
+The full pipeline costs four workflow runs of overhead. For small, mechanical,
+fully specified work — a rename, a doc fix, a Task-template Issue with no
+architectural content — skip planning: file the Issue, add `agent:execute`
+directly, and let `agent-02-execute.yml` dispatch it. Review still applies if
+the change touches `.tscn`, `.tres`, `project.godot`, or anything under
+`addons/`.
+
+`agent-02-execute.yml` does not require an Issue to have come from the
+planner. It only requires that the Issue be open and unblocked.
+
+## Where the handoff contract lives
+
+There is no plan file. The planner writes no repository files at all — its
+`tools:` list grants no `edit`, which is the same capability-removal fix that
+stopped it implementing features.
+
+The contract is split across two durable places, both of which a cold
+execution session can read:
+
+| Artifact | Carries |
+| --- | --- |
+| The `[impl]` sub-issue body | Objective, scope, expected files, architecture constraints, acceptance criteria, out of scope, dependencies |
+| The plan comment on the Feature | Plan summary, architecture notes, the task list with Issue numbers |
+
+The sub-issue is authoritative. The executor is given exactly one Issue and
+never sees the planner's session, so **anything an executor needs must be in
+the sub-issue body** — not in the plan comment, and not in the parent Feature.
+The parent is context only and does not expand scope.
+
+This is why `agent-01-planner.yml` validates the plan JSON structurally before
+creating anything: a task with empty acceptance criteria or a dangling
+`depends_on` would become an Issue that cannot be executed cold, and the run
+fails instead.
 
 ## Running in VS Code
 
 In VS Code the `model:` frontmatter is honored, so the three profiles route
 themselves and the planner can delegate in-session via the `agent` tool. This
-is the faster path and the right one for exploratory work; the split-session
+is the faster path and the right one for exploratory work; the workflow-driven
 flow above is for work that lands on `main`.
 
 Caveat: [copilot-cli#2564](https://github.com/github/copilot-cli/issues/2564)
@@ -312,15 +492,18 @@ example schema — do not expect clean per-model cost.
 
 | File | Purpose |
 | --- | --- |
-| `.github/agents/planner.agent.md` | Planner role, Issue promotion criteria |
-| `.github/agents/implementer.agent.md` | Implementer role, scope boundaries |
-| `.github/agents/reviewer.agent.md` | Reviewer role, verdict classification |
+| `.github/workflows/agent-01-planner.yml` | Decomposes a Feature into `[impl]` sub-issues |
+| `.github/workflows/agent-02-execute.yml` | Dispatches one task to the Copilot cloud agent |
+| `.github/workflows/agent-03-review.yml` | Reviews a PR against its task contract, emits a verdict |
+| `.github/workflows/agent-04-rollup.yml` | Task → Done, and parent → In review when the last one closes |
+| `.github/actions/set-project-status/` | Shared Projects v2 plumbing; the only place `PROJECT_TOKEN` is read |
+| `.github/agents/01-planner.agent.md` | Planner role, Issue promotion criteria |
+| `.github/agents/02-executor.agent.md` | Executor role, scope boundaries |
+| `.github/agents/03-reviewer.agent.md` | Reviewer role, verdict classification |
 | `.github/scripts/validate-godot.sh` | Single source of truth for validation; CI and agents call it |
 | `.github/scripts/agent-metrics.py` | Tier A outcome metrics from merged PRs |
-| `.github/ISSUE_TEMPLATE/07-implementation.md` | Planner-emitted bounded task |
+| `.github/ISSUE_TEMPLATE/99-execute_task.md` | Planner-emitted bounded task |
 | `.github/pull_request_template.md` | Handoff record, verdict, model metadata |
-| `.github/templates/implementation-plan.md` | Planner output format |
-| `docs/plans/` | Committed plans, one per feature Issue |
 
 ## Sources
 

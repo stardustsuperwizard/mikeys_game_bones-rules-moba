@@ -1,0 +1,485 @@
+name: Review Task
+
+# Reviews a Copilot implementation pull request against the Implementation
+# Task Issue that authorizes it, and emits a machine-readable verdict.
+#
+# This runs as a Copilot CLI session rather than a cloud agent for the same
+# reason the planner does: the cloud agent is built to produce a diff, and a
+# reviewer must not. Tools capable of editing or executing are removed rather
+# than merely discouraged.
+#
+# GitHub's built-in Copilot code review is complementary, not a replacement --
+# it reviews code quality but does not check the diff against the Issue's
+# acceptance criteria.
+
+on:
+  pull_request:
+    types:
+      - ready_for_review
+      - labeled
+
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull Request number to review"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  copilot-requests: write
+
+concurrency:
+  group: agent-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Review Task
+    runs-on: ubuntu-latest
+
+    # Automatic on a Copilot branch becoming ready; manual anywhere else via
+    # the agent:review label, which works from the GitHub mobile apps.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' &&
+       github.event.label.name == 'agent:review') ||
+      (github.event.action == 'ready_for_review' &&
+       startsWith(github.event.pull_request.head.ref, 'copilot/'))
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+
+      PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
+
+      PROJECT_OWNER: stardustsuperwizard
+      PROJECT_NUMBER: "1"
+
+      # docs/AGENT_WORKFLOW.md routes review to the stronger model. Change
+      # this to the Copilot CLI id for Claude Opus 5 once you have confirmed
+      # the id against `copilot --help`; it is left on the planner's known-good
+      # model so the first run does not fail on an unrecognised name.
+      REVIEWER_MODEL: gpt-5.4
+
+      REVIEWER_MAX_AI_CREDITS: "20"
+
+      # Reviewing a very large diff costs more than it is worth; past this
+      # the diff is truncated and the verdict says so.
+      MAX_DIFF_CHARS: "150000"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install GitHub Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Resolve Pull Request and Task Contract
+        id: context
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json number,title,body,url,headRefName,isDraft,files \
+            > pr.json
+
+          gh pr diff "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            > pr.diff
+
+          # The Issue the PR closes is the authoritative work contract.
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          NAME="${GITHUB_REPOSITORY##*/}"
+
+          gh api graphql \
+            -f owner="$OWNER" \
+            -f name="$NAME" \
+            -F number="$PR_NUMBER" \
+            -f query='
+              query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                  pullRequest(number: $number) {
+                    closingIssuesReferences(first: 10) {
+                      nodes { number title url }
+                    }
+                  }
+                }
+              }
+            ' \
+            --jq '.data.repository.pullRequest.closingIssuesReferences.nodes' \
+            > closing-issues.json
+
+          TASK_NUMBER=$(jq -r '.[0].number // empty' closing-issues.json)
+
+          if [ -z "$TASK_NUMBER" ]; then
+            echo "::warning::PR #$PR_NUMBER does not close any Issue." \
+                 "There is no acceptance-criteria contract to review against."
+            echo "has_task=false" >> "$GITHUB_OUTPUT"
+            echo '{}' > task.json
+          else
+            echo "has_task=true" >> "$GITHUB_OUTPUT"
+            echo "task_number=$TASK_NUMBER" >> "$GITHUB_OUTPUT"
+
+            gh issue view "$TASK_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json number,title,body,url,parent \
+              > task.json
+
+            echo "Reviewing PR #$PR_NUMBER against Task #$TASK_NUMBER"
+          fi
+
+          echo "pr_url=$(jq -r '.url' pr.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Build Reviewer Request
+        shell: python
+        run: |
+          import json
+          import os
+          import pathlib
+
+          root = pathlib.Path(".")
+          max_diff = int(os.environ["MAX_DIFF_CHARS"])
+
+          pr = json.loads(pathlib.Path("pr.json").read_text())
+          task = json.loads(pathlib.Path("task.json").read_text())
+
+          sections = []
+
+          # The reviewer role definition is the same file used interactively
+          # in VS Code, so the two paths cannot drift apart.
+          role = root / ".github/agents/03-reviewer.agent.md"
+
+          if role.exists():
+              sections.append(
+                  "# REVIEWER ROLE DEFINITION\n\n"
+                  + role.read_text(errors="replace")
+              )
+          else:
+              raise RuntimeError(
+                  "Missing .github/agents/03-reviewer.agent.md"
+              )
+
+          for filename in ("AGENTS.md", ".github/copilot-instructions.md"):
+              path = root / filename
+
+              if path.exists():
+                  sections.append(
+                      f"# REPOSITORY FILE: {filename}\n\n"
+                      + path.read_text(errors="replace")[:20000]
+                  )
+
+          if task:
+              sections.append(
+                  "# IMPLEMENTATION TASK (AUTHORITATIVE WORK CONTRACT)\n\n"
+                  f"Number: #{task['number']}\n"
+                  f"Title: {task['title']}\n\n"
+                  f"{task.get('body') or ''}"
+              )
+
+              parent = task.get("parent")
+
+              if parent:
+                  sections.append(
+                      "# PARENT FEATURE (CONTEXT ONLY)\n\n"
+                      f"#{parent['number']} {parent['title']}\n\n"
+                      "This does not expand the task's scope."
+                  )
+
+          else:
+              sections.append(
+                  "# IMPLEMENTATION TASK\n\n"
+                  "This pull request does not close any Issue, so no "
+                  "acceptance-criteria contract is available. Review "
+                  "against repository conventions only and return "
+                  "DESIGN AMBIGUITY if intent cannot be determined."
+              )
+
+          sections.append(
+              "# PULL REQUEST\n\n"
+              f"Number: #{pr['number']}\n"
+              f"Title: {pr['title']}\n"
+              f"Branch: {pr['headRefName']}\n\n"
+              f"{pr.get('body') or ''}"
+          )
+
+          changed = "\n".join(
+              f"- {entry['path']} "
+              f"(+{entry['additions']}/-{entry['deletions']})"
+              for entry in pr.get("files", [])
+          )
+
+          sections.append(
+              f"# FILES CHANGED\n\n{changed or '- none'}"
+          )
+
+          diff = pathlib.Path("pr.diff").read_text(errors="replace")
+          truncated = len(diff) > max_diff
+
+          if truncated:
+              diff = diff[:max_diff]
+
+          sections.append(
+              "# FINAL INTEGRATED DIFF\n\n"
+              + ("**The diff was truncated. Say so in your reasoning and "
+                 "do not return PASS on unreviewed content.**\n\n"
+                 if truncated else "")
+              + "```diff\n"
+              + diff
+              + "\n```"
+          )
+
+          context = "\n\n---\n\n".join(sections)
+
+          prompt = f"""
+          You are the review agent for Sword and Planet.
+
+          You are NOT an implementation agent.
+
+          Review the supplied pull request against the Implementation Task
+          contract and report a verdict.
+
+          HARD RULES:
+
+          - Do not edit repository files.
+          - Do not execute shell commands.
+          - Do not create or modify GitHub Issues or comments yourself.
+          - Do not implement fixes.
+          - Do not review work the task explicitly places out of scope.
+          - Do not invent requirements absent from the contract.
+          - Judge completeness against the Acceptance Criteria, one by one.
+
+          Your first line MUST be exactly one of:
+
+          VERDICT: PASS
+          VERDICT: FIX
+          VERDICT: PLANNING FAILURE
+          VERDICT: DESIGN AMBIGUITY
+
+          After that line, output Markdown with these sections:
+
+          ## Acceptance Criteria
+
+          A table with columns: Criterion | Met | Evidence.
+          Cite the file and change that satisfies each criterion, or state
+          plainly that nothing in the diff satisfies it.
+
+          ## Scope Adherence
+
+          Note any change outside the task's stated scope or expected files,
+          and any acceptance criterion left unimplemented.
+
+          ## Findings
+
+          Numbered, most serious first. Each finding gives the file, what is
+          wrong, and why it matters. Write "None" if there are none.
+
+          ## Required Before Merge
+
+          Bullet list of what must change for this to become PASS.
+          Write "Nothing" when the verdict is PASS.
+
+          Be concise. Do not restate the diff.
+
+          CONTEXT FOLLOWS.
+
+          {context}
+          """
+
+          pathlib.Path("reviewer-prompt.txt").write_text(prompt)
+
+          print(f"Prompt built: {len(prompt)} chars, truncated={truncated}")
+
+      - name: Run Reviewer with Copilot CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Same capability-removal posture as the planner: the reviewer can
+          # read the checkout but holds no tool that can change it.
+          copilot \
+            -p "$(cat reviewer-prompt.txt)" \
+            --model "$REVIEWER_MODEL" \
+            --output-format json \
+            --no-ask-user \
+            --max-ai-credits "$REVIEWER_MAX_AI_CREDITS" \
+            --allow-all-tools \
+            --excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent" \
+            > copilot-output.jsonl
+
+      - name: Extract Verdict
+        id: verdict
+        shell: python
+        run: |
+          import json
+          import os
+          import pathlib
+          import re
+
+          jsonl = pathlib.Path("copilot-output.jsonl")
+
+          parts = []
+
+          for raw_line in jsonl.read_text(errors="replace").splitlines():
+              raw_line = raw_line.strip()
+
+              if not raw_line:
+                  continue
+
+              try:
+                  event = json.loads(raw_line)
+              except json.JSONDecodeError:
+                  continue
+
+              if event.get("type") != "assistant.message":
+                  continue
+
+              content = (event.get("data") or {}).get("content")
+
+              if isinstance(content, str):
+                  parts.append(content)
+
+          if not parts:
+              raise RuntimeError(
+                  "Copilot CLI returned no assistant.message content"
+              )
+
+          text = "\n".join(parts).strip()
+
+          if text.startswith("```"):
+              lines = text.splitlines()[1:]
+
+              if lines and lines[-1].strip() == "```":
+                  lines = lines[:-1]
+
+              text = "\n".join(lines).strip()
+
+          match = re.search(
+              r"^\s*VERDICT:\s*"
+              r"(PASS|FIX|PLANNING FAILURE|DESIGN AMBIGUITY)\s*$",
+              text,
+              re.MULTILINE,
+          )
+
+          if not match:
+              raise RuntimeError(
+                  "Reviewer did not emit a recognisable VERDICT line.\n\n"
+                  + text[:2000]
+              )
+
+          verdict = match.group(1)
+
+          pathlib.Path("review.md").write_text(text + "\n")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"verdict={verdict}\n")
+              handle.write(
+                  "slug="
+                  + verdict.lower().replace(" ", "-")
+                  + "\n"
+              )
+
+          print(f"VERDICT: {verdict}")
+
+      - name: Publish Review
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "<!-- agent-review-verdict -->"
+            echo ""
+            echo "## Automated Review — \`${{ steps.verdict.outputs.verdict }}\`"
+            echo ""
+            cat review.md
+            echo ""
+            echo "---"
+            echo ""
+            echo "Reviewed by \`.github/agents/03-reviewer.agent.md\` via" \
+                 "\`agent-03-review.yml\` on \`$REVIEWER_MODEL\`."
+            echo "Re-run by adding the \`agent:review\` label."
+          } > review-comment.md
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file review-comment.md
+
+          cat review-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply Verdict Label
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ensure_label () {
+            if ! gh label list \
+                --repo "$GITHUB_REPOSITORY" \
+                --limit 200 \
+                --json name \
+                --jq '.[].name' |
+                grep -Fxq "$1"
+            then
+              gh label create "$1" \
+                --repo "$GITHUB_REPOSITORY" \
+                --color "$2" \
+                --description "$3"
+            fi
+          }
+
+          ensure_label "review:pass" "0E8A16" "Automated review returned PASS"
+          ensure_label "review:fix" "D93F0B" "Automated review returned FIX"
+          ensure_label "review:planning-failure" "B60205" \
+            "Automated review returned PLANNING FAILURE"
+          ensure_label "review:design-ambiguity" "FBCA04" \
+            "Automated review returned DESIGN AMBIGUITY"
+
+          for STALE in review:pass review:fix review:planning-failure \
+                       review:design-ambiguity; do
+            gh pr edit "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$STALE" || true
+          done
+
+          gh pr edit "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --add-label "review:${{ steps.verdict.outputs.slug }}"
+
+          # The label is consumed so re-adding it is a clean re-review signal.
+          gh pr edit "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "agent:review" || true
+
+      - name: Move Task to In Review on Pass
+        if: >
+          steps.verdict.outputs.verdict == 'PASS' &&
+          steps.context.outputs.has_task == 'true'
+        uses: ./.github/actions/set-project-status
+        with:
+          token: ${{ secrets.PROJECT_TOKEN }}
+          owner: ${{ env.PROJECT_OWNER }}
+          project-number: ${{ env.PROJECT_NUMBER }}
+          url: https://github.com/${{ github.repository }}/issues/${{ steps.context.outputs.task_number }}
+          status: In review
+          work-type: Implementation
+
+      - name: Move Task to Blocked on Adverse Verdict
+        if: >
+          steps.verdict.outputs.verdict != 'PASS' &&
+          steps.context.outputs.has_task == 'true'
+        uses: ./.github/actions/set-project-status
+        with:
+          token: ${{ secrets.PROJECT_TOKEN }}
+          owner: ${{ env.PROJECT_OWNER }}
+          project-number: ${{ env.PROJECT_NUMBER }}
+          url: https://github.com/${{ github.repository }}/issues/${{ steps.context.outputs.task_number }}
+          status: Blocked
+          work-type: Implementation

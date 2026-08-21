@@ -23,9 +23,9 @@ Human-authored GitHub Issues and project documentation remain the
 source of truth for intended behavior.
 
 Roles, model routing, and the session flow are defined in
-`docs/AGENT_WORKFLOW.md`. Implementation sessions start cold: the
-implementation plan in `docs/plans/` and the task Issue are the only
-context carried across the handoff.
+`docs/AGENT_WORKFLOW.md`. Execution sessions start cold: the task Issue
+is the only context carried across the handoff. If a constraint is not
+written in the Issue, it does not exist.
 
 When work is delegated by a planning agent:
 
