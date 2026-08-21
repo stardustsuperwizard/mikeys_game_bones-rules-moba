@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: Reviews completed Sword and Planet feature implementations
+model: Claude Opus 5
 tools: ["read", "search"]
 user-invocable: true
 ---

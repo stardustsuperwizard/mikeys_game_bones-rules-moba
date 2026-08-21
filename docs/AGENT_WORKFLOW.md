@@ -23,7 +23,8 @@ Consequence: per-role model routing on github.com requires **separate
 sessions**, not subagent delegation. That is the workflow below.
 
 The `model:` lines in `.github/agents/*.agent.md` are still correct and still
-maintained — they take effect when the same profiles are run from VS Code.
+maintained — they take effect when the same profiles are run from VS Code,
+JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 
 ## Model routing
 
@@ -84,20 +85,38 @@ applies: it is in the Issue body, and in *Executing an Implementation Task* in
 Label mode remains for mechanical work where the model does not matter. Avoid
 it for anything touching `.tscn`, `.tres`, `project.godot`, or `addons/`.
 
-### Do not put `model:` in an agent file
+### `model:` in an agent file takes a display name
 
-All three agent files used to carry `model: Claude Haiku 4.5` and similar.
-That is a **display name**, not a model identifier — identifiers are
-lowercase and hyphenated, like `claude-haiku-4.5` or the `gpt-5.4` these
-workflows pass to the CLI.
+All three agent files carry a `model:` line again:
 
-The property was believed to be ignored on github.com, which made the wrong
-value harmless. It is a prime suspect for a custom agent erroring at session
-start, so it has been removed from all three files. Nothing is lost: planner
-and reviewer take their model from workflow env, and interactive sessions take
-it from the picker.
+| File | `model:` |
+| --- | --- |
+| `01-planner.agent.md` | `Claude Opus 5` |
+| `02-executor.agent.md` | `Claude Haiku 4.5` |
+| `03-reviewer.agent.md` | `Claude Opus 5` |
 
-If you add it back, use an identifier and verify it resolves.
+They were removed once on the theory that `Claude Haiku 4.5` is a display
+name where an identifier was wanted, and that a bad value was making custom
+agents error at session start. Both halves of that were wrong, and the
+correction matters because the two config formats do not agree:
+
+- **Agent files take the display name.** VS Code documents `model:` as the
+  name shown in the model picker, optionally vendor-qualified
+  (`Claude Opus 5 (copilot)`), and accepts an array tried in order. So
+  `Claude Haiku 4.5` was always the right spelling here.
+- **Copilot CLI takes the lowercase identifier.** That is the `claude-opus-5`
+  and `gpt-5.4` form the workflows pass via `--model`. Do not copy those
+  strings into an agent file, or the display names out of one into a workflow.
+
+An unresolvable `model:` is also not fatal: VS Code falls back to whatever is
+selected in the model picker, so it could not have been the session-start
+error. Keep the values in the table above in sync with the routing table, and
+confirm a new one appears in the picker's autocomplete before committing it.
+
+The property is still ignored by the cloud agent on github.com, so this
+changes nothing about the routing above — planner and reviewer keep taking
+their model from workflow env, and cloud sessions keep taking theirs from the
+picker.
 
 
 Rationale: reasoning is worth paying for where decisions are made, not where
