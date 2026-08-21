@@ -23,6 +23,12 @@ func _ready() -> void:
 		if ability_data_passed:
 			print("\nAbility Data Test PASSED")
 		
+		# Run the combatant test
+		var combatant_passed = CombatantTest.run()
+		
+		if combatant_passed:
+			print("\nCombatant Test PASSED")
+		
 		# Exit after the tests complete to avoid loading the main scene
 		call_deferred("_quit_engine")
 
