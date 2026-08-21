@@ -485,7 +485,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: https://github.com/${{ github.repository }}/issues/${{ steps.context.outputs.task_number }}
           status: In review
-          work-type: Implementation
 
       - name: Move Task to Blocked on Adverse Verdict
         if: >
@@ -498,4 +497,3 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: https://github.com/${{ github.repository }}/issues/${{ steps.context.outputs.task_number }}
           status: Blocked
-          work-type: Implementation

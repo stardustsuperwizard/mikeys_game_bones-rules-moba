@@ -223,7 +223,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: ${{ steps.issue.outputs.url }}
           status: Blocked
-          work-type: Implementation
 
       - name: Stop Because Blocked
         if: steps.blockers.outputs.blocked == 'true'
@@ -252,7 +251,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: ${{ steps.issue.outputs.url }}
           status: In Progress
-          work-type: Implementation
 
       - name: Assign Copilot Coding Agent
         if: >
@@ -390,7 +388,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: ${{ steps.issue.outputs.url }}
           status: Blocked
-          work-type: Implementation
 
   # -------------------------------------------------------------------
   # Any session that reaches a draft pull request moves its task to

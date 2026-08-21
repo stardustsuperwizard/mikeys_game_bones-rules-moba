@@ -69,7 +69,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
           status: Planning
-          work-type: Planning
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -1039,13 +1038,7 @@ jobs:
               --field "Status" \
               --value "Ready"
 
-            gh project item-edit "$PROJECT_NUMBER" \
-              --owner "$PROJECT_OWNER" \
-              --url "$TASK_URL" \
-              --field "Work Type" \
-              --value "Implementation"
-
-            echo "Board: Ready / Implementation for $TASK_URL"
+            echo "Board: Ready for $TASK_URL"
           done
 
       - name: Move Feature to In Progress
@@ -1057,7 +1050,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
           status: In Progress
-          work-type: Planning
 
       - name: Move Feature to Blocked
         if: failure()
@@ -1068,4 +1060,3 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
           status: Blocked
-          work-type: Planning
