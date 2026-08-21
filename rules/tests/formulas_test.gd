@@ -6,8 +6,9 @@
 class_name FormulasTest
 
 
-const TOLERANCE = 0.0001  # Tolerance for floating-point comparisons
-const TOLERANCE_PHYSICAL = 0.01  # Tolerance for physical_damage worked example
+## Helper function to compare floats with tolerance
+static func _approx_equal(a: float, b: float, tolerance: float = 0.0001) -> bool:
+	return abs(a - b) < tolerance
 
 
 ## Run the formulas test suite.
@@ -75,7 +76,7 @@ static func _test_mitigation_multiplier_hundred() -> Array[String]:
 	var violations: Array[String] = []
 	
 	var result = MobaFormulas.mitigation_multiplier(100.0)
-	if not is_equal_approx(result, 0.5, TOLERANCE):
+	if not _approx_equal(result, 0.5, 0.0001):
 		violations.append("mitigation_multiplier(100.0): expected 0.5, got %f" % result)
 	
 	return violations
@@ -97,7 +98,7 @@ static func _test_physical_damage_worked_example() -> Array[String]:
 	var violations: Array[String] = []
 	
 	var result = MobaFormulas.physical_damage(50.0, 50.0)
-	if not is_equal_approx(result, 33.33, TOLERANCE_PHYSICAL):
+	if not _approx_equal(result, 33.33, 0.01):
 		violations.append("physical_damage(50.0, 50.0): expected 33.33, got %f" % result)
 	
 	return violations
@@ -108,7 +109,7 @@ static func _test_effective_defense_with_penetration() -> Array[String]:
 	var violations: Array[String] = []
 	
 	var result = MobaFormulas.effective_defense(100.0, 20.0, 0.30)
-	if not is_equal_approx(result, 56.0, TOLERANCE):
+	if not _approx_equal(result, 56.0, 0.0001):
 		violations.append("effective_defense(100.0, 20.0, 0.30): expected 56.0, got %f" % result)
 	
 	return violations
@@ -148,7 +149,7 @@ static func _test_effective_cooldown() -> Array[String]:
 	
 	# Test with 100 ability haste (should return 5.0)
 	var result_haste = MobaFormulas.effective_cooldown(10.0, 100.0)
-	if not is_equal_approx(result_haste, 5.0, TOLERANCE):
+	if not _approx_equal(result_haste, 5.0, 0.0001):
 		violations.append("effective_cooldown(10.0, 100.0): expected 5.0, got %f" % result_haste)
 	
 	# Test with 0 ability haste (should return 10.0)
@@ -181,7 +182,7 @@ static func _test_expected_crit_multiplier() -> Array[String]:
 	
 	# Test with 5% crit chance (should return 1.05)
 	var result_five = MobaFormulas.expected_crit_multiplier(0.05, 2.0)
-	if not is_equal_approx(result_five, 1.05, TOLERANCE):
+	if not _approx_equal(result_five, 1.05, 0.0001):
 		violations.append("expected_crit_multiplier(0.05, 2.0): expected 1.05, got %f" % result_five)
 	
 	# Test with 100% crit chance (should return 2.0)
