@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sword-and-planet-sim"
+version = "0.1.0"
+description = "Python balance harness for Sword and Planet MOBA RPG"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.4",
+    "hypothesis==6.92.1",
+    "numpy==1.26.3",
+    "jsonschema==4.20.0",
+]
+
+[tool.pytest.ini_options]
+minversion = "7.4"
+testpaths = ["tests"]
+markers = [
+    "deep: marks tests as deep suite (slow, deferred to scheduled runs)",
+]
+strict_markers = true
+addopts = "--strict-markers"
