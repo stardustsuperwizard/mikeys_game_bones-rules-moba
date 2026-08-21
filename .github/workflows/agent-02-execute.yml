@@ -28,6 +28,17 @@ on:
   # A pasted agent session -- the mobile and agents-panel path -- is neither
   # an assignment nor a label, so the draft pull request the session opens
   # early is the only "work has started" signal available for it.
+  #
+  # `opened` only, never `synchronize`: this asks "did work just start", not
+  # "did the branch change". The job below narrows it further to pull requests
+  # that actually came from an agent session -- a human pull request resolves
+  # no dispatched task, so every one of them was booting a runner to look up
+  # an empty `closingIssuesReferences` and stop.
+  #
+  # Note there is no `paths` filter here, and one would be wrong. Relevance
+  # has nothing to do with which files changed: an agent session that touches
+  # only markdown still needs its blockers checked, and a human pull request
+  # rewriting every `.gd` in the repository still does not.
   pull_request:
     types:
       - opened
@@ -56,9 +67,23 @@ jobs:
     name: Check Dependencies
     runs-on: ubuntu-latest
 
+    # Two independent signals for "this pull request is an agent session", so
+    # the guard survives either one changing. Copilot names every branch it
+    # opens `copilot/*` -- the same test `agent-03-review.yml` already uses --
+    # and authors the pull request as the `Copilot` bot. Note that login
+    # differs from the `copilot-swe-agent` assignee login below; that is
+    # GitHub's inconsistency, not a typo here.
+    #
+    # A false negative here costs the blocker warning on a hand-written pull
+    # request that closes an Implementation Task. That is the accepted trade:
+    # this workflow exists for the blocker a *dispatch* forgets, and a human
+    # writing the code is already looking at the Issue. `workflow_dispatch`
+    # covers the exception.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'pull_request' ||
+      (github.event_name == 'pull_request' &&
+       (startsWith(github.event.pull_request.head.ref, 'copilot/') ||
+        github.event.pull_request.user.login == 'Copilot')) ||
       (github.event.action == 'assigned' &&
        github.event.assignee.login == 'copilot-swe-agent')
 

@@ -457,6 +457,13 @@ when you assign Copilot, and when a session opens its draft pull request, and
 does exactly one thing: if the task still has an open `blocked-by` Issue, it
 says so in a comment on the task.
 
+The pull-request path is scoped to agent sessions — a `copilot/*` branch or a
+pull request authored by the Copilot bot, either signal being enough. Your own
+pull requests skip the job entirely rather than starting a runner to discover
+they dispatched nothing. The cost of that scoping is a hand-written pull
+request that closes an Implementation Task, which gets no blocker warning; run
+the workflow by hand if you want one.
+
 It warns rather than refuses, and never cancels. By the time it runs the
 session has already started, and unassigning a live agent orphans its branch
 rather than reliably stopping it — so whether to let it finish is your call.
