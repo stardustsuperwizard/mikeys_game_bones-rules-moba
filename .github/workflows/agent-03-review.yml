@@ -58,10 +58,18 @@ jobs:
       PROJECT_OWNER: stardustsuperwizard
       PROJECT_NUMBER: "1"
 
-      # Review is the correctness gate, so it gets the strong model.
-      # Overridable without a commit via the REVIEWER_MODEL repository
-      # variable.
-      REVIEWER_MODEL: ${{ vars.REVIEWER_MODEL || 'claude-opus-5' }}
+      # Review is the correctness gate, so it gets the strong model. This is
+      # a *preference list*, not a single id — see the long note in
+      # agent-01-planner.yml for why availability is per-identity and a
+      # picker-visible model can still be refused to this job.
+      #
+      # Every entry stays in the strong tier; a cheap reviewer is worse than
+      # no reviewer. Overridable via the REVIEWER_MODELS repository variable
+      # (comma-separated); the older REVIEWER_MODEL is honoured first if set.
+      REVIEWER_MODELS: >-
+        ${{ vars.REVIEWER_MODELS
+        || vars.REVIEWER_MODEL
+        || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
 
       REVIEWER_MAX_AI_CREDITS: "20"
 
@@ -301,16 +309,29 @@ jobs:
       # Copilot CLI model ids are not published as a stable list; they are
       # shown in the --model help text. Dumping them costs nothing and means
       # a rejected id is self-diagnosing instead of a mystery failure.
+      # The help text lists what the CLI supports, which is a superset of what
+      # this workflow's identity is entitled to. Goes to the log as well as the
+      # summary, because the summary is not where anyone looks when a job fails.
       - name: Show Available Models
         continue-on-error: true
         shell: bash
         run: |
           set +e
+
+          copilot --version
+          copilot --help 2>&1 | sed -n '/--model/,/^[[:space:]]*$/p' \
+            > model-help.txt
+
+          echo "Candidate models for this run: $REVIEWER_MODELS"
+          cat model-help.txt
+
           {
             echo "<details><summary>Copilot CLI model ids</summary>"
             echo ""
+            echo "Candidates tried in order: \`$REVIEWER_MODELS\`"
+            echo ""
             echo '```'
-            copilot --help 2>&1 | sed -n '/--model/,/^[[:space:]]*$/p'
+            cat model-help.txt
             echo '```'
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -322,15 +343,60 @@ jobs:
 
           # Same capability-removal posture as the planner: the reviewer can
           # read the checkout but holds no tool that can change it.
-          copilot \
-            -p "$(cat reviewer-prompt.txt)" \
-            --model "$REVIEWER_MODEL" \
-            --output-format json \
-            --no-ask-user \
-            --max-ai-credits "$REVIEWER_MAX_AI_CREDITS" \
-            --allow-all-tools \
-            --excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent" \
-            > copilot-output.jsonl
+          #
+          # Same model-fallback posture too: an unavailable model is rejected
+          # before billing, so walking the preference list is free. Any other
+          # failure is not retried.
+
+          resolved=""
+
+          IFS=',' read -r -a candidates <<< "$REVIEWER_MODELS"
+
+          for candidate in "${candidates[@]}"; do
+            model="$(echo "$candidate" | tr -d '[:space:]')"
+            [ -n "$model" ] || continue
+
+            echo "::group::Reviewing with $model"
+
+            status=0
+
+            copilot \
+              -p "$(cat reviewer-prompt.txt)" \
+              --model "$model" \
+              --output-format json \
+              --no-ask-user \
+              --max-ai-credits "$REVIEWER_MAX_AI_CREDITS" \
+              --allow-all-tools \
+              --excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent" \
+              > copilot-output.jsonl 2> copilot-error.txt || status=$?
+
+            cat copilot-error.txt
+            echo "::endgroup::"
+
+            if [ "$status" -eq 0 ]; then
+              resolved="$model"
+              break
+            fi
+
+            if ! grep -q 'from --model flag is not available' copilot-error.txt; then
+              echo "::error::Copilot failed on $model for a reason other than" \
+                   "model availability; not retrying on another model."
+              exit "$status"
+            fi
+
+            echo "::warning::$model is not available to this workflow's" \
+                 "identity. Trying the next candidate."
+          done
+
+          if [ -z "$resolved" ]; then
+            echo "::error::None of these models were available to the Actions" \
+                 "GITHUB_TOKEN identity: $REVIEWER_MODELS. Check the Copilot" \
+                 "model policy at https://github.com/settings/copilot/features," \
+                 "then set the REVIEWER_MODELS repository variable."
+            exit 1
+          fi
+
+          echo "REVIEWER_MODEL_USED=$resolved" >> "$GITHUB_ENV"
 
       - name: Extract Verdict
         id: verdict
@@ -421,7 +487,7 @@ jobs:
             echo "---"
             echo ""
             echo "Reviewed by \`.github/agents/03-reviewer.agent.md\` via" \
-                 "\`agent-03-review.yml\` on \`$REVIEWER_MODEL\`."
+                 "\`agent-03-review.yml\` on \`$REVIEWER_MODEL_USED\`."
             echo "Re-run by adding the \`agent:review\` label."
           } > review-comment.md
 

@@ -30,14 +30,61 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 
 | Role | Model | Where the model is set |
 | --- | --- | --- |
-| Planner | Claude Opus 5 | `PLANNER_MODEL` env / `vars.PLANNER_MODEL` in `agent-01-planner.yml` |
+| Planner | Claude Opus 5, then fallbacks | `PLANNER_MODELS` env / `vars.PLANNER_MODELS` in `agent-01-planner.yml` |
 | Executor | Claude Haiku 4.5 | The picker, when **you** assign Copilot. Auto in label mode. |
-| Reviewer | Claude Opus 5 | `REVIEWER_MODEL` env / `vars.REVIEWER_MODEL` in `agent-03-review.yml` |
+| Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-03-review.yml` |
 
 Planner and reviewer are Copilot CLI sessions, so their model is a string in
 version control rather than a dropdown someone has to remember. Both are
 overridable with a repository variable, so changing one does not need a
 commit.
+
+### Both are lists, because CLI availability is per-identity
+
+`PLANNER_MODELS` and `REVIEWER_MODELS` are comma-separated preference lists,
+defaulting to:
+
+```
+claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5
+```
+
+Copilot CLI resolves model availability against the **identity making the
+request**, and in Actions that identity is the workflow's `GITHUB_TOKEN`, not
+your seat. The two do not always agree. A model the cloud-agent picker offers
+you can still come back as:
+
+```
+Error: Model "claude-opus-5" from --model flag is not available.
+```
+
+which is what killed the first planner run
+([run 32452540331](https://github.com/stardustsuperwizard/sword-and-planet/actions/runs/32452540331)).
+The id was right — `claude-opus-5` is a documented Copilot CLI model — and the
+`copilot-requests: write` permission was present. It was an entitlement
+resolution, and there is a live history of those going wrong:
+[copilot-cli#4390](https://github.com/github/copilot-cli/issues/4390) and
+[#4422](https://github.com/github/copilot-cli/issues/4422) tracked a
+catalogue regression that removed *every* Anthropic model from the CLI while
+the policy pages still showed them enabled, resolved 2026-08-19.
+
+So the run steps walk the list and take the first model that starts. This is
+free: an unavailable model is rejected at startup, before a token is billed,
+so retrying the real prompt on the next candidate costs nothing that probing
+each id first would not have cost more. Only the availability error is
+retried — any other failure means the model ran and failed, and re-running it
+elsewhere would burn credits reproducing the same failure.
+
+**Every entry stays in the strong tier.** A silent fallback to Haiku would
+defeat the reason planning and review are paid for at all. If the whole list
+is refused, the job fails loudly with the list it tried rather than
+downgrading.
+
+The model that actually ran is recorded in the step summary, and the reviewer
+names it in its PR comment — so read that, not this table, when you want to
+know what reviewed a PR.
+
+Single-valued `vars.PLANNER_MODEL` / `vars.REVIEWER_MODEL` are still honoured
+and, when set, are used as the entire list.
 
 ### Three entry points, three different capabilities
 
@@ -107,6 +154,8 @@ correction matters because the two config formats do not agree:
 - **Copilot CLI takes the lowercase identifier.** That is the `claude-opus-5`
   and `gpt-5.4` form the workflows pass via `--model`. Do not copy those
   strings into an agent file, or the display names out of one into a workflow.
+  A correct identifier is still not a guarantee of access — see *Both are
+  lists* above.
 
 An unresolvable `model:` is also not fatal: VS Code falls back to whatever is
 selected in the model picker, so it could not have been the session-start
@@ -682,6 +731,8 @@ example schema — do not expect clean per-model cost.
 - [Copilot usage-based billing](https://github.blog/news-insights/company-news/github-copilot-is-moving-to-usage-based-billing/)
 - [Customize the reasoning level for Copilot cloud agent](https://github.blog/changelog/2026-08-03-customize-the-reasoning-level-for-copilot-cloud-agent/)
 - [cli/cli#13222 — add `--model` to `gh agent-task create`](https://github.com/cli/cli/issues/13222) — open; why no programmatic path can pick a model
+- [Using Copilot CLI in GitHub Actions with `GITHUB_TOKEN`](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli-in-actions) — the `copilot-requests: write` permission
+- [copilot-cli#4390](https://github.com/github/copilot-cli/issues/4390) and [#4422](https://github.com/github/copilot-cli/issues/4422) — Anthropic models absent from the CLI catalogue while shown enabled in policy
 
 ### Things checked directly against the API, not the docs
 
