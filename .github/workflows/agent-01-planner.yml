@@ -402,13 +402,13 @@ jobs:
           # else means the model ran and failed, and re-running it on another
           # model would burn credits reproducing the same failure.
           #
-          # The prompt is fed on stdin, NOT via -p "$(cat ...)". Linux caps a
+          # The prompt is fed on stdin, not via -p "$(cat ...)". Linux caps a
           # single argv element at MAX_ARG_STRLEN (32 pages = 128 KiB), which
           # is a separate, much smaller limit than the ~2 MB total ARG_MAX.
           # This planner prompt embeds repository files and routinely exceeds
           # 128 KiB, so passing it as an argument made execve() fail with
           # E2BIG ("Argument list too long", exit 126) before copilot ever
-          # started. Copilot CLI reads the prompt from stdin when -p is empty.
+          # started. Copilot CLI should read the prompt from stdin by default.
 
           # DEBUG: Check that prompt file exists
           echo "=== DEBUG: Checking planner-prompt.txt ==="
@@ -432,7 +432,6 @@ jobs:
             status=0
 
             copilot \
-              -p "" \
               --model "$model" \
               --output-format json \
               --no-ask-user \
