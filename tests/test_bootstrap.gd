@@ -29,6 +29,12 @@ func _ready() -> void:
 		if combatant_passed:
 			print("\nCombatant Test PASSED")
 		
+		# Run the formulas test
+		var formulas_passed = FormulasTest.run()
+		
+		if formulas_passed:
+			print("\nFormulas Test PASSED")
+		
 		# Exit after the tests complete to avoid loading the main scene
 		call_deferred("_quit_engine")
 
