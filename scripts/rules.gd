@@ -9,7 +9,17 @@ extends Object
 const BASE_ATTACK_DAMAGE := 1
 
 static func attack(attacker: Actor, target: Actor) -> ActionResult:
-	target.take_damage(BASE_ATTACK_DAMAGE)
+	var attacker_combatant := attacker.get_node_or_null("Combatant") as MobaCombatant
+	var target_combatant := target.get_node_or_null("Combatant") as MobaCombatant
+	
+	# If both actors have a Combatant child, delegate to the rules module
+	if attacker_combatant != null and target_combatant != null:
+		var damage := attacker_combatant.get_stat(MobaStatBlock.ATTACK_DAMAGE)
+		target_combatant.apply_damage(damage)
+	else:
+		# Fallback to the existing behavior
+		target.take_damage(BASE_ATTACK_DAMAGE)
+	
 	return ActionResult.new(true)
 
 static func open(actor: Actor, door: Door) -> ActionResult:
