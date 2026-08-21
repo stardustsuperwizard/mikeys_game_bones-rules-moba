@@ -106,7 +106,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: ${{ steps.resolve.outputs.url }}
           status: Done
-          work-type: Implementation
 
       - name: Move Reopened Task Back to Ready
         if: >
@@ -119,7 +118,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: ${{ steps.resolve.outputs.url }}
           status: Ready
-          work-type: Implementation
 
       # ---------------------------------------------------------------
       # The parent rollup.
@@ -193,7 +191,6 @@ jobs:
           project-number: ${{ env.PROJECT_NUMBER }}
           url: ${{ steps.parent.outputs.url }}
           status: In review
-          work-type: Planning
 
       - name: Notify Parent
         if: steps.parent.outputs.complete == 'true'

@@ -1,8 +1,8 @@
 name: Set Project Status
 description: >
   Add an Issue or Pull Request to the workflow Project and set its Status
-  (and optionally Work Type) field. Projects v2 is not writable with the
-  default GITHUB_TOKEN, so this requires a PAT with Projects read/write.
+  field. Projects v2 is not writable with the default GITHUB_TOKEN, so
+  this requires a PAT with Projects read/write.
 
 inputs:
   token:
@@ -27,11 +27,6 @@ inputs:
       In review, Blocked, Done.
     required: true
 
-  work-type:
-    description: Optional Work Type option name, either Planning or Implementation.
-    required: false
-    default: ""
-
 runs:
   using: composite
 
@@ -44,7 +39,6 @@ runs:
         PROJECT_NUMBER: ${{ inputs.project-number }}
         ITEM_URL: ${{ inputs.url }}
         STATUS: ${{ inputs.status }}
-        WORK_TYPE: ${{ inputs.work-type }}
       run: |
         set -euo pipefail
 
@@ -68,13 +62,3 @@ runs:
           --value "$STATUS"
 
         echo "Status -> $STATUS for $ITEM_URL"
-
-        if [ -n "$WORK_TYPE" ]; then
-          gh project item-edit "$PROJECT_NUMBER" \
-            --owner "$OWNER" \
-            --url "$ITEM_URL" \
-            --field "Work Type" \
-            --value "$WORK_TYPE"
-
-          echo "Work Type -> $WORK_TYPE for $ITEM_URL"
-        fi

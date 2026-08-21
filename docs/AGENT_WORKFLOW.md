@@ -493,15 +493,15 @@ close it.
 
 Tracked on the [Sword and Planet Workflow](https://github.com/users/stardustsuperwizard/projects/1)
 project. The parent Feature and its Implementation Task sub-issues each carry
-their own item on the board, distinguished by two fields:
+their own item on the board, carrying one field:
 
 - **Status** — one shared single-select field on every item: `Backlog`,
   `Planning`, `Ready`, `In Progress`, `In review`, `Blocked`, `Done`.
-- **Work Type** — `Planning` or `Implementation`, distinguishing a Feature
-  row from a Task row.
 
 There is no separate Planner Status / Implementation Status pair; both roles
-write the same Status field on their own item.
+write the same Status field on their own item. A Feature row is told apart
+from a Task row by the Issue itself — a Feature carries the `planned` label
+and owns sub-issues; a Task is a sub-issue.
 
 Every transition goes through the `.github/actions/set-project-status`
 composite action, so the token handling and the field names live in one file
