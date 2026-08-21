@@ -550,6 +550,10 @@ jobs:
 
               if isinstance(content, str):
                   assistant_parts.append(content)
+              elif isinstance(content, list):
+                  for block in content:
+                      if isinstance(block, dict) and block.get("type") == "text":
+                          assistant_parts.append(block.get("text", ""))
 
           print(f"\n=== DEBUG: Event types found: {event_types} ===")
           print(f"Assistant message parts collected: {len(assistant_parts)}")
