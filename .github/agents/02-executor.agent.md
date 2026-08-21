@@ -1,7 +1,6 @@
 ---
 name: executor
 description: executes implementation tasks for Sword and Planet
-model: Claude Haiku 4.5
 tools: ["read", "search", "edit", "execute"]
 user-invocable: true
 ---

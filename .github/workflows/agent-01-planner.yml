@@ -630,6 +630,7 @@ jobs:
               milestone = issue["milestone"].get("title")
 
           created = {}
+          bodies = {}
 
           def bullets(items, empty="None"):
               if not items:
@@ -769,6 +770,8 @@ jobs:
                   "title": task["title"],
               }
 
+              bodies[task["id"]] = body
+
               print(
                   f"Created {task['id']} as "
                   f"#{number}: {task['title']}"
@@ -816,6 +819,64 @@ jobs:
                       in dependency_numbers
                   )
               )
+
+
+          # Third pass: prepend a copy-pasteable task description.
+          #
+          # Starting a session from the Copilot agents panel is the only
+          # entry point that offers BOTH a model picker and a custom-agent
+          # picker, but it takes a free-text task description rather than an
+          # Issue. This block is that description, pre-filled with the Issue's
+          # own number so the resulting PR closes the right thing. It cannot
+          # be written in the first pass because the number does not exist
+          # until the Issue is created.
+          for task_id, entry in created.items():
+              number = entry["number"]
+
+              run_block = (
+                  "## Run This Task\n\n"
+                  "Open the Copilot **agents panel**, select the "
+                  "`executor` agent and your model, then paste this:\n\n"
+                  "````text\n"
+                  f"Work GitHub issue #{number} in this repository.\n"
+                  "\n"
+                  "Read that issue first. Its Objective, Scope, Architecture\n"
+                  "Constraints, Acceptance Criteria and Out of Scope sections\n"
+                  "are the authoritative contract. Implement only what they\n"
+                  "require, run .github/scripts/validate-godot.sh, and report\n"
+                  "the command and its result.\n"
+                  "\n"
+                  f"Your pull request must include: Closes #{number}\n"
+                  "````\n\n"
+                  "Assigning this Issue to Copilot instead also works and "
+                  "still lets you pick the model, but the agents panel is "
+                  "the only place you can pick the agent too.\n\n"
+                  "---\n\n"
+              )
+
+              with tempfile.NamedTemporaryFile(
+                  mode="w",
+                  suffix=".md",
+                  delete=False,
+              ) as patched:
+                  patched.write(run_block + bodies[task_id])
+                  patched_path = patched.name
+
+              subprocess.run(
+                  [
+                      "gh",
+                      "issue",
+                      "edit",
+                      str(number),
+                      "--repo",
+                      repo,
+                      "--body-file",
+                      patched_path,
+                  ],
+                  check=True,
+              )
+
+              print(f"Added run block to #{number}")
 
           pathlib.Path(
               "created-issues.json"

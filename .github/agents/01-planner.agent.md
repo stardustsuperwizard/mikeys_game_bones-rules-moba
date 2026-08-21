@@ -1,7 +1,6 @@
 ---
 name: planner
 description: Decomposes Sword and Planet features into bounded engineering work and orchestrates implementation through GitHub Issues
-model: Claude Opus 5
 tools: ["read", "search", "agent", "github/*"]
 ---
 ## HARD EXECUTION BOUNDARY

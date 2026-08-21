@@ -18,6 +18,25 @@ It MUST:
 The implementation PR closes THIS Issue, not the parent Feature.
 -->
 
+## Run This Task
+
+Open the Copilot **agents panel**, select the `executor` agent and your model,
+then paste this:
+
+````text
+Work GitHub issue #<this-issue-number> in this repository.
+
+Read that issue first. Its Objective, Scope, Architecture
+Constraints, Acceptance Criteria and Out of Scope sections
+are the authoritative contract. Implement only what they
+require, run .github/scripts/validate-godot.sh, and report
+the command and its result.
+
+Your pull request must include: Closes #<this-issue-number>
+````
+
+---
+
 ## Provenance
 
 - Parent Feature: #<issue-number>

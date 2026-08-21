@@ -38,10 +38,30 @@ version control rather than a dropdown someone has to remember. Both are
 overridable with a repository variable, so changing one does not need a
 commit.
 
-### The executor cannot have both a model and a custom agent
+### Three entry points, three different capabilities
 
-This is the one hard constraint in the pipeline, and it decides how execution
-is triggered.
+Execution can start three ways, and they differ in what you get to choose.
+This is the single most confusing part of the setup, so it is tabulated
+rather than described.
+
+| Entry point | Model | Custom agent | Linked to the Issue | Blocked-by check |
+| --- | --- | --- | --- | --- |
+| **Agents panel** — start a session | **your choice** | **`executor`** | no, free text | none |
+| Issue → assign Copilot | **your choice** | no | yes | after the fact |
+| `agent:execute` label | Auto | **`executor`** | yes | **before dispatch** |
+
+The agents panel is the only place you get both, which makes it the preferred
+path — and it is available on GitHub Mobile. What it does not give you is a
+link back to the Issue, because it takes a free-text task description instead.
+
+That gap is closed by the **Run This Task** block the planner writes at the
+top of every `[impl]` Issue: a pre-filled description carrying the Issue's own
+number and a `Closes #n` line. Copy it, open the agents panel, pick `executor`
+and your model, paste. The resulting PR closes the right Issue, and
+`agent-02-execute.yml` picks the task up from the `pull_request` event.
+
+The assignee screen on an Issue offers a model picker but no agent picker.
+That is a property of that screen, not of mobile.
 
 **No programmatic path can select a model.** Three independent confirmations,
 checked 2026-08-21:
@@ -55,26 +75,30 @@ checked 2026-08-21:
   to add exactly that flag.
 
 And the model documentation states: *"Where a model picker is not available,
-Auto will be used automatically."*
+Auto will be used automatically."* That is why label mode runs on Auto.
 
-**The picker cannot select a custom agent.** It selects a model only.
-
-So the two are mutually exclusive, and the choice is per task:
-
-| | Model | Custom agent | Blocked-by check |
-| --- | --- | --- | --- |
-| You assign Copilot from the UI | **Your choice** | none | after the fact |
-| `agent:execute` label | Auto | `executor` | before dispatch |
-
-The default path is the first one. GitHub Mobile is a supported entrypoint for
-model selection, so picking Claude Haiku 4.5 from a phone works — it is only
-the *agent* picker that mobile lacks. Losing the custom agent costs little
-because the same contract lives in two places the cloud agent always reads:
-the Issue body's scope and acceptance criteria, and *Executing an
-Implementation Task* in `.github/copilot-instructions.md`.
+Whenever a session runs without the `executor` profile, the contract still
+applies: it is in the Issue body, and in *Executing an Implementation Task* in
+`.github/copilot-instructions.md`, which the cloud agent always reads.
 
 Label mode remains for mechanical work where the model does not matter. Avoid
 it for anything touching `.tscn`, `.tres`, `project.godot`, or `addons/`.
+
+### Do not put `model:` in an agent file
+
+All three agent files used to carry `model: Claude Haiku 4.5` and similar.
+That is a **display name**, not a model identifier — identifiers are
+lowercase and hyphenated, like `claude-haiku-4.5` or the `gpt-5.4` these
+workflows pass to the CLI.
+
+The property was believed to be ignored on github.com, which made the wrong
+value harmless. It is a prime suspect for a custom agent erroring at session
+start, so it has been removed from all three files. Nothing is lost: planner
+and reviewer take their model from workflow env, and interactive sessions take
+it from the picker.
+
+If you add it back, use an identifier and verify it resolves.
+
 
 Rationale: reasoning is worth paying for where decisions are made, not where
 they are executed. The planner and reviewer read a lot and write little, so
@@ -174,17 +198,20 @@ Intake Issue        [plan] in title, `plan` + type label
         ▼                        Status: In Progress
 Implementation Task     Status: Ready
         │
-        ├── you assign Copilot, picking the model   ← default path
-        │        (works from GitHub Mobile)
+        ├── paste its "Run This Task" block into      ← default
+        │   the agents panel                            model + agent
         │
-        └── or you add  agent:execute               ← one tap, Auto model
+        ├── or assign Copilot from the Issue            model only
+        │
+        └── or add  agent:execute                       agent only, Auto
                  │
                  ▼
 ┌────────────────────────────────────────────────┐
 │ agent-02-execute.yml       Status: In Progress │
 │ board plumbing, no AI credits                  │
-│ assign mode: observes, checks blockers         │
-│ label mode:  assigns + customAgent (Auto)      │
+│ panel  → fires on the draft PR                 │
+│ assign → observes, warns on blockers           │
+│ label  → refuses if blocked, then assigns      │
 └────────────────────────────────────────────────┘
         │
    Copilot Cloud Agent ──▶ draft PR ──▶ ready for review
@@ -312,12 +339,28 @@ the stale sub-issues yourself first, because nothing removes them for you.
 ### Step 2 — Execution
 
 Work tasks in dependency order. `agent-02-execute.yml` spends no AI credits in
-either mode; it is board plumbing and a dependency check.
+any mode; it is board plumbing and a dependency check. See *Three entry
+points, three different capabilities* above for why there are three.
 
-#### Assign mode — the default
+#### Agents panel — the default
+
+Open the Implementation Task, copy its **Run This Task** block, then open the
+Copilot agents panel, select the `executor` agent and **Claude Haiku 4.5**,
+and paste. This is the only path that gives you both the model and the agent,
+and it works from GitHub Mobile.
+
+The workflow has nothing to fire on until the session opens its draft pull
+request. At that point the `pull_request` job resolves the PR's
+`closingIssuesReferences` and moves those tasks to **In Progress**. There is
+no pre-flight dependency check on this path — the Run This Task block only
+exists on tasks the planner created, and the Issue lists its blockers, so
+check them before you paste.
+
+#### Assign mode
 
 Open the Implementation Task and assign it to Copilot, picking
-**Claude Haiku 4.5** in the model picker. This works from GitHub Mobile.
+**Claude Haiku 4.5** in the model picker. You get the model but not the
+`executor` agent, because the assignee screen has no agent picker.
 
 The workflow fires on the `assigned` event and:
 
@@ -516,14 +559,31 @@ the cloud agent:
 
 | Property | Status |
 | --- | --- |
-| `model` | Ignored on github.com; honored in VS Code / JetBrains / Eclipse / Xcode |
+| `model` | **Removed from all three files.** Was set to display names like `Claude Haiku 4.5`, which are not resolvable identifiers. See *Do not put `model:` in an agent file*. |
 | `agents` | Not supported |
 | `handoffs` | Not supported |
 | reasoning level | Not settable in frontmatter — picker only ([#2904](https://github.com/github/copilot-cli/issues/2904)) |
 
-Supported and in use: `name`, `description`, `tools`, `user-invocable`,
-`disable-model-invocation`, `target`, `mcp-servers`, `metadata`. Agent
-prompts cap at 30,000 characters.
+Supported: `name`, `description`, `tools`, `user-invocable`,
+`disable-model-invocation`, `target`, `mcp-servers`, `metadata`, and `model`
+when given a real identifier.
+
+Other requirements worth knowing, since violating them makes an agent fail to
+load rather than degrade gracefully:
+
+- The file must be **committed to the default branch**. An agent that exists
+  only on a feature branch is not selectable.
+- Filenames may contain only `.`, `-`, `_`, `a-z`, `A-Z`, `0-9`.
+- The prompt body caps at **30,000 characters**. All three files are well
+  under: planner ~9k, executor ~4.6k, reviewer ~1.5k.
+- Valid `tools` aliases are `execute`, `read`, `edit`, `search`, `agent`,
+  `web`, `todo`, `*`, `[]`, plus `server-name/tool-name` for MCP. Unrecognised
+  plain names are ignored, but `01-planner.agent.md` references `github/*`,
+  which needs an MCP server named `github` configured for the repository — if
+  the planner ever errors at session start, that is the thing to remove.
+
+There is **no "skill" concept** for the cloud agent. The only extension points
+are custom agents and MCP servers.
 
 ## Measuring the workflow
 

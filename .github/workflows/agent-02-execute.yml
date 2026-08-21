@@ -27,6 +27,14 @@ on:
       - labeled
       - assigned
 
+  # Covers the third entry path: a session started from the agents panel is
+  # not an assignment and carries no label, so neither trigger above fires.
+  # The cloud agent opens its draft PR early in a session, which makes this
+  # a reliable "work has started" signal whatever the entry path was.
+  pull_request:
+    types:
+      - opened
+
   workflow_dispatch:
     inputs:
       issue_number:
@@ -51,7 +59,10 @@ permissions:
   issues: write
 
 concurrency:
-  group: agent-execute-${{ github.event.issue.number || inputs.issue_number }}
+  group: >
+    agent-execute-${{ github.event.pull_request.number
+      || github.event.issue.number
+      || inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
@@ -61,9 +72,11 @@ jobs:
 
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event.action == 'labeled' &&
+      (github.event_name == 'issues' &&
+       github.event.action == 'labeled' &&
        github.event.label.name == 'agent:execute') ||
-      (github.event.action == 'assigned' &&
+      (github.event_name == 'issues' &&
+       github.event.action == 'assigned' &&
        (github.event.assignee.login == 'copilot-swe-agent' ||
         github.event.assignee.login == 'Copilot'))
 
@@ -378,3 +391,84 @@ jobs:
           url: ${{ steps.issue.outputs.url }}
           status: Blocked
           work-type: Implementation
+
+  # -------------------------------------------------------------------
+  # Any session that reaches a draft pull request moves its task to
+  # In Progress, including sessions started from the agents panel that
+  # never touched the label or the assignee field.
+  # -------------------------------------------------------------------
+
+  from_pull_request:
+    name: Mark Task In Progress from PR
+    runs-on: ubuntu-latest
+
+    if: github.event_name == 'pull_request'
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PROJECT_OWNER: stardustsuperwizard
+      PROJECT_NUMBER: "1"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Closed Issues
+        id: closes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          NAME="${GITHUB_REPOSITORY##*/}"
+
+          gh api graphql \
+            -f owner="$OWNER" \
+            -f name="$NAME" \
+            -F number="$PR_NUMBER" \
+            -f query='
+              query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                  pullRequest(number: $number) {
+                    closingIssuesReferences(first: 10) {
+                      nodes { number url }
+                    }
+                  }
+                }
+              }
+            ' \
+            --jq '.data.repository.pullRequest.closingIssuesReferences.nodes' \
+            > closes.json
+
+          COUNT=$(jq 'length' closes.json)
+
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "PR #$PR_NUMBER closes $COUNT issue(s)."
+
+      - name: Move Tasks to In Progress
+        if: steps.closes.outputs.count != '0'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::PROJECT_TOKEN is empty."
+            exit 1
+          fi
+
+          jq -r '.[].url' closes.json | while read -r ISSUE_URL; do
+            gh project item-add "$PROJECT_NUMBER" \
+              --owner "$PROJECT_OWNER" \
+              --url "$ISSUE_URL"
+
+            gh project item-edit "$PROJECT_NUMBER" \
+              --owner "$PROJECT_OWNER" \
+              --url "$ISSUE_URL" \
+              --field "Status" \
+              --value "In Progress"
+
+            echo "In Progress: $ISSUE_URL"
+          done
