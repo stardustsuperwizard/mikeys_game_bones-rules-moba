@@ -361,14 +361,21 @@ jobs:
 
             status=0
 
+            # The prompt goes on stdin, NOT via -p "$(cat ...)". Linux caps a
+            # single argv element at MAX_ARG_STRLEN (32 pages = 128 KiB),
+            # independently of the much larger total ARG_MAX. MAX_DIFF_CHARS
+            # alone is 150000, so an argument-passed prompt fails execve()
+            # with E2BIG ("Argument list too long", exit 126) before copilot
+            # starts. Copilot CLI reads the prompt from stdin when -p is empty.
             copilot \
-              -p "$(cat reviewer-prompt.txt)" \
+              -p "" \
               --model "$model" \
               --output-format json \
               --no-ask-user \
               --max-ai-credits "$REVIEWER_MAX_AI_CREDITS" \
               --allow-all-tools \
               --excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent" \
+              < reviewer-prompt.txt \
               > copilot-output.jsonl 2> copilot-error.txt || status=$?
 
             cat copilot-error.txt
@@ -377,6 +384,17 @@ jobs:
             if [ "$status" -eq 0 ]; then
               resolved="$model"
               break
+            fi
+
+            # 126/127 mean the shell could not execute copilot at all, which
+            # is a harness fault every candidate would hit identically — not
+            # the fault of whichever model happened to be tried first.
+            if [ "$status" -eq 126 ] || [ "$status" -eq 127 ]; then
+              echo "::error::Could not execute the copilot binary (exit" \
+                   "$status). This is not a model failure. Check that Copilot" \
+                   "CLI is installed on the runner and that the prompt is fed" \
+                   "on stdin rather than as a command-line argument."
+              exit "$status"
             fi
 
             if ! grep -q 'from --model flag is not available' copilot-error.txt; then

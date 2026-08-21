@@ -336,7 +336,18 @@ jobs:
           {context}
           """
 
-          pathlib.Path("planner-prompt.txt").write_text(prompt)
+          prompt_path = pathlib.Path("planner-prompt.txt")
+          prompt_path.write_text(prompt)
+
+          # Size is worth surfacing: the prompt grows with the Issue body, its
+          # comments, and every backticked file the Issue references, so it is
+          # the number that silently drifts upward run over run.
+          size = prompt_path.stat().st_size
+
+          print(f"Planner prompt: {size} bytes across {len(sections)} sections")
+
+          for section in sections:
+              print(f"  {len(section.encode()):>8} B  {section.splitlines()[0]}")
 
       # Copilot CLI model ids are not published as a stable list; they are
       # shown in the --model help text. Dumping them costs nothing and means
@@ -390,6 +401,14 @@ jobs:
           # each id first. Only the availability error is retried; anything
           # else means the model ran and failed, and re-running it on another
           # model would burn credits reproducing the same failure.
+          #
+          # The prompt is fed on stdin, NOT via -p "$(cat ...)". Linux caps a
+          # single argv element at MAX_ARG_STRLEN (32 pages = 128 KiB), which
+          # is a separate, much smaller limit than the ~2 MB total ARG_MAX.
+          # This planner prompt embeds repository files and routinely exceeds
+          # 128 KiB, so passing it as an argument made execve() fail with
+          # E2BIG ("Argument list too long", exit 126) before copilot ever
+          # started. Copilot CLI reads the prompt from stdin when -p is empty.
 
           resolved=""
 
@@ -404,13 +423,14 @@ jobs:
             status=0
 
             copilot \
-              -p "$(cat planner-prompt.txt)" \
+              -p "" \
               --model "$model" \
               --output-format json \
               --no-ask-user \
               --max-ai-credits "$PLANNER_MAX_AI_CREDITS" \
               --allow-all-tools \
               --excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent" \
+              < planner-prompt.txt \
               > copilot-output.jsonl 2> copilot-error.txt || status=$?
 
             cat copilot-error.txt
@@ -419,6 +439,19 @@ jobs:
             if [ "$status" -eq 0 ]; then
               resolved="$model"
               break
+            fi
+
+            # 126/127 mean the shell could not execute copilot at all (not
+            # found, not executable, or execve() refused the argument list).
+            # That is a harness fault, not a model fault, and every candidate
+            # would hit it identically — so say so plainly instead of blaming
+            # whichever model happened to be first in the list.
+            if [ "$status" -eq 126 ] || [ "$status" -eq 127 ]; then
+              echo "::error::Could not execute the copilot binary (exit" \
+                   "$status). This is not a model failure. Check that Copilot" \
+                   "CLI is installed on the runner and that the prompt is fed" \
+                   "on stdin rather than as a command-line argument."
+              exit "$status"
             fi
 
             if ! grep -q 'from --model flag is not available' copilot-error.txt; then
