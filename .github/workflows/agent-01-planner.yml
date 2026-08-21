@@ -64,7 +64,7 @@ jobs:
         || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
 
       # Soft cap for this planning session.
-      PLANNER_MAX_AI_CREDITS: "30"
+      PLANNER_MAX_AI_CREDITS: "75"
 
     steps:
       - name: Checkout Repository
