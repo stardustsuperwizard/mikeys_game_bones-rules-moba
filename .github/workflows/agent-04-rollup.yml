@@ -2,12 +2,16 @@ name: Roll Up Parent Status
 
 # Closing an Implementation Task does two things:
 #
-#   1. moves that task to Done on the board; and
-#   2. if it was the last open sub-issue, moves the parent Feature to
-#      In review, where a human does the final check and closes it.
+# nothing on its own, unless it was the last open sub-issue of a Feature --
+# in which case the Feature is ready for the human check that closes it, and
+# this workflow says so in a comment.
 #
-# GitHub Projects' built-in automation cannot express "all children closed",
-# so this workflow supplies the rollup.
+# A comment, specifically, because a comment notifies you. The control plane
+# Issue rendered by agent-00-dashboard.yml shows the same fact, but nobody
+# gets a push notification from a regenerated dashboard.
+#
+# Task and Feature *status* is not written anywhere: it is derived on demand
+# by .github/scripts/render-dashboard.py. See docs/AGENT_WORKFLOW.md.
 
 on:
   issues:
@@ -40,8 +44,6 @@ jobs:
 
       ISSUE_NUMBER: ${{ inputs.issue_number || github.event.issue.number }}
 
-      PROJECT_OWNER: stardustsuperwizard
-      PROJECT_NUMBER: "1"
 
     steps:
       - name: Checkout Repository
@@ -93,34 +95,6 @@ jobs:
 
       # ---------------------------------------------------------------
       # The closed child itself.
-      # ---------------------------------------------------------------
-
-      - name: Move Closed Task to Done
-        if: >
-          steps.resolve.outputs.is_child == 'true' &&
-          steps.resolve.outputs.state == 'CLOSED'
-        uses: ./.github/actions/set-project-status
-        with:
-          token: ${{ secrets.PROJECT_TOKEN }}
-          owner: ${{ env.PROJECT_OWNER }}
-          project-number: ${{ env.PROJECT_NUMBER }}
-          url: ${{ steps.resolve.outputs.url }}
-          status: Done
-
-      - name: Move Reopened Task Back to Ready
-        if: >
-          steps.resolve.outputs.is_child == 'true' &&
-          steps.resolve.outputs.state == 'OPEN'
-        uses: ./.github/actions/set-project-status
-        with:
-          token: ${{ secrets.PROJECT_TOKEN }}
-          owner: ${{ env.PROJECT_OWNER }}
-          project-number: ${{ env.PROJECT_NUMBER }}
-          url: ${{ steps.resolve.outputs.url }}
-          status: Ready
-
-      # ---------------------------------------------------------------
-      # The parent rollup.
       # ---------------------------------------------------------------
 
       - name: Evaluate Parent Completion
@@ -182,16 +156,6 @@ jobs:
             echo "Parent #$PARENT still waiting on: $OPEN_SUBS"
           fi
 
-      - name: Move Parent to In Review
-        if: steps.parent.outputs.complete == 'true'
-        uses: ./.github/actions/set-project-status
-        with:
-          token: ${{ secrets.PROJECT_TOKEN }}
-          owner: ${{ env.PROJECT_OWNER }}
-          project-number: ${{ env.PROJECT_NUMBER }}
-          url: ${{ steps.parent.outputs.url }}
-          status: In review
-
       - name: Notify Parent
         if: steps.parent.outputs.complete == 'true'
         shell: bash
@@ -205,8 +169,7 @@ jobs:
             --body "$(cat <<'EOF'
           <!-- agent-rollup-complete -->
 
-          All Implementation Tasks for this Feature are closed. Status has
-          moved to **In review**.
+          All Implementation Tasks for this Feature are closed.
 
           Remaining work is human: confirm the Feature's own acceptance
           criteria hold end to end, complete any **Human Validation Required**

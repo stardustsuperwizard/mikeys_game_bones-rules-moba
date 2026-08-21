@@ -44,10 +44,6 @@ jobs:
 
       ISSUE_NUMBER: ${{ inputs.issue_number || github.event.issue.number }}
 
-      # Sword and Planet Workflow project board.
-      # https://github.com/users/stardustsuperwizard/projects/1
-      PROJECT_OWNER: stardustsuperwizard
-      PROJECT_NUMBER: "1"
 
       # Planning is where the decisions are made, so it gets the strong
       # model. This is a *preference list*, not a single id: Copilot CLI
@@ -73,15 +69,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Move Feature to Planning
-        uses: ./.github/actions/set-project-status
-        with:
-          token: ${{ secrets.PROJECT_TOKEN }}
-          owner: ${{ env.PROJECT_OWNER }}
-          project-number: ${{ env.PROJECT_NUMBER }}
-          url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
-          status: Planning
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -669,11 +656,6 @@ jobs:
             "Intended for AI agent execution"
 
           ensure_label \
-            "agent:execute" \
-            "8250DF" \
-            "Ready for the execution agent"
-
-          ensure_label \
             "planned" \
             "0E8A16" \
             "Feature has been decomposed into implementation tasks"
@@ -1047,10 +1029,14 @@ jobs:
               "required Implementation Tasks are completed "
               "and reviewed.",
               "",
-              "To run one, open an unblocked Implementation Task "
-              "and assign it to Copilot, choosing the model in the "
-              "picker. Adding the `agent:execute` label instead "
-              "dispatches it on Auto with the `executor` agent.",
+              "To run one, open an unblocked Implementation Task, "
+              "copy its **Run This Task** block, and paste it into the "
+              "Copilot agents panel with the `executor` agent and a model "
+              "you chose. Assigning Copilot from the Issue also works and "
+              "still lets you pick the model, but not the agent.",
+              "",
+              "The **Agent Control Plane** Issue lists every task that is "
+              "ready to dispatch right now, in dependency order.",
           ])
 
           body = "\n".join(lines)
@@ -1095,46 +1081,41 @@ jobs:
 
           echo "Feature #$ISSUE_NUMBER planned successfully."
 
-      - name: Place Implementation Tasks on the Board
-        if: steps.duplicate_check.outputs.already_planned != 'true'
+      # Nothing records a failed plan as *status*, because status is derived
+      # and there is no field to write it to. What matters is that the
+      # Feature must not sit under "Planning" on the control plane forever:
+      # `agent:plan` is what puts it there, so a failed run gives the label
+      # back. The Feature returns to "Awaiting planning", which is true, and
+      # re-adding the label is the same clean retry it always was.
+      #
+      # The comment is the part that notifies you.
+      - name: Report Planning Failure
+        if: failure()
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository
+            }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
 
-          # Each created sub-issue gets its own board row so the Feature and
-          # its tasks can hold different Status values.
-          jq -r '.[].url' created-issues.json | while read -r TASK_URL; do
-            gh project item-add "$PROJECT_NUMBER" \
-              --owner "$PROJECT_OWNER" \
-              --url "$TASK_URL"
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "agent:plan" || true
 
-            gh project item-edit "$PROJECT_NUMBER" \
-              --owner "$PROJECT_OWNER" \
-              --url "$TASK_URL" \
-              --field "Status" \
-              --value "Ready"
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(cat <<EOF
+          <!-- agent-planner-failed -->
 
-            echo "Board: Ready for $TASK_URL"
-          done
+          ## Planning failed
 
-      - name: Move Feature to In Progress
-        if: success()
-        uses: ./.github/actions/set-project-status
-        with:
-          token: ${{ secrets.PROJECT_TOKEN }}
-          owner: ${{ env.PROJECT_OWNER }}
-          project-number: ${{ env.PROJECT_NUMBER }}
-          url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
-          status: In Progress
+          The planning run did not complete: $RUN_URL
 
-      - name: Move Feature to Blocked
-        if: failure()
-        uses: ./.github/actions/set-project-status
-        with:
-          token: ${{ secrets.PROJECT_TOKEN }}
-          owner: ${{ env.PROJECT_OWNER }}
-          project-number: ${{ env.PROJECT_NUMBER }}
-          url: https://github.com/${{ github.repository }}/issues/${{ env.ISSUE_NUMBER }}
-          status: Blocked
+          No Implementation Tasks were created, or only some were — check the
+          Issue's sub-issues before retrying, and close any partial ones.
+
+          \`agent:plan\` has been removed, so this Feature now shows under
+          **Awaiting planning** again. Re-add the label to retry.
+          EOF
+          )"

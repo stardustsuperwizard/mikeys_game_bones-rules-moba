@@ -55,8 +55,6 @@ jobs:
 
       PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
 
-      PROJECT_OWNER: stardustsuperwizard
-      PROJECT_NUMBER: "1"
 
       # Review is the correctness gate, so it gets the strong model. This is
       # a *preference list*, not a single id — see the long note in
@@ -542,27 +540,3 @@ jobs:
           gh pr edit "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --remove-label "agent:review" || true
-
-      - name: Move Task to In Review on Pass
-        if: >
-          steps.verdict.outputs.verdict == 'PASS' &&
-          steps.context.outputs.has_task == 'true'
-        uses: ./.github/actions/set-project-status
-        with:
-          token: ${{ secrets.PROJECT_TOKEN }}
-          owner: ${{ env.PROJECT_OWNER }}
-          project-number: ${{ env.PROJECT_NUMBER }}
-          url: https://github.com/${{ github.repository }}/issues/${{ steps.context.outputs.task_number }}
-          status: In review
-
-      - name: Move Task to Blocked on Adverse Verdict
-        if: >
-          steps.verdict.outputs.verdict != 'PASS' &&
-          steps.context.outputs.has_task == 'true'
-        uses: ./.github/actions/set-project-status
-        with:
-          token: ${{ secrets.PROJECT_TOKEN }}
-          owner: ${{ env.PROJECT_OWNER }}
-          project-number: ${{ env.PROJECT_NUMBER }}
-          url: https://github.com/${{ github.repository }}/issues/${{ steps.context.outputs.task_number }}
-          status: Blocked

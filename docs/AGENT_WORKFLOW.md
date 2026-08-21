@@ -31,7 +31,7 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 | Role | Model | Where the model is set |
 | --- | --- | --- |
 | Planner | Claude Opus 5, then fallbacks | `PLANNER_MODELS` env / `vars.PLANNER_MODELS` in `agent-01-planner.yml` |
-| Executor | Claude Haiku 4.5 | The picker, when **you** assign Copilot. Auto in label mode. |
+| Executor | Claude Haiku 4.5 | The picker, when **you** dispatch. There is no other way — see below. |
 | Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-03-review.yml` |
 
 Planner and reviewer are Copilot CLI sessions, so their model is a string in
@@ -86,17 +86,35 @@ know what reviewed a PR.
 Single-valued `vars.PLANNER_MODEL` / `vars.REVIEWER_MODEL` are still honoured
 and, when set, are used as the entire list.
 
-### Three entry points, three different capabilities
+### Two entry points, and why neither is a workflow
 
-Execution can start three ways, and they differ in what you get to choose.
-This is the single most confusing part of the setup, so it is tabulated
-rather than described.
+Execution is manual. Nothing in this repository dispatches a session for you,
+and that is a consequence of one fact rather than a preference:
 
-| Entry point | Model | Custom agent | Linked to the Issue | Blocked-by check |
-| --- | --- | --- | --- | --- |
-| **Agents panel** — start a session | **your choice** | **`executor`** | no, free text | none |
-| Issue → assign Copilot | **your choice** | no | yes | after the fact |
-| `agent:execute` label | Auto | **`executor`** | yes | **before dispatch** |
+**No programmatic path can select a model.** Three independent confirmations,
+re-checked against the live API on 2026-08-21:
+
+- `AgentAssignmentInput` — the only input to `replaceActorsForAssignable`, the
+  mutation that assigns Copilot — has exactly four fields:
+  `targetRepositoryId`, `baseRef`, `customInstructions`, `customAgent`. No
+  model.
+- `gh agent-task create` (v2.97.0) has `--custom-agent` but no `--model`.
+- [cli/cli#13222](https://github.com/cli/cli/issues/13222) is an open request
+  to add exactly that flag.
+
+And the model documentation states: *"Where a model picker is not available,
+Auto will be used automatically."* So anything a workflow dispatched would run
+on Auto — a blind draw from a pool that is three-quarters non-Anthropic, on a
+codebase whose `.tscn` and `.tres` serialization is unforgiving. There was
+once an `agent:execute` label that made exactly that trade. It has been
+removed.
+
+What is left is two ways in, both of which you drive:
+
+| Entry point | Model | Custom agent | Linked to the Issue |
+| --- | --- | --- | --- |
+| **Agents panel** — start a session | **your choice** | **`executor`** | via the Run This Task block |
+| Issue → assign Copilot | **your choice** | no | yes |
 
 The agents panel is the only place you get both, which makes it the preferred
 path — and it is available on GitHub Mobile. What it does not give you is a
@@ -105,32 +123,13 @@ link back to the Issue, because it takes a free-text task description instead.
 That gap is closed by the **Run This Task** block the planner writes at the
 top of every `[impl]` Issue: a pre-filled description carrying the Issue's own
 number and a `Closes #n` line. Copy it, open the agents panel, pick `executor`
-and your model, paste. The resulting PR closes the right Issue, and
-`agent-02-execute.yml` picks the task up from the `pull_request` event.
+and your model, paste. The resulting PR closes the right Issue.
 
 The assignee screen on an Issue offers a model picker but no agent picker.
-That is a property of that screen, not of mobile.
-
-**No programmatic path can select a model.** Three independent confirmations,
-checked 2026-08-21:
-
-- `AgentAssignmentInput` — the only input to `replaceActorsForAssignable`, the
-  mutation that assigns Copilot — has exactly four fields:
-  `targetRepositoryId`, `baseRef`, `customInstructions`, `customAgent`. No
-  model.
-- `gh agent-task create` has `--custom-agent` but no `--model`.
-- [cli/cli#13222](https://github.com/cli/cli/issues/13222) is an open request
-  to add exactly that flag.
-
-And the model documentation states: *"Where a model picker is not available,
-Auto will be used automatically."* That is why label mode runs on Auto.
-
-Whenever a session runs without the `executor` profile, the contract still
-applies: it is in the Issue body, and in *Executing an Implementation Task* in
+That is a property of that screen, not of mobile. When a session runs without
+the `executor` profile the contract still applies: it is in the Issue body,
+and in *Executing an Implementation Task* in
 `.github/copilot-instructions.md`, which the cloud agent always reads.
-
-Label mode remains for mechanical work where the model does not matter. Avoid
-it for anything touching `.tscn`, `.tres`, `project.godot`, or `addons/`.
 
 ### `model:` in an agent file takes a display name
 
@@ -247,8 +246,8 @@ this comparison is possible.
 
 ## The workflow
 
-Four workflows in `.github/workflows/`, numbered in the order work moves
-through them. Two of them spend AI credits; two are plumbing.
+Five workflows in `.github/workflows/`, numbered in the order work moves
+through them. Two spend AI credits; three are plumbing and cost nothing.
 
 ```
 Intake Issue        [plan] in title, `plan` + type label
@@ -256,32 +255,30 @@ Intake Issue        [plan] in title, `plan` + type label
         │  you add  agent:plan
         ▼
 ┌────────────────────────────────────────────────┐
-│ agent-01-planner.yml         Status: Planning  │
+│ agent-01-planner.yml                           │
 │ Copilot CLI, edit/execute tools REMOVED        │
 │ reads Issue body + comments + repo inventory   │
 └────────────────────────────────────────────────┘
         │  validated plan JSON
         │  → [impl] sub-issues, blocked-by wired
         │  → plan comment on the Feature
-        ▼                        Status: In Progress
-Implementation Task     Status: Ready
+        ▼
+Implementation Task
         │
-        ├── paste its "Run This Task" block into      ← default
-        │   the agents panel                            model + agent
+        │  you paste its "Run This Task" block into the agents
+        │  panel, with the `executor` agent and a model you chose.
+        │  (Assigning Copilot from the Issue also works: model
+        │  but no agent.)
         │
-        ├── or assign Copilot from the Issue            model only
-        │
-        └── or add  agent:execute                       agent only, Auto
-                 │
-                 ▼
-┌────────────────────────────────────────────────┐
-│ agent-02-execute.yml       Status: In Progress │
-│ board plumbing, no AI credits                  │
-│ panel  → fires on the draft PR                 │
-│ assign → observes, warns on blockers           │
-│ label  → refuses if blocked, then assigns      │
-└────────────────────────────────────────────────┘
-        │
+        ├──────────────────────────┐
+        │                          ▼
+        │            ┌────────────────────────────────────┐
+        │            │ agent-02-execute.yml               │
+        │            │ no AI credits                      │
+        │            │ warns if you dispatched something  │
+        │            │ with an open blocker. Never cancels│
+        │            └────────────────────────────────────┘
+        ▼
    Copilot Cloud Agent ──▶ draft PR ──▶ ready for review
         │
         ▼
@@ -291,18 +288,27 @@ Implementation Task     Status: Ready
 │ diff vs. acceptance criteria → VERDICT         │
 └────────────────────────────────────────────────┘
         │
-   PASS  → review:pass label,  task Status: In review
-   other → review:* label,     task Status: Blocked
+   PASS  → review:pass label
+   other → review:fix / planning-failure / design-ambiguity
         │
         │  you merge; the PR closes the task Issue
         ▼
 ┌────────────────────────────────────────────────┐
-│ agent-04-rollup.yml           task → Done      │
-│ no AI credits                                  │
-│ last sibling closed? parent → In review        │
+│ agent-04-rollup.yml            no AI credits   │
+│ last sibling closed? comment on the parent     │
 └────────────────────────────────────────────────┘
         │
-   you do the human checks and close the Feature → Done
+   you do the human checks and close the Feature
+
+
+        every event above, plus nightly
+                    │
+                    ▼
+┌────────────────────────────────────────────────┐
+│ agent-00-dashboard.yml         no AI credits   │
+│ derives every state from the repository graph  │
+│ and rewrites the pinned control plane Issue    │
+└────────────────────────────────────────────────┘
 ```
 
 ### Mostly label-driven, on purpose
@@ -315,19 +321,23 @@ Every stage but execution starts because a label was added, and each workflow
 - **Re-adding a consumed label is a clean retry.** No separate re-run verb.
 - **No workflow fires on its own output**, so there are no dispatch loops.
 
-Execution is the exception: its default trigger is *assigning Copilot*, not a
-label, because that is the only way to choose the model. See
-*The executor cannot have both a model and a custom agent* above.
+Execution is the exception, because a label cannot carry a model. See
+*Two entry points, and why neither is a workflow* above.
 
 | Trigger | Added by | Consumed by | Means |
 | --- | --- | --- | --- |
 | `plan` label | Issue template | — | Intake ticket, type marker |
 | `agent:plan` label | You | `agent-01-planner.yml` | This Issue is ready to be planned |
+| **the agents panel** | You | — | Run this task, on the model and agent you picked |
 | **assigning Copilot** | You | `agent-02-execute.yml` | Run this task on the model you picked |
-| `agent:execute` label | You | `agent-02-execute.yml` | Run this task on Auto, with the `executor` agent |
 | `agent:review` label | You | `agent-03-review.yml` | Re-review this PR |
 | `planned` label | Planner | — | Feature has been decomposed |
-| `review:*` label | Reviewer | — | Last verdict on a PR |
+| `review:*` label | Reviewer | `agent-00-dashboard.yml` | Last verdict on a PR |
+| `dashboard` label | `agent-00` | `agent-00-dashboard.yml` | This Issue is the generated control plane |
+
+Review is the one thing that fires without a tap, on `ready_for_review`. That
+is deliberate: it is a safety net on work you already chose to start, and
+gating it means an unreviewed PR can sit looking finished.
 
 ### Why planning and review are CLI sessions, not cloud agents
 
@@ -350,30 +360,19 @@ the cloud agent's grain, so it is the one role that runs as a cloud agent.
 Their agent files are for `agent-01-planner.yml`, `agent-03-review.yml`, and
 interactive VS Code use.
 
-### Setup: the PROJECT_TOKEN secret
+### Setup
 
-Projects v2 is not writable with the default `GITHUB_TOKEN`, so every status
-transition needs a PAT in the repository secret `PROJECT_TOKEN`:
+None. Every workflow runs on the default `GITHUB_TOKEN`.
+
+This used to say something else. Status lived on a Projects v2 board, which
+`GITHUB_TOKEN` cannot write, so every transition needed a PAT in a
+`PROJECT_TOKEN` repository secret — a standing credential whose only job was
+keeping a mirror in sync. The board is gone and so is the secret. **Delete
+it** if it is still set:
 
 ```bash
-gh secret set PROJECT_TOKEN --repo stardustsuperwizard/sword-and-planet
+gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/sword-and-planet
 ```
-
-Project 1 is **user-owned**, not repo-owned. That changes which permission you
-need:
-
-| PAT type | What to grant |
-| --- | --- |
-| Classic | `project` scope (plus `repo`) |
-| Fine-grained | **Account permissions → Projects: Read and write** — *not* a repository permission |
-
-Without it, the first status step fails and the run stops before spending any
-credits, which is the intended failure mode.
-
-The token is scoped to individual steps through
-`.github/actions/set-project-status`, never to the job. Keep it that way: a
-job-level PAT would sit in the environment of a Copilot CLI session running
-with `--allow-all-tools`.
 
 ### Step 1 — Planning
 
@@ -384,7 +383,6 @@ with `--allow-all-tools`.
 
 `agent-01-planner.yml` then:
 
-- moves the Feature to **Planning**;
 - builds a prompt from the Issue body, **its comments**, the planner agent
   file, the task template, and a repository file inventory;
 - runs Copilot CLI with implementation tools removed;
@@ -393,8 +391,7 @@ with `--allow-all-tools`.
   dangling `depends_on`, non-empty acceptance criteria;
 - creates one `[impl]` sub-issue per task with native `--parent` and
   `--add-blocked-by` relationships;
-- posts the plan as a comment on the Feature;
-- moves the Feature to **In Progress** and each task to **Ready**.
+- posts the plan as a comment on the Feature.
 
 Comments are read as amendments to the body, and later comments win over the
 original text. The workflow skips its own machine comments so a re-plan does
@@ -404,69 +401,40 @@ A second run is blocked by the `<!-- automated-planner-complete -->` marker.
 To genuinely re-plan, run the workflow manually with `force: true` — and close
 the stale sub-issues yourself first, because nothing removes them for you.
 
+If the run **fails**, it removes `agent:plan` and comments with a link to the
+failed run. That is deliberate: `agent:plan` is what puts a Feature under
+*Planning* on the control plane, so leaving it on a failed run would park the
+Feature there forever. Giving the label back returns the Feature to *Awaiting
+planning* — which is true — and re-adding it is the same clean retry as
+always. Check for partial sub-issues before you do.
+
 ### Step 2 — Execution
 
-Work tasks in dependency order. `agent-02-execute.yml` spends no AI credits in
-any mode; it is board plumbing and a dependency check. See *Three entry
-points, three different capabilities* above for why there are three.
-
-#### Agents panel — the default
+Work tasks in dependency order. The **Agent Control Plane** Issue lists what
+is ready right now, grouped by Feature, with a ⚠️ against any task expected to
+touch `.tscn`, `.tres`, `project.godot`, or `addons/`.
 
 Open the Implementation Task, copy its **Run This Task** block, then open the
-Copilot agents panel, select the `executor` agent and **Claude Haiku 4.5**,
-and paste. This is the only path that gives you both the model and the agent,
-and it works from GitHub Mobile.
+Copilot agents panel, select the `executor` agent and your model, and paste.
+This is the only path that gives you both, and it works from GitHub Mobile.
+Assigning Copilot from the Issue is the alternative: model but no agent.
 
-The workflow has nothing to fire on until the session opens its draft pull
-request. At that point the `pull_request` job resolves the PR's
-`closingIssuesReferences` and moves those tasks to **In Progress**. There is
-no pre-flight dependency check on this path — the Run This Task block only
-exists on tasks the planner created, and the Issue lists its blockers, so
-check them before you paste.
+`agent-02-execute.yml` spends no AI credits and dispatches nothing. It fires
+when you assign Copilot, and when a session opens its draft pull request, and
+does exactly one thing: if the task still has an open `blocked-by` Issue, it
+says so in a comment on the task.
 
-#### Assign mode
+It warns rather than refuses, and never cancels. By the time it runs the
+session has already started, and unassigning a live agent orphans its branch
+rather than reliably stopping it — so whether to let it finish is your call.
+The comment is posted once per set of blockers, so the assign path and the
+pull-request path do not say it twice.
 
-Open the Implementation Task and assign it to Copilot, picking
-**Claude Haiku 4.5** in the model picker. You get the model but not the
-`executor` agent, because the assignee screen has no agent picker.
+Run it by hand against any Issue number to re-check:
 
-The workflow fires on the `assigned` event and:
-
-1. Moves the task to **In Progress**.
-2. Checks `blocked-by`. Because the session has already started, an open
-   blocker is reported as a warning comment rather than a refusal — the
-   session is deliberately *not* cancelled, since unassigning a live agent
-   orphans its branch rather than reliably stopping it. Decide whether to let
-   it finish.
-
-You get the model you chose and no custom agent. The scope contract still
-applies: it is in the Issue body, and in *Executing an Implementation Task* in
-`.github/copilot-instructions.md`, which the cloud agent always reads.
-
-#### Label mode — one tap, Auto model
-
-Add **`agent:execute`**. The workflow:
-
-1. **Refuses** if the task has open `blocked-by` Issues, parks it at
-   **Blocked**, and removes the label. This is the only mode that can gate
-   before work starts. Override with the `ignore_blockers` dispatch input.
-2. Moves the task to **In Progress**.
-3. Assigns `copilot-swe-agent` via `replaceActorsForAssignable` with
-   `agentAssignment.customAgent`, so the session runs
-   `.github/agents/02-executor.agent.md`.
-4. Removes `agent:execute` so re-adding it retries.
-
-The model is **Auto**. Use this for mechanical work where that does not
-matter; avoid it for anything touching `.tscn`, `.tres`, `project.godot`, or
-`addons/`.
-
-How a custom agent is named in the API is not precisely documented —
-`gh agent-task create --help` implies the filename stem, the file's own
-frontmatter says `executor`, and with `02-executor.agent.md` those differ. The
-workflow tries `executor`, `02-executor`, and `02-executor.agent` in turn and
-logs which one GitHub accepted. If none is accepted it falls back to the
-default agent rather than stranding the task. **Check the first run's log and
-pin `EXECUTOR_AGENT_CANDIDATES` to the winner.**
+```bash
+gh workflow run agent-02-execute.yml -f issue_number=68
+```
 
 ### Step 3 — Review
 
@@ -481,12 +449,18 @@ criterion.
 
 The first line is machine-readable:
 
-| Verdict | Board effect | PR label | Next action |
+| Verdict | PR label | Shows on the control plane as | Next action |
 | --- | --- | --- | --- |
-| `PASS` | task → **In review** | `review:pass` | Merge, squash, delete branch |
-| `FIX` | task → **Blocked** | `review:fix` | Bounded correction on the same PR |
-| `PLANNING FAILURE` | task → **Blocked** | `review:planning-failure` | Revise the plan, re-delegate |
-| `DESIGN AMBIGUITY` | task → **Blocked** | `review:design-ambiguity` | Stop, decide it yourself |
+| `PASS` | `review:pass` | Ready to merge | Merge, squash, delete branch |
+| `FIX` | `review:fix` | Needs your attention | Bounded correction on the same PR |
+| `PLANNING FAILURE` | `review:planning-failure` | Needs your attention | Revise the plan, re-delegate |
+| `DESIGN AMBIGUITY` | `review:design-ambiguity` | Needs your attention | Stop, decide it yourself |
+
+These four labels are load-bearing, not decoration: they are the only part of
+a task's derived state that is not implied by the issue graph, so the control
+plane reads them directly. `agent-03-review.yml` clears the other three before
+adding one, which is what makes "the `review:*` label on a PR" and "the most
+recent verdict" the same thing.
 
 Fix cycles are **not** dispatched automatically. Nothing re-summons Copilot on
 an adverse verdict, because an auto-fix loop can burn credits without
@@ -499,16 +473,19 @@ implementation problem. Record it.
 ### Step 4 — Rollup
 
 `agent-04-rollup.yml` fires on any Issue closing or reopening. No AI credits.
+It writes no status, because status is derived — its whole job is to
+**notify**. When the last open sibling closes, it comments on the parent
+Feature saying so.
 
-- A closed sub-issue moves to **Done**; a reopened one returns to **Ready**.
-- When the last open sibling closes, the parent Feature moves to
-  **In review** and gets a comment saying what is left.
+A comment specifically, because a comment sends a push notification. The
+control plane Issue shows the same Feature under *Awaiting your sign-off*, but
+nobody gets pinged by a regenerated dashboard.
 
 What is left is human: confirm the Feature's own acceptance criteria hold end
 to end, do the **Human Validation Required** checks in the Godot editor, then
-close the Feature. Nothing moves a Feature to **Done** automatically — that
-transition is the human sign-off, and automating it would remove the only
-checkpoint in the pipeline.
+close the Feature. Nothing closes a Feature automatically — that transition is
+the human sign-off, and automating it would remove the only checkpoint in the
+pipeline.
 
 Child states are read from `subIssues.nodes[].state` rather than the cached
 `subIssuesSummary` counters, which can lag the close event.
@@ -528,61 +505,101 @@ Each implementation sub-issue:
 - follows `.github/ISSUE_TEMPLATE/99-execute_task.md`;
 - has the same milestone as its parent Feature;
 - carries `implementation` and `machine`, and nothing else — the planner
-  deliberately does not pre-apply `agent:execute`, because that label is a
-  trigger and a pre-applied trigger is a spent one;
+  applies no `agent:*` label, because those are dispatch triggers a human
+  adds and a pre-applied trigger is a spent one;
 - records sibling ordering with GitHub issue dependencies;
 - is the only Issue assigned to the executor; and
 - is closed by its own implementation PR.
 
 The parent Feature stays open while its sub-issues are implemented.
-`agent-04-rollup.yml` moves it to **In review** when the last one closes; you
-close it.
+`agent-04-rollup.yml` comments on it when the last one closes; you close it.
 
-### Project board
+This structure is also what the control plane reads. A task is an issue with a
+parent; a Feature is an issue with sub-issues. That is deliberately structural
+rather than label-based — labels on tasks have drifted before, the graph has
+not.
 
-Tracked on the [Sword and Planet Workflow](https://github.com/users/stardustsuperwizard/projects/1)
-project. The parent Feature and its Implementation Task sub-issues each carry
-their own item on the board, carrying one field:
+### The control plane
 
-- **Status** — one shared single-select field on every item: `Backlog`,
-  `Planning`, `Ready`, `In Progress`, `In review`, `Blocked`, `Done`.
+`agent-00-dashboard.yml` regenerates a pinned Issue titled **Agent Control
+Plane** on every issue and pull request event, and nightly. It spends no AI
+credits, needs no secrets beyond `GITHUB_TOKEN`, and is the one place that
+answers *what should I dispatch next?*
 
-There is no separate Planner Status / Implementation Status pair; both roles
-write the same Status field on their own item. A Feature row is told apart
-from a Task row by the Issue itself — a Feature carries the `planned` label
-and owns sub-issues; a Task is a sub-issue.
+Every state it shows is **derived** — computed from the repository graph at
+the moment it runs, and stored nowhere:
 
-Every transition goes through the `.github/actions/set-project-status`
-composite action, so the token handling and the field names live in one file
-rather than in four workflows:
+| Condition | Task state |
+| --- | --- |
+| Issue closed | Done |
+| Open `blocked-by` issues | Blocked — dependencies |
+| No linked PR | **Ready to dispatch** |
+| Draft PR open | Implementing |
+| PR ready, no `review:*` | Awaiting review |
+| `review:fix` / `-planning-failure` / `-design-ambiguity` | **Needs your attention** |
+| `review:pass` | **Ready to merge** |
 
-| Item | Status | Set by |
-| --- | --- | --- |
-| Feature | `Planning` | `agent-01-planner.yml`, at start |
-| Feature | `In Progress` | `agent-01-planner.yml`, on success |
-| Feature | `Blocked` | `agent-01-planner.yml`, on failure |
-| Task | `Ready` | `agent-01-planner.yml`, at creation |
-| Task | `In Progress` | `agent-02-execute.yml`, on dispatch |
-| Task | `Blocked` | `agent-02-execute.yml` when blocked; `agent-03-review.yml` on an adverse verdict |
-| Task | `In review` | `agent-03-review.yml`, on `PASS` |
-| Task | `Done` | `agent-04-rollup.yml`, when the Issue closes |
-| Feature | `In review` | `agent-04-rollup.yml`, when the last sub-issue closes |
-| Feature | `Done` | **You.** Never automated. |
+| Condition | Feature state |
+| --- | --- |
+| Issue closed | Done |
+| `agent:plan` present | Planning |
+| No sub-issues | Awaiting planning |
+| Sub-issues, some open | In progress |
+| Sub-issues, all closed | **Awaiting your sign-off** |
 
-`Backlog` is the intake state and nothing writes it; the project's built-in
-auto-add sets it when an Issue first lands on the board.
+Order matters in the task table: a draft PR reads as *Implementing* even when
+a `review:fix` label is still present, because that label persists through the
+bounded correction that answers it. Testing draft-ness first is what stops
+every in-flight fix from showing as waiting on you.
+
+Run the same derivation locally at any time:
+
+```bash
+.github/scripts/render-dashboard.py            # the markdown
+.github/scripts/render-dashboard.py --json     # just the states
+```
+
+#### Why this replaced a Projects v2 board
+
+Status used to live on the [Sword and Planet
+Workflow](https://github.com/users/stardustsuperwizard/projects/1) project,
+written by eleven steps across four workflows through a shared
+`set-project-status` composite action. Three problems, in order of how fatal:
+
+1. **A board cannot cause work.** There is no repository-level Actions trigger
+   for a project item change — that webhook exists only at organization scope,
+   and Project 1 is user-owned. So a board can record state and never act on
+   it. A control plane that cannot cause anything is a report; better to build
+   an honest report.
+2. **It needed a PAT.** `GITHUB_TOKEN` cannot write Projects v2, so a
+   `PROJECT_TOKEN` secret existed purely to keep a mirror in sync.
+3. **It was a second source of truth.** Every one of its `Status` values was
+   already implied by issue state, dependencies, and labels. Eleven writes
+   maintained a copy of facts GitHub already stored, and any failed run left
+   the copy wrong.
+
+Derived state cannot drift. A failed dashboard run leaves the Issue stale —
+visibly, with its own timestamp — and never leaves the repository misdescribed.
+The nightly run bounds staleness at a day.
+
+#### Finding and re-creating it
+
+The dashboard Issue is located by its `dashboard` label, not by title or body,
+so renaming it is harmless. If it is ever deleted, the next run creates and
+pins a new one. If three Issues are already pinned the pin fails with a
+warning and the dashboard still works.
+
+Do not edit it by hand — the next run overwrites the body.
 
 ## When to collapse to one session
 
-The full pipeline costs four workflow runs of overhead. For small, mechanical,
-fully specified work — a rename, a doc fix, a Task-template Issue with no
-architectural content — skip planning: file the Issue and either assign
-Copilot directly or add `agent:execute`. This is the case label mode is for.
+For small, mechanical, fully specified work — a rename, a doc fix, a
+Task-template Issue with no architectural content — skip planning. File the
+Issue and dispatch it straight from the agents panel or by assigning Copilot.
+Nothing requires an Issue to have come from the planner.
+
 Review still applies if the change touches `.tscn`, `.tres`, `project.godot`,
 or anything under `addons/`.
-
-`agent-02-execute.yml` does not require an Issue to have come from the
-planner. It only requires that the Issue be open and unblocked.
 
 ## Where the handoff contract lives
 
@@ -708,11 +725,12 @@ example schema — do not expect clean per-model cost.
 
 | File | Purpose |
 | --- | --- |
+| `.github/workflows/agent-00-dashboard.yml` | Rewrites the pinned control plane Issue from derived state |
 | `.github/workflows/agent-01-planner.yml` | Decomposes a Feature into `[impl]` sub-issues |
-| `.github/workflows/agent-02-execute.yml` | Dispatches one task to the Copilot cloud agent |
+| `.github/workflows/agent-02-execute.yml` | Warns when a dispatched task still has an open blocker |
 | `.github/workflows/agent-03-review.yml` | Reviews a PR against its task contract, emits a verdict |
-| `.github/workflows/agent-04-rollup.yml` | Task → Done, and parent → In review when the last one closes |
-| `.github/actions/set-project-status/` | Shared Projects v2 plumbing; the only place `PROJECT_TOKEN` is read |
+| `.github/workflows/agent-04-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
+| `.github/scripts/render-dashboard.py` | Derives every task and Feature state from the repository graph |
 | `.github/agents/01-planner.agent.md` | Planner role, Issue promotion criteria |
 | `.github/agents/02-executor.agent.md` | Executor role, scope boundaries |
 | `.github/agents/03-reviewer.agent.md` | Reviewer role, verdict classification |
@@ -744,4 +762,4 @@ Re-check these with the commands rather than trusting this table.
 | `customAgent` exists on that input | same command |
 | Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"sword-and-planet"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
 | `gh agent-task create` has no `--model` | `gh agent-task create --help` |
-| Project field names and options | `gh project field-list 1 --owner stardustsuperwizard` |
+| Derived state matches reality | `.github/scripts/render-dashboard.py --json` |
