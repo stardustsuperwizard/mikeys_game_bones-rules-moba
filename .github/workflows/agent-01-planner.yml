@@ -64,7 +64,7 @@ jobs:
         || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
 
       # Soft cap for this planning session.
-      PLANNER_MAX_AI_CREDITS: "30"
+      PLANNER_MAX_AI_CREDITS: "75"
 
     steps:
       - name: Checkout Repository
@@ -129,24 +129,88 @@ jobs:
             echo "already_planned=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # The planner runs with read tools against a full checkout, so the
+      # prompt does not need to *be* the repository -- it needs to be a map of
+      # one. What goes inline is only what the planner cannot work without and
+      # would not know to ask for: the Feature Issue, the output contract, and
+      # an index of what exists. Everything else is named, sized, and left for
+      # the planner to fetch, which keeps the prompt roughly an order of
+      # magnitude smaller and leaves the credit budget for reasoning instead
+      # of for re-reading files the model may never look at.
       - name: Build Planner Request
         if: steps.duplicate_check.outputs.already_planned != 'true'
         shell: python
         run: |
           import json
+          import os
           import pathlib
           import re
+          import subprocess
+
+          # Budgets, in bytes unless named otherwise. These exist so the
+          # prompt cannot silently grow back: every inlined section is capped,
+          # and anything clipped is announced to the model rather than
+          # vanishing.
+          MAX_ISSUE_BODY = 20000
+          MAX_COMMENTS = 20
+          MAX_COMMENT = 4000
+          MAX_CONTRACT_FILE = 14000
+          MAX_INVENTORY_ENTRIES = 800
+
+          # Godot writes a .uid sidecar next to every script and resource.
+          # They are tracked, they are a quarter of the tree, and no plan ever
+          # targets one -- listing them is pure noise in the inventory.
+          INVENTORY_NOISE_SUFFIXES = (".uid",)
+
+          # Inlined in full: these define the shape of the answer. A planner
+          # that has to go and fetch its own output contract may simply not,
+          # and the failure mode is a plan that fails validation.
+          CONTRACT_FILES = [
+              ".github/agents/01-planner.agent.md",
+              ".github/ISSUE_TEMPLATE/99-execute_task.md",
+              "AGENTS.md",
+          ]
+
+          # Named but not inlined: architecture and process background. These
+          # are large, only partly relevant to any one Feature, and the
+          # planner can read the parts it needs.
+          BACKGROUND_FILES = [
+              "docs/AGENT_WORKFLOW.md",
+              ".github/copilot-instructions.md",
+              "CONTRIBUTING.md",
+          ]
 
           root = pathlib.Path(".")
           issue = json.loads(pathlib.Path("issue.json").read_text())
 
           sections = []
 
+
+          def human_size(count):
+              if count < 1024:
+                  return f"{count} B"
+
+              return f"{count / 1024:.1f} KB"
+
+
+          def clip(text, limit):
+              if len(text) <= limit:
+                  return text
+
+              return (
+                  text[:limit]
+                  + f"\n\n[... clipped at {limit} bytes;"
+                  + " read the file directly for the rest ...]"
+              )
+
+
+          issue_body = issue.get("body") or ""
+
           sections.append(
               "# FEATURE ISSUE\n\n"
               f"Number: #{issue['number']}\n"
               f"Title: {issue['title']}\n\n"
-              f"{issue.get('body') or ''}"
+              f"{clip(issue_body, MAX_ISSUE_BODY)}"
           )
 
           # Comments amend the Issue body. Skip this workflow's own output so
@@ -171,13 +235,21 @@ jobs:
                   if "<!-- agent-review-verdict -->" in body:
                       continue
 
+                  if "<!-- agent-planner-failed -->" in body:
+                      continue
+
                   author = (comment.get("user") or {}).get("login", "unknown")
 
                   human_comments.append(
                       f"## Comment by {author} "
                       f"({comment.get('created_at', 'unknown date')})\n\n"
-                      f"{body}"
+                      f"{clip(body, MAX_COMMENT)}"
                   )
+
+              # The most recent comments are the ones that amend the rest, so
+              # when there are more than the cap allows, keep the tail.
+              if len(human_comments) > MAX_COMMENTS:
+                  human_comments = human_comments[-MAX_COMMENTS:]
 
               if human_comments:
                   sections.append(
@@ -188,81 +260,184 @@ jobs:
                       + "\n\n".join(human_comments)
                   )
 
-          important_files = [
-              ".github/agents/01-planner.agent.md",
-              ".github/ISSUE_TEMPLATE/99-execute_task.md",
-              "docs/AGENT_WORKFLOW.md",
-          ]
-
-          seen = set()
-
-          for filename in important_files:
+          for filename in CONTRACT_FILES:
               path = root / filename
 
-              if path.exists() and path.is_file():
-                  text = path.read_text(errors="replace")[:40000]
-
-                  sections.append(
-                      f"# REPOSITORY FILE: {filename}\n\n{text}"
-                  )
-
-                  seen.add(filename)
-
-          # Give the planner an architectural map without dumping every file.
-          tracked_files = []
-
-          for path in root.rglob("*"):
               if not path.is_file():
                   continue
 
-              relative = path.as_posix()
+              text = clip(path.read_text(errors="replace"), MAX_CONTRACT_FILE)
 
-              if relative.startswith(".git/"):
-                  continue
+              sections.append(f"# PLANNING CONTRACT: {filename}\n\n{text}")
 
-              tracked_files.append(relative)
+          # The inventory is built from `git ls-files` rather than from a
+          # filesystem walk. A walk on a runner also picks up Godot's .godot/
+          # cache, egg-info, and __pycache__ -- hundreds of paths that are not
+          # part of the codebase and that pushed the real files past the old
+          # entry cap. Tracked files are exactly the ones a plan may target.
+          def tracked_files():
+              try:
+                  result = subprocess.run(
+                      ["git", "ls-files", "-z"],
+                      capture_output=True,
+                      check=True,
+                  )
+              except (OSError, subprocess.CalledProcessError) as error:
+                  print(f"git ls-files unavailable ({error}); walking instead")
 
-          tracked_files.sort()
+                  skip = {".git", ".godot", "__pycache__", "node_modules"}
+
+                  walked = []
+
+                  for path in root.rglob("*"):
+                      if not path.is_file():
+                          continue
+
+                      if skip.intersection(path.parts):
+                          continue
+
+                      walked.append(path.as_posix())
+
+                  return sorted(walked)
+
+              return sorted(
+                  name
+                  for name in result.stdout.decode(
+                      "utf-8", errors="replace"
+                  ).split("\0")
+                  if name
+              )
+
+
+          all_tracked = tracked_files()
+
+          inventory = [
+              name
+              for name in all_tracked
+              if not name.endswith(INVENTORY_NOISE_SUFFIXES)
+          ]
+
+          hidden = len(all_tracked) - len(inventory)
+
+          truncated = len(inventory) > MAX_INVENTORY_ENTRIES
+          shown = inventory[:MAX_INVENTORY_ENTRIES]
+
+          # Grouped by directory with sizes: the grouping is what makes the
+          # subsystem boundaries legible at a glance, and the sizes are what
+          # let the planner decide which files are worth spending a read on.
+          grouped = {}
+
+          for name in shown:
+              directory = str(pathlib.PurePosixPath(name).parent)
+              grouped.setdefault(directory, []).append(name)
+
+          lines = []
+
+          for directory in sorted(grouped):
+              label = "." if directory == "." else f"{directory}/"
+
+              count = len(grouped[directory])
+
+              lines.append(
+                  f"{label}  ({count} file{'' if count == 1 else 's'})"
+              )
+
+              for name in grouped[directory]:
+                  try:
+                      size = human_size((root / name).stat().st_size)
+                  except OSError:
+                      size = "unknown size"
+
+                  lines.append(
+                      f"  {pathlib.PurePosixPath(name).name}  ({size})"
+                  )
+
+          inventory_note = f"{len(inventory)} tracked files"
+
+          if truncated:
+              inventory_note += (
+                  f"; the first {MAX_INVENTORY_ENTRIES} are listed"
+              )
+
+          if hidden:
+              inventory_note += f" ({hidden} Godot .uid sidecars omitted)"
+
+          inventory_note += "."
 
           sections.append(
               "# REPOSITORY FILE INVENTORY\n\n"
-              + "\n".join(tracked_files[:1500])
+              f"{inventory_note} Paths are relative to the repository root,"
+              " which is your working directory. Read any of these with your"
+              " file tools; do not assume a file's contents from its name.\n\n"
+              + "\n".join(lines)
           )
 
-          # Include repository files explicitly referenced in backticks
-          # in the Feature Issue.
-          issue_body = issue.get("body") or ""
+          # Pointers, not contents. Background documents plus whatever the
+          # Issue itself pointed at in backticks: the Issue author naming a
+          # path is a strong signal the planner should look there, and a much
+          # weaker signal that the whole file belongs in the prompt.
+          pointers = []
+          seen = set(CONTRACT_FILES)
 
-          referenced_paths = re.findall(r"`([^`\n]+)`", issue_body)
+          for filename in BACKGROUND_FILES:
+              path = root / filename
 
-          for candidate in referenced_paths:
+              if not path.is_file() or filename in seen:
+                  continue
+
+              pointers.append(
+                  f"- `{filename}` ({human_size(path.stat().st_size)})"
+                  " -- architecture and process background"
+              )
+
+              seen.add(filename)
+
+          for candidate in re.findall(r"`([^`\n]+)`", issue_body):
               candidate = candidate.strip()
 
-              if candidate in seen:
+              if candidate in seen or "/" not in candidate:
                   continue
 
-              if "/" not in candidate:
+              path = root / candidate.rstrip("/")
+
+              if path.is_dir():
+                  contained = [
+                      name
+                      for name in inventory
+                      if name.startswith(candidate.rstrip("/") + "/")
+                  ]
+
+                  if not contained:
+                      continue
+
+                  pointers.append(
+                      f"- `{candidate.rstrip('/')}/` ({len(contained)} tracked"
+                      " files) -- subsystem named by the Feature Issue"
+                  )
+
+                  seen.add(candidate)
+
                   continue
 
-              path = root / candidate
-
-              if not path.exists() or not path.is_file():
+              if not path.is_file():
                   continue
 
-              try:
-                  text = path.read_text(errors="replace")
-              except Exception:
-                  continue
-
-              sections.append(
-                  f"# ISSUE-REFERENCED FILE: {candidate}\n\n"
-                  + text[:40000]
+              pointers.append(
+                  f"- `{candidate}` ({human_size(path.stat().st_size)})"
+                  " -- named by the Feature Issue"
               )
 
               seen.add(candidate)
 
-              if len(seen) >= 15:
-                  break
+          if pointers:
+              sections.append(
+                  "# READ THESE BEFORE PLANNING\n\n"
+                  "These files are NOT included below. Open them with your"
+                  " read tools. The ones named by the Feature Issue are the"
+                  " code the plan will touch; read them before deciding how"
+                  " to split the work.\n\n"
+                  + "\n".join(pointers)
+              )
 
           context = "\n\n---\n\n".join(sections)
 
@@ -273,6 +448,25 @@ jobs:
 
           Your sole responsibility in this invocation is to decompose the
           supplied Feature Issue into bounded Implementation Tasks.
+
+          HOW TO USE YOUR TOOLS:
+
+          You are running inside a full checkout of the repository. Your
+          working directory is the repository root. You have read and search
+          tools; every write tool and shell execution is disabled.
+
+          The context below is a map, not the territory. It gives you the
+          Feature Issue, your output contract, and an inventory of every
+          tracked file. It does NOT give you the source. Retrieve what you
+          need:
+
+          - Read every file listed under READ THESE BEFORE PLANNING.
+          - Read the existing code your tasks will modify, before you decide
+            how to split them. A task's expected_files must name real paths.
+          - Search rather than guess. Do not infer a file's contents, its
+            API, or its conventions from its name or its size.
+          - Stop reading once you can write the plan. Reading is not free,
+            and this session has a credit budget.
 
           HARD RULES:
 
@@ -331,6 +525,10 @@ jobs:
 
           Produce between 1 and 12 tasks.
 
+          Write the JSON object as your final message. Write it in one piece,
+          and do not narrate it first: a session that spends its budget
+          describing the plan before emitting it ends with no plan at all.
+
           REPOSITORY AND FEATURE CONTEXT FOLLOWS.
 
           {context}
@@ -340,14 +538,22 @@ jobs:
           prompt_path.write_text(prompt)
 
           # Size is worth surfacing: the prompt grows with the Issue body, its
-          # comments, and every backticked file the Issue references, so it is
-          # the number that silently drifts upward run over run.
+          # comments, and the inventory, so it is the number that silently
+          # drifts upward run over run. The per-section breakdown is what
+          # tells you which one drifted.
           size = prompt_path.stat().st_size
 
           print(f"Planner prompt: {size} bytes across {len(sections)} sections")
 
           for section in sections:
               print(f"  {len(section.encode()):>8} B  {section.splitlines()[0]}")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(
+                  f"\nPlanner prompt: {human_size(size)} across"
+                  f" {len(sections)} sections,"
+                  f" {len(inventory)} tracked files inventoried.\n"
+              )
 
       # Copilot CLI model ids are not published as a stable list; they are
       # shown in the --model help text. Dumping them costs nothing and means
@@ -390,36 +596,43 @@ jobs:
           # Programmatic mode requires pre-authorized tools.
           #
           # We allow Copilot to inspect the checkout but explicitly remove
-          # tools capable of implementation or shell execution.
+          # tools capable of implementation or shell execution. The read and
+          # search tools that survive that filter are the ones the prompt
+          # tells the planner to use: the prompt ships a map of the repository
+          # and expects the planner to fetch the files it actually needs.
           #
           # --output-format json emits JSONL events, which we parse in the
           # following step rather than trusting terminal-formatted output.
           #
           # PLANNER_MODELS is a preference list. An unavailable model is
           # rejected at startup, before any token is billed, so retrying the
-          # real prompt on the next candidate is free — cheaper than probing
-          # each id first. Only the availability error is retried; anything
-          # else means the model ran and failed, and re-running it on another
-          # model would burn credits reproducing the same failure.
+          # real prompt on the next candidate is free -- cheaper than probing
+          # each id first. Only the availability error is retried; every other
+          # ending means the model ran, and re-running it on another model
+          # would burn credits reproducing the same failure.
+          #
+          # Which ending it was is not something this loop guesses. Every
+          # attempt is handed to classify-copilot-outcome.py, which reads the
+          # exit status, stderr, and the event stream and names the reason.
+          # That distinction is the whole point: a session that ran out of
+          # credits mid-answer and a model that emitted garbage produce the
+          # same unparsable output here, and need opposite responses.
           #
           # The prompt is fed on stdin, not via -p "$(cat ...)". Linux caps a
           # single argv element at MAX_ARG_STRLEN (32 pages = 128 KiB), which
           # is a separate, much smaller limit than the ~2 MB total ARG_MAX.
-          # This planner prompt embeds repository files and routinely exceeds
-          # 128 KiB, so passing it as an argument made execve() fail with
-          # E2BIG ("Argument list too long", exit 126) before copilot ever
-          # started. Copilot CLI should read the prompt from stdin by default.
+          # Copilot CLI reads the prompt from stdin by default.
 
-          # DEBUG: Check that prompt file exists
-          echo "=== DEBUG: Checking planner-prompt.txt ==="
-          if [ -f planner-prompt.txt ]; then
-            echo "File exists, size: $(wc -c < planner-prompt.txt) bytes"
-          else
-            echo "ERROR: planner-prompt.txt not found!"
+          if [ ! -f planner-prompt.txt ]; then
+            echo "::error::planner-prompt.txt was not produced by the" \
+                 "Build Planner Request step."
             exit 1
           fi
 
+          echo "Planner prompt: $(wc -c < planner-prompt.txt) bytes"
+
           resolved=""
+          last_reason=""
 
           IFS=',' read -r -a candidates <<< "$PLANNER_MODELS"
 
@@ -441,90 +654,218 @@ jobs:
               < planner-prompt.txt \
               > copilot-output.jsonl 2> copilot-error.txt || status=$?
 
-            echo "=== copilot-error.txt ==="
-            cat copilot-error.txt
-            echo ""
+            echo "copilot exited $status"
+            echo "output: $(wc -c < copilot-output.jsonl) bytes of JSONL"
 
-            echo "=== copilot-output.jsonl (first 1000 bytes) ==="
-            head -c 1000 copilot-output.jsonl
-            echo ""
-            echo "=== copilot-output.jsonl (total size) ==="
-            echo "$(wc -c < copilot-output.jsonl) bytes"
-            echo ""
+            python3 .github/scripts/classify-copilot-outcome.py \
+              --jsonl copilot-output.jsonl \
+              --stderr copilot-error.txt \
+              --exit-status "$status" \
+              --model "$model" \
+              --credit-limit "$PLANNER_MAX_AI_CREDITS" \
+              --out copilot-outcome.json
+
+            reason="$(jq -r '.reason' copilot-outcome.json)"
+            headline="$(jq -r '.headline' copilot-outcome.json)"
+            guidance="$(jq -r '.guidance' copilot-outcome.json)"
 
             echo "::endgroup::"
 
-            if [ "$status" -eq 0 ]; then
+            last_reason="$reason"
+
+            if [ "$reason" = "model_unavailable" ]; then
+              echo "::warning::$headline. Trying the next candidate."
+              continue
+            fi
+
+            chars="$(jq -r '.assistant_text_chars' copilot-outcome.json)"
+
+            # Anything that produced text goes forward, even a session that
+            # ended badly. The credit cap is soft -- an in-flight response
+            # finishes -- so a run can trip its budget and still hand back a
+            # whole plan, and failing here would throw that plan away. Whether
+            # what came back is usable is the validator's question, and it is
+            # asked in exactly one place.
+            if [ "$reason" = "completed" ] || [ "$chars" -gt 0 ]; then
               resolved="$model"
+
+              if [ "$reason" != "completed" ]; then
+                echo "::warning::$headline, but it produced $chars characters" \
+                     "of output. Passing them to the validator, which will" \
+                     "report whether a usable plan survived."
+              fi
+
               break
             fi
 
-            # 126/127 mean the shell could not execute copilot at all (not
-            # found, not executable, or execve() refused the argument list).
-            # That is a harness fault, not a model fault, and every candidate
-            # would hit it identically — so say so plainly instead of blaming
-            # whichever model happened to be first in the list.
-            if [ "$status" -eq 126 ] || [ "$status" -eq 127 ]; then
-              echo "::error::Could not execute the copilot binary (exit" \
-                   "$status). This is not a model failure. Check that Copilot" \
-                   "CLI is installed on the runner and that the prompt is fed" \
-                   "on stdin rather than as a command-line argument."
-              exit "$status"
-            fi
+            # No text at all. Now the reason is the whole story.
 
-            if ! grep -q 'from --model flag is not available' copilot-error.txt; then
-              echo "::error::Copilot failed on $model for a reason other than" \
-                   "model availability; not retrying on another model."
-              exit "$status"
-            fi
+            # Everything else is terminal, and each kind gets its own error
+            # so the log says what to do rather than "copilot failed".
+            echo "::error::$headline"
+            echo "$guidance"
 
-            echo "::warning::$model is not available to this workflow's" \
-                 "identity. Trying the next candidate."
+            {
+              echo "### Planning failed: $reason"
+              echo ""
+              echo "$headline"
+              echo ""
+              echo "$guidance"
+              echo ""
+              echo "<details><summary>Session evidence</summary>"
+              echo ""
+              echo '```json'
+              jq '{reason, exit_status, assistant_text_chars, event_counts,
+                   unfinished_turn, unparsable_jsonl_lines, budget_signals,
+                   rate_limit_signals, error_events}' copilot-outcome.json
+              echo '```'
+              echo ""
+              echo '```'
+              jq -r '.stderr_excerpt' copilot-outcome.json
+              echo '```'
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            cp copilot-outcome.json planner-failure.json
+
+            exit 1
           done
 
           if [ -z "$resolved" ]; then
+            echo '{"reason":"model_unavailable",' \
+                 '"headline":"No candidate model was available",' \
+                 '"guidance":"Availability is resolved per identity."}' \
+              > planner-failure.json
+
             echo "::error::None of these models were available to the Actions" \
                  "GITHUB_TOKEN identity: $PLANNER_MODELS. Availability is" \
                  "resolved per identity, so a model offered in your own picker" \
                  "can still be refused here. Check the Copilot model policy at" \
                  "https://github.com/settings/copilot/features, then set the" \
-                 "PLANNER_MODELS repository variable."
+                 "PLANNER_MODELS repository variable. (last reason:" \
+                 "$last_reason)"
             exit 1
           fi
 
           echo "PLANNER_MODEL_USED=$resolved" >> "$GITHUB_ENV"
           echo "Planned on $resolved." >> "$GITHUB_STEP_SUMMARY"
 
+      # Every way this step can fail is a different message to the human, and
+      # the differences matter more than the failure. "Copilot ran out of
+      # credits while writing the plan" means raise the cap; "the model
+      # returned prose instead of JSON" means fix the prompt; "the JSON is
+      # valid but the schema is wrong" means the contract drifted. All three
+      # arrive here as `plan.json is missing`, so this step names which one it
+      # was, records it in planner-failure.json, and lets the failure reporter
+      # say it on the Issue.
       - name: Extract and Validate Planner JSON
         if: steps.duplicate_check.outputs.already_planned != 'true'
         shell: python
         run: |
           import json
           import pathlib
+          import sys
+
+          # How much model output to quote back when the parse fails. Enough
+          # to see what went wrong, not so much that the Issue comment becomes
+          # the transcript.
+          EVIDENCE_CHARS = 1500
 
           jsonl = pathlib.Path("copilot-output.jsonl")
 
-          # Debug: Show what's in the output files
-          print("=== DEBUG: copilot-output.jsonl ===")
-          if jsonl.exists():
-              content = jsonl.read_text(errors="replace")
-              print(f"File size: {len(content)} bytes")
-              print(f"Content (first 2000 chars):\n{content[:2000]}")
-              if len(content) > 2000:
-                  print(f"... ({len(content) - 2000} more bytes)")
-          else:
-              print("File does not exist!")
+          outcome_path = pathlib.Path("copilot-outcome.json")
 
-          print("\n=== DEBUG: copilot-error.txt ===")
-          error_file = pathlib.Path("copilot-error.txt")
-          if error_file.exists():
-              error_content = error_file.read_text(errors="replace")
-              print(f"Content:\n{error_content}")
-          else:
-              print("File does not exist!")
+          outcome = (
+              json.loads(outcome_path.read_text())
+              if outcome_path.exists()
+              else {}
+          )
+
+
+          def fail(kind, headline, guidance, evidence=""):
+              """Record a classified failure and stop the job."""
+
+              pathlib.Path("planner-failure.json").write_text(
+                  json.dumps(
+                      {
+                          "reason": kind,
+                          "headline": headline,
+                          "guidance": guidance,
+                          "evidence": evidence[:EVIDENCE_CHARS],
+                          "session_reason": outcome.get("reason"),
+                          "assistant_text_chars": outcome.get(
+                              "assistant_text_chars"
+                          ),
+                          "unfinished_turn": outcome.get("unfinished_turn"),
+                          "credit_limit": outcome.get("credit_limit"),
+                      },
+                      indent=2,
+                  )
+                  + "\n"
+              )
+
+              print(f"::error::{headline}")
+              print(guidance)
+
+              if evidence:
+                  print("--- model output ---")
+                  print(evidence[:EVIDENCE_CHARS])
+
+              sys.exit(1)
+
+
+          def find_object_end(candidate, start):
+              """Index of the brace closing the object opened at `start`.
+
+              None when it is never closed -- which is the signature of a
+              writer that stopped mid-sentence rather than of bad JSON.
+
+              Counting braces outside string literals beats text.rfind("}"):
+              a model that appends a sentence containing a brace after its
+              plan would otherwise drag that prose inside the parsed slice and
+              be reported as invalid JSON, when the plan itself was fine.
+              """
+
+              depth = 0
+              in_string = False
+              escaped = False
+
+              for index in range(start, len(candidate)):
+                  character = candidate[index]
+
+                  if in_string:
+                      if escaped:
+                          escaped = False
+                      elif character == "\\":
+                          escaped = True
+                      elif character == '"':
+                          in_string = False
+
+                      continue
+
+                  if character == '"':
+                      in_string = True
+                  elif character in "{[":
+                      depth += 1
+                  elif character in "}]":
+                      depth -= 1
+
+                      if depth == 0:
+                          return index
+
+              return None
+
+
+          if not jsonl.exists():
+              fail(
+                  "no_output",
+                  "Copilot produced no output file",
+                  "The CLI did not write copilot-output.jsonl at all. This is"
+                  " a harness fault rather than a model or budget failure.",
+              )
 
           assistant_parts = []
-          event_types = set()
+          event_types = {}
 
           for raw_line in jsonl.read_text(errors="replace").splitlines():
               raw_line = raw_line.strip()
@@ -534,13 +875,13 @@ jobs:
 
               try:
                   event = json.loads(raw_line)
-              except json.JSONDecodeError as e:
-                  print(f"Failed to parse JSON: {e}")
-                  print(f"Line was: {raw_line[:200]}")
+              except json.JSONDecodeError:
+                  # A single unparsable line is almost always the last one, cut
+                  # off mid-write. The classifier already counted these.
                   continue
 
               event_type = event.get("type")
-              event_types.add(event_type)
+              event_types[event_type] = event_types.get(event_type, 0) + 1
 
               if event_type != "assistant.message":
                   continue
@@ -548,6 +889,8 @@ jobs:
               data = event.get("data") or {}
               content = data.get("content")
 
+              # Copilot CLI has shipped both a bare string and a list of typed
+              # content blocks in this field.
               if isinstance(content, str):
                   assistant_parts.append(content)
               elif isinstance(content, list):
@@ -555,15 +898,42 @@ jobs:
                       if isinstance(block, dict) and block.get("type") == "text":
                           assistant_parts.append(block.get("text", ""))
 
-          print(f"\n=== DEBUG: Event types found: {event_types} ===")
-          print(f"Assistant message parts collected: {len(assistant_parts)}")
+          print(f"Event types: {json.dumps(event_types)}")
+          print(f"Assistant message parts: {len(assistant_parts)}")
+
+          # The credit cap is a soft one: Copilot lets an in-flight response
+          # finish, so a run can hit its budget and still hand back a complete
+          # plan. The session verdict therefore never vetoes output that
+          # arrived intact -- it only explains output that did not.
+          stopped_short = outcome.get("reason") == "budget_exhausted" or (
+              outcome.get("unfinished_turn")
+              and outcome.get("reason")
+              in ("no_assistant_output", "session_error")
+          )
 
           if not assistant_parts:
-              raise RuntimeError(
-                  "Copilot CLI returned no assistant.message content"
+              if stopped_short:
+                  fail(
+                      "budget_exhausted",
+                      outcome.get(
+                          "headline",
+                          "Copilot stopped on its AI credit limit before"
+                          " saying anything",
+                      ),
+                      outcome.get("guidance", ""),
+                  )
+
+              fail(
+                  "no_assistant_output",
+                  "Copilot returned no assistant message",
+                  outcome.get("guidance")
+                  or "The session ended without the model saying anything."
+                  " Check the event counts in the job log.",
               )
 
           text = "\n".join(assistant_parts).strip()
+
+          print(f"Assistant text: {len(text)} chars")
 
           # Be tolerant if the model ignored the no-fence instruction.
           if text.startswith("```"):
@@ -580,14 +950,88 @@ jobs:
           # Also tolerate small leading/trailing chatter by extracting the
           # outermost JSON object.
           start = text.find("{")
-          end = text.rfind("}")
 
-          if start == -1 or end == -1 or end <= start:
-              raise RuntimeError(
-                  "Could not locate a JSON object in Copilot response"
+          if start == -1:
+              if stopped_short:
+                  fail(
+                      "budget_exhausted",
+                      "Copilot stopped on its AI credit limit before it began"
+                      " the plan",
+                      outcome.get("guidance", ""),
+                      text,
+                  )
+
+              fail(
+                  "malformed_json",
+                  "The model returned no JSON object at all",
+                  "The response contains no opening brace, and the session"
+                  " ran to completion within budget -- so this is a"
+                  " prompt-following failure, not a truncated or"
+                  " budget-stopped one. The model's full response is below.",
+                  text,
               )
 
-          plan = json.loads(text[start:end + 1])
+          end = find_object_end(text, start)
+
+          # An object that opens and never closes is the signature of a
+          # session that stopped mid-answer. Paired with an unfinished turn or
+          # a budget verdict, that is a budget stop, not malformed output --
+          # and saying "malformed JSON" here would send the reader to rewrite
+          # a prompt that was working fine.
+          if end is None:
+              candidate = text[start:]
+
+              if stopped_short or outcome.get("unfinished_turn"):
+                  fail(
+                      "budget_exhausted",
+                      "Copilot stopped mid-answer, most likely on its AI"
+                      f" credit limit ({outcome.get('credit_limit', '?')}"
+                      " credits)",
+                      "The model was writing a well-formed plan and was cut"
+                      " off before closing it: the JSON is incomplete, not"
+                      " wrong, and the session never finished its turn. Raise"
+                      " the credit cap for this workflow or narrow the"
+                      " Feature, then retry. Do not change the prompt.",
+                      candidate,
+                  )
+
+              fail(
+                  "truncated_output",
+                  "The model's JSON object is incomplete",
+                  "The response opens a JSON object and never closes it, but"
+                  " the session itself ended cleanly and within budget. That"
+                  " points at the model stopping early rather than at the"
+                  " harness. Retry; if it repeats, shorten the requested"
+                  " plan.",
+                  candidate,
+              )
+
+          candidate = text[start:end + 1]
+
+          try:
+              plan = json.loads(candidate)
+          except json.JSONDecodeError as error:
+              fail(
+                  "malformed_json",
+                  f"The model returned invalid JSON: {error}",
+                  "The response is complete -- it opens and closes -- but is"
+                  " not valid JSON. This is a model output failure, not a"
+                  " budget failure. The offending text is below.",
+                  candidate,
+              )
+
+
+          def schema_fail(message):
+              fail(
+                  "schema_violation",
+                  f"The plan is valid JSON but does not match the contract:"
+                  f" {message}",
+                  "The model answered in full and stayed within budget; it"
+                  " simply returned the wrong shape. Fix the contract in the"
+                  " prompt, or the validation here if the contract moved.",
+                  json.dumps(plan, indent=2),
+              )
+
 
           required_top = {
               "plan_summary",
@@ -596,25 +1040,24 @@ jobs:
           }
 
           if set(plan.keys()) != required_top:
-              raise RuntimeError(
-                  "Planner JSON has unexpected top-level fields: "
-                  + repr(set(plan.keys()))
+              schema_fail(
+                  "unexpected top-level fields: " + repr(set(plan.keys()))
               )
 
           if not isinstance(plan["plan_summary"], str):
-              raise RuntimeError("plan_summary must be a string")
+              schema_fail("plan_summary must be a string")
 
           if not isinstance(plan["architecture_notes"], list):
-              raise RuntimeError("architecture_notes must be an array")
+              schema_fail("architecture_notes must be an array")
 
           tasks = plan["tasks"]
 
           if not isinstance(tasks, list):
-              raise RuntimeError("tasks must be an array")
+              schema_fail("tasks must be an array")
 
           if not 1 <= len(tasks) <= 12:
-              raise RuntimeError(
-                  f"Planner produced {len(tasks)} tasks; expected 1-12"
+              schema_fail(
+                  f"planner produced {len(tasks)} tasks; expected 1-12"
               )
 
           required_task = {
@@ -632,10 +1075,11 @@ jobs:
           task_ids = []
 
           for task in tasks:
+              if not isinstance(task, dict):
+                  schema_fail(f"task is not an object: {task!r}")
+
               if set(task.keys()) != required_task:
-                  raise RuntimeError(
-                      f"Task has unexpected fields: {task}"
-                  )
+                  schema_fail(f"task has unexpected fields: {task}")
 
               for field in (
                   "id",
@@ -644,9 +1088,7 @@ jobs:
                   "scope",
               ):
                   if not isinstance(task[field], str):
-                      raise RuntimeError(
-                          f"{field} must be a string"
-                      )
+                      schema_fail(f"{field} must be a string")
 
               for field in (
                   "expected_files",
@@ -656,52 +1098,52 @@ jobs:
                   "depends_on",
               ):
                   if not isinstance(task[field], list):
-                      raise RuntimeError(
-                          f"{task['id']}.{field} must be an array"
-                      )
+                      schema_fail(f"{task['id']}.{field} must be an array")
 
                   if not all(
                       isinstance(value, str)
                       for value in task[field]
                   ):
-                      raise RuntimeError(
+                      schema_fail(
                           f"{task['id']}.{field} must contain strings"
                       )
 
               if not task["acceptance_criteria"]:
-                  raise RuntimeError(
-                      f"{task['id']} has no acceptance criteria"
-                  )
+                  schema_fail(f"{task['id']} has no acceptance criteria")
 
               task_ids.append(task["id"])
 
           if len(task_ids) != len(set(task_ids)):
-              raise RuntimeError(
-                  "Planner returned duplicate task IDs"
-              )
+              schema_fail("planner returned duplicate task IDs")
 
           known_ids = set(task_ids)
 
           for task in tasks:
               for dependency in task["depends_on"]:
                   if dependency not in known_ids:
-                      raise RuntimeError(
-                          f"{task['id']} depends on unknown task "
-                          f"{dependency}"
+                      schema_fail(
+                          f"{task['id']} depends on unknown task {dependency}"
                       )
 
                   if dependency == task["id"]:
-                      raise RuntimeError(
-                          f"{task['id']} depends on itself"
-                      )
+                      schema_fail(f"{task['id']} depends on itself")
 
           pathlib.Path("plan.json").write_text(
               json.dumps(plan, indent=2) + "\n"
           )
 
-          print(
-              f"Validated {len(tasks)} Implementation Task(s)"
-          )
+          print(f"Validated {len(tasks)} Implementation Task(s)")
+
+          # A plan that arrived complete *and* tripped the cap is a warning,
+          # not a failure -- the cap is soft, so the in-flight response
+          # finished. It is still the last run that will get away with it.
+          if outcome.get("budget_signals"):
+              print(
+                  "::warning::This plan is complete, but the session reached"
+                  f" its AI credit limit ({outcome.get('credit_limit')}"
+                  " credits) on the way. Raise PLANNER_MAX_AI_CREDITS before"
+                  " the next Feature of this size."
+              )
 
       - name: Ensure Orchestration Labels Exist
         if: steps.duplicate_check.outputs.already_planned != 'true'
@@ -1205,7 +1647,6 @@ jobs:
             --remove-label "plan" || true
 
           echo "Feature #$ISSUE_NUMBER planned successfully."
-
       # Nothing records a failed plan as *status*, because status is a label
       # query and there is no field to write it to. What matters is that the
       # Feature must not sit in the planning view forever: `agent:plan` is
@@ -1214,35 +1655,189 @@ jobs:
       # back in the awaiting-planning view, which is true, and re-adding
       # `agent:plan` is the same clean retry it always was.
       #
-      # The comment is the part that notifies you.
+      # The comment is the part that notifies you, so it carries the reason
+      # rather than a link to go and find one. Whichever step failed leaves a
+      # classified planner-failure.json behind; this reads it and says what
+      # happened and what to do about it. When there is no such file the
+      # failure happened somewhere other than the Copilot session -- label
+      # creation, sub-issue creation -- and the generic message is the honest
+      # one.
       - name: Report Planning Failure
         if: failure()
-        shell: bash
+        shell: python
         env:
           RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository
             }}/actions/runs/${{ github.run_id }}
         run: |
-          set -euo pipefail
+          import json
+          import os
+          import pathlib
+          import subprocess
 
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:plan" || true
+          repo = os.environ["GITHUB_REPOSITORY"]
+          issue_number = os.environ["ISSUE_NUMBER"]
+          run_url = os.environ["RUN_URL"]
 
-          gh issue comment "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "$(cat <<EOF
-          <!-- agent-planner-failed -->
+          failure_path = pathlib.Path("planner-failure.json")
 
-          ## Planning failed
+          failure = {}
 
-          The planning run did not complete: $RUN_URL
+          if failure_path.exists():
+              try:
+                  failure = json.loads(failure_path.read_text())
+              except json.JSONDecodeError:
+                  failure = {}
 
-          No Implementation Tasks were created, or only some were — check the
-          Issue's sub-issues before retrying, and close any partial ones.
+          reason = failure.get("reason", "unknown")
 
-          \`agent:plan\` has been removed and \`plan\` was left in place, so
-          this Feature is back in the awaiting-planning view. Re-add
-          \`agent:plan\` to retry.
-          EOF
-          )"
+          # What the human should actually do next, per reason. The guidance
+          # the classifier wrote is about the session; this is about the
+          # workflow.
+          NEXT_STEPS = {
+              "budget_exhausted": (
+                  "Raise `PLANNER_MAX_AI_CREDITS` in"
+                  " `.github/workflows/agent-01-planner.yml` (currently"
+                  " `{credit_limit}`), or split this Feature into smaller"
+                  " ones, then re-add `agent:plan`. Re-running unchanged will"
+                  " stop at the same place."
+              ),
+              "rate_limited": (
+                  "Nothing is misconfigured. Re-add `agent:plan` in a few"
+                  " minutes."
+              ),
+              "truncated_output": (
+                  "Re-add `agent:plan` to retry. If it truncates again at the"
+                  " same point, the Feature is too large for one plan."
+              ),
+              "malformed_json": (
+                  "The model did not follow the output contract. Retry once;"
+                  " if it repeats, the prompt in the Build Planner Request"
+                  " step needs tightening, not a bigger budget."
+              ),
+              "schema_violation": (
+                  "The plan's shape does not match what the workflow"
+                  " validates. Either the model drifted or the contract"
+                  " changed on one side only -- compare the prompt's JSON"
+                  " skeleton against the validation in the Extract and"
+                  " Validate Planner JSON step."
+              ),
+              "model_unavailable": (
+                  "No candidate model was available to the Actions"
+                  " `GITHUB_TOKEN` identity. Check"
+                  " https://github.com/settings/copilot/features, then set"
+                  " the `PLANNER_MODELS` repository variable."
+              ),
+              "harness_error": (
+                  "This is a workflow fault, not a model or budget fault."
+                  " Retrying without changing anything will fail the same"
+                  " way."
+              ),
+              "no_assistant_output": (
+                  "The session produced nothing at all. Check the run log for"
+                  " the event counts before retrying."
+              ),
+              "no_output": (
+                  "Copilot CLI wrote no output file. Check that the CLI"
+                  " installed on the runner."
+              ),
+          }
+
+          lines = [
+              "<!-- agent-planner-failed -->",
+              "",
+              "## Planning failed",
+              "",
+          ]
+
+          if failure:
+              lines += [
+                  f"**{failure.get('headline', 'The planning run failed')}**",
+                  "",
+                  f"Reason: `{reason}`",
+                  "",
+              ]
+
+              guidance = failure.get("guidance")
+
+              if guidance:
+                  lines += [guidance, ""]
+
+              next_step = NEXT_STEPS.get(reason)
+
+              if next_step:
+                  lines += [
+                      "### What to do",
+                      "",
+                      next_step.format(
+                          credit_limit=failure.get("credit_limit", "unset")
+                      ),
+                      "",
+                  ]
+
+              evidence = failure.get("evidence")
+
+              if evidence:
+                  lines += [
+                      "<details><summary>What the model returned</summary>",
+                      "",
+                      "```",
+                      evidence,
+                      "```",
+                      "",
+                      "</details>",
+                      "",
+                  ]
+          else:
+              lines += [
+                  "The planning run did not complete, and it did not fail"
+                  " inside the Copilot session -- so this is a failure in the"
+                  " GitHub steps around it (labels, sub-issues, or the plan"
+                  " comment) rather than a model or budget problem.",
+                  "",
+                  "No Implementation Tasks were created, or only some were —"
+                  " check the Issue's sub-issues before retrying, and close"
+                  " any partial ones.",
+                  "",
+              ]
+
+          lines += [
+              f"Full run log: {run_url}",
+              "",
+              "`agent:plan` has been removed and `plan` was left in place, so"
+              " this Feature is back in the awaiting-planning view. Re-add"
+              " `agent:plan` to retry.",
+          ]
+
+          body = "\n".join(lines)
+
+          subprocess.run(
+              [
+                  "gh",
+                  "issue",
+                  "edit",
+                  issue_number,
+                  "--repo",
+                  repo,
+                  "--remove-label",
+                  "agent:plan",
+              ],
+              check=False,
+          )
+
+          subprocess.run(
+              [
+                  "gh",
+                  "issue",
+                  "comment",
+                  issue_number,
+                  "--repo",
+                  repo,
+                  "--body",
+                  body,
+              ],
+              check=True,
+          )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("\n" + body + "\n")
