@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MobaPassive Export Schema",
+  "description": "Schema for exported MobaPassive resources in canonical JSON format",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique snake_case identifier, matches ^[a-z][a-z0-9_]*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable display name"
+    },
+    "discipline": {
+      "type": "string",
+      "enum": ["warrior", "guardian", "slayer", "marksman", "mystic", "adventurer"],
+      "description": "Combat discipline this passive belongs to"
+    },
+    "trigger": {
+      "type": "string",
+      "description": "Event that activates this passive (e.g. 'on_basic_attack_hit')"
+    },
+    "effect": {
+      "type": ["object", "null"],
+      "description": "The stat modifier applied by this passive",
+      "$ref": "#/definitions/statModifier"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "discipline",
+    "trigger",
+    "effect"
+  ],
+  "definitions": {
+    "statModifier": {
+      "type": "object",
+      "properties": {
+        "stat": {
+          "type": "string",
+          "description": "The stat key this modifier applies to"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Flat or percentage amount to apply"
+        },
+        "is_percentage": {
+          "type": "boolean",
+          "description": "Whether amount is a fraction (0.05 = 5%)"
+        },
+        "duration": {
+          "type": "number",
+          "description": "Duration in seconds. 0 means permanent until explicitly removed."
+        },
+        "stacking": {
+          "type": "string",
+          "enum": ["refresh", "stack", "ignore", "replace_if_stronger"],
+          "description": "How multiple applications of this modifier interact"
+        },
+        "max_stacks": {
+          "type": "integer",
+          "description": "Maximum number of stacks allowed when stacking == STACK",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "stat",
+        "amount",
+        "is_percentage",
+        "duration",
+        "stacking",
+        "max_stacks"
+      ]
+    }
+  }
+}
