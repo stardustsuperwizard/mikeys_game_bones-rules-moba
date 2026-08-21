@@ -1,0 +1,278 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MobaAbility Export Schema",
+  "description": "Schema for exported MobaAbility resources in canonical JSON format",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique snake_case identifier, matches ^[a-z][a-z0-9_]*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable display name"
+    },
+    "discipline": {
+      "type": "string",
+      "enum": ["warrior", "guardian", "slayer", "marksman", "mystic", "adventurer"],
+      "description": "Combat discipline this ability belongs to"
+    },
+    "targeting_type": {
+      "type": "string",
+      "enum": ["self", "targeted", "skillshot", "ground", "area", "toggle", "channeled"],
+      "description": "How the ability is targeted and delivered"
+    },
+    "aim_assist": {
+      "type": "string",
+      "enum": ["free", "soft_lock", "hard_lock", "none"],
+      "description": "Aim assist mode for this ability"
+    },
+    "aim_cone_degrees": {
+      "type": "number",
+      "description": "Half-angle of the aim cone in degrees (used with SKILLSHOT / CHANNELED)",
+      "minimum": 0.0,
+      "maximum": 180.0
+    },
+    "magnetism": {
+      "type": "number",
+      "description": "Snap strength for soft-lock aim assist (0.0 = no snap, 1.0 = full snap)",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "acquisition_range": {
+      "type": "number",
+      "description": "Radius in world units within which a target can be acquired"
+    },
+    "damage_type": {
+      "type": "string",
+      "enum": ["physical", "magical", "true", "none"],
+      "description": "Type of damage this ability deals"
+    },
+    "base_damage": {
+      "type": "number",
+      "description": "Base damage before scaling"
+    },
+    "scaling": {
+      "type": "object",
+      "description": "Scaling coefficients keyed by stat name (e.g. {\"attack_damage\": 0.6})",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "resource_cost": {
+      "type": "number",
+      "description": "Resource cost to use this ability"
+    },
+    "cooldown": {
+      "type": "number",
+      "description": "Cooldown in seconds"
+    },
+    "cast_time": {
+      "type": "number",
+      "description": "Delay before the effect resolves"
+    },
+    "channel_duration": {
+      "type": "number",
+      "description": "Duration of the channel window for CHANNELED abilities"
+    },
+    "channel_tick_interval": {
+      "type": "number",
+      "description": "Interval between ticks while channeling (seconds). 0 = continuous."
+    },
+    "range": {
+      "type": "number",
+      "description": "Range in world units"
+    },
+    "projectile_speed": {
+      "type": "number",
+      "description": "Speed of projectiles in world units per second"
+    },
+    "area_radius": {
+      "type": "number",
+      "description": "Radius of area-of-effect abilities"
+    },
+    "duration": {
+      "type": "number",
+      "description": "Duration of the ability's persistent effect, in seconds"
+    },
+    "charges": {
+      "type": "integer",
+      "description": "Number of charges this ability has",
+      "minimum": 1,
+      "maximum": 99
+    },
+    "usable_in_air": {
+      "type": "boolean",
+      "description": "Whether this ability can be used while airborne"
+    },
+    "touch_viable": {
+      "type": "boolean",
+      "description": "Whether this ability can be executed with drag-to-aim"
+    },
+    "crowd_control": {
+      "type": ["object", "null"],
+      "description": "Optional crowd control applied by this ability",
+      "$ref": "#/definitions/crowdControlSpec"
+    },
+    "buffs": {
+      "type": "array",
+      "description": "Buffs applied by this ability",
+      "items": {
+        "$ref": "#/definitions/statModifier"
+      }
+    },
+    "debuffs": {
+      "type": "array",
+      "description": "Debuffs applied by this ability",
+      "items": {
+        "$ref": "#/definitions/statModifier"
+      }
+    },
+    "max_stacks": {
+      "type": "integer",
+      "description": "Maximum number of buff/debuff stacks this ability can apply",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "cancellable_by_movement": {
+      "type": "boolean",
+      "description": "Whether movement can cancel this ability"
+    },
+    "cancellable_by_hard_cc": {
+      "type": "boolean",
+      "description": "Whether hard crowd control can cancel this ability"
+    },
+    "refund_resource_on_cancel": {
+      "type": "number",
+      "description": "Fraction of resource_cost returned on cancel (0.0 = none, 1.0 = full)",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "on_cancel": {
+      "type": "string",
+      "enum": ["full_refund", "partial_refund", "no_refund", "cooldown_still_applies"],
+      "description": "Cancellation policy"
+    },
+    "on_channel_break": {
+      "type": "string",
+      "enum": ["no_effect_remaining", "partial_effect_already_applied"],
+      "description": "What happens to effect delivery when a channel is broken"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "discipline",
+    "targeting_type",
+    "aim_assist",
+    "aim_cone_degrees",
+    "magnetism",
+    "acquisition_range",
+    "damage_type",
+    "base_damage",
+    "scaling",
+    "resource_cost",
+    "cooldown",
+    "cast_time",
+    "channel_duration",
+    "channel_tick_interval",
+    "range",
+    "projectile_speed",
+    "area_radius",
+    "duration",
+    "charges",
+    "usable_in_air",
+    "touch_viable",
+    "crowd_control",
+    "buffs",
+    "debuffs",
+    "max_stacks",
+    "cancellable_by_movement",
+    "cancellable_by_hard_cc",
+    "refund_resource_on_cancel",
+    "on_cancel",
+    "on_channel_break"
+  ],
+  "definitions": {
+    "statModifier": {
+      "type": "object",
+      "properties": {
+        "stat": {
+          "type": "string",
+          "description": "The stat key this modifier applies to"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Flat or percentage amount to apply"
+        },
+        "is_percentage": {
+          "type": "boolean",
+          "description": "Whether amount is a fraction (0.05 = 5%)"
+        },
+        "duration": {
+          "type": "number",
+          "description": "Duration in seconds. 0 means permanent until explicitly removed."
+        },
+        "stacking": {
+          "type": "string",
+          "enum": ["refresh", "stack", "ignore", "replace_if_stronger"],
+          "description": "How multiple applications of this modifier interact"
+        },
+        "max_stacks": {
+          "type": "integer",
+          "description": "Maximum number of stacks allowed when stacking == STACK",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "stat",
+        "amount",
+        "is_percentage",
+        "duration",
+        "stacking",
+        "max_stacks"
+      ]
+    },
+    "crowdControlSpec": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "stun",
+            "root",
+            "slow",
+            "silence",
+            "disarm",
+            "knockback",
+            "pull",
+            "knock_up",
+            "fear",
+            "taunt",
+            "blind"
+          ],
+          "description": "The kind of crowd control applied"
+        },
+        "magnitude": {
+          "type": "number",
+          "description": "Magnitude of the effect"
+        },
+        "duration": {
+          "type": "number",
+          "description": "Duration in seconds"
+        },
+        "affected_by_tenacity": {
+          "type": "boolean",
+          "description": "Whether the duration can be reduced by the target's Tenacity stat"
+        }
+      },
+      "required": [
+        "type",
+        "magnitude",
+        "duration",
+        "affected_by_tenacity"
+      ]
+    }
+  }
+}
