@@ -1,7 +1,7 @@
 name: Execute Task
 
-# A dependency guard around manual dispatch. Spends no AI credits, writes no
-# status anywhere, and never starts or stops a session.
+# Two guards around manual dispatch. Spends no AI credits, writes no status
+# anywhere, and never starts or stops a session.
 #
 # Execution is deliberately manual: no programmatic path can choose a model.
 # `AgentAssignmentInput` has no model field, `gh agent-task create` has no
@@ -12,13 +12,17 @@ name: Execute Task
 # was removed. You dispatch it yourself, from an agent session or the
 # assignee screen, with a model you chose.
 #
-# What is left is the one check a human reliably forgets: whether the task
-# you just started still has an open blocker. The control plane Issue shows
-# that before you dispatch; this catches it after, when you did not look.
+# What is left is the pair of checks nobody reliably performs by hand:
 #
-# It warns and never cancels. Unassigning a live session orphans its branch
-# rather than reliably stopping it, so the decision to abandon a running
-# session stays yours.
+#   1. Whether the task you just started still has an open blocker. The
+#      control plane Issue shows that before you dispatch; this catches it
+#      after, when you did not look. It warns and never cancels -- unassigning
+#      a live session orphans its branch rather than reliably stopping it, so
+#      the decision to abandon a running session stays yours.
+#
+#   2. Whether the session's pull request actually says `Closes #NN`. That one
+#      fails the check, because unlike a blocker it is cheap to fix and
+#      silently corrupts everything downstream if it is not. See the step.
 
 on:
   issues:
@@ -79,6 +83,9 @@ jobs:
     # this workflow exists for the blocker a *dispatch* forgets, and a human
     # writing the code is already looking at the Issue. `workflow_dispatch`
     # covers the exception.
+    #
+    # It also keeps the closing-reference check below off human pull requests,
+    # where "closes no Issue" is the ordinary case rather than a defect.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
@@ -118,11 +125,131 @@ jobs:
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
           if [ "$COUNT" -eq 0 ]; then
-            echo "::notice::No Issue is closed by this pull request." \
-                 "Nothing to check."
+            echo "An agent session opened a pull request that closes nothing."
           else
             echo "Checking: $(tr '\n' ' ' < tasks.txt)"
           fi
+
+      # An agent session that never wrote `Closes #NN` is the one failure
+      # this pipeline cannot see anywhere else. `closingIssuesReferences` is
+      # what `agent-03-review.yml` reads to find the acceptance criteria, and
+      # it is the only thing that closes the task on merge. An empty one
+      # therefore turns the review into a contract-free diff read, leaves the
+      # task open after its work has shipped, and strands the Feature rollup
+      # in `agent-04-rollup.yml`, which only ever fires on `issues: closed`.
+      #
+      # Pull request #80 shipped exactly that way: it said "as specified in
+      # #77" instead of "Closes #77", so Issue #77 stayed open with all of
+      # its work merged and nothing anywhere reported a problem.
+      #
+      # `opened` is the right moment to say so. Copilot fills the body in
+      # before it opens the pull request -- #78 resolved its task on this
+      # same trigger, 41 seconds after being created -- so an empty reference
+      # here is a real defect and not a draft that has yet to catch up. The
+      # session is still live and can edit its own body once this lands.
+      #
+      # This fails where the blocker check only warns. A blocker is expensive
+      # to act on and the judgement is yours; a missing keyword is one line,
+      # and the red check is what survives after the session ends.
+      - name: Require a Closing Reference
+        if: >
+          github.event_name == 'pull_request' &&
+          steps.tasks.outputs.count == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MARKER="<!-- agent-execute-no-closing-ref -->"
+
+          gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json title,body,headRefName \
+            > pr.json
+
+          # The task number is nearly always already on the page -- Copilot
+          # names its branch after the Issue and tends to cite it in prose. It
+          # paraphrased the keyword; it did not forget which task it was on.
+          {
+            jq -r '.headRefName' pr.json | grep -oE '[0-9]+' || true
+            jq -r '.title + "\n" + (.body // "")' pr.json \
+              | grep -oE '#[0-9]+' | tr -d '#' || true
+          } | sort -un > candidates.txt
+
+          # Keep only the ones that are actually open Implementation Tasks, so
+          # a stray number from a branch slug or a link to the parent Feature
+          # cannot become a confident wrong suggestion.
+          : > suggest.txt
+          while read -r N; do
+            [ -n "$N" ] || continue
+            gh issue view "$N" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json state,labels,number \
+              --jq '
+                select(.state == "OPEN")
+                | select([.labels[].name] | index("implementation"))
+                | .number
+              ' >> suggest.txt 2>/dev/null || true
+          done < candidates.txt
+
+          if [ "$(grep -c . suggest.txt || true)" -eq 1 ]; then
+            TASK=$(grep . suggest.txt)
+            KEYWORD="Closes #$TASK"
+            NOTE="This branch is working **#$TASK**, an open Implementation"
+            NOTE="$NOTE Task. That is almost certainly the number."
+          else
+            KEYWORD="Closes #<task>"
+            NOTE="No single open Implementation Task could be inferred from"
+            NOTE="$NOTE the branch name or the body, so fill in the number"
+            NOTE="$NOTE yourself."
+          fi
+
+          echo "::error::This pull request closes no Issue." \
+               "Add a \"$KEYWORD\" line to its body."
+
+          if gh pr view "$PR_NUMBER" \
+               --repo "$GITHUB_REPOSITORY" \
+               --json comments \
+               --jq '.comments[].body' \
+             | grep -qF "$MARKER"; then
+            echo "Already asked for a closing reference on #$PR_NUMBER."
+            exit 1
+          fi
+
+          # Built as a file rather than the `--body "$(cat <<EOF ...)"` form
+          # used below: bash 3.2 -- still the default shell on macOS, where
+          # this gets edited -- cannot parse an apostrophe inside a heredoc
+          # nested in a command substitution, so that form is not checkable
+          # with `bash -n` outside the runner.
+          cat > comment.md <<EOF
+          $MARKER
+
+          ## ❌ No \`Closes #NN\` line
+
+          GitHub reports no closing reference for this pull request, so it is
+          not linked to any Implementation Task.
+
+          $NOTE
+
+          **Edit the pull request body to include a line reading exactly:**
+
+          \`\`\`text
+          $KEYWORD
+          \`\`\`
+
+          A bare mention such as \`as specified in #NN\` does not count --
+          only the \`Closes\` / \`Fixes\` / \`Resolves\` keywords create
+          the link.
+
+          Without it the automated reviewer has no acceptance criteria to
+          review against, this task stays open after the pull request merges,
+          and the parent Feature's rollup never runs.
+          EOF
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file comment.md
+
+          exit 1
 
       - name: Warn on Open Blockers
         if: steps.tasks.outputs.count != '0'
@@ -204,7 +331,12 @@ jobs:
             echo "## Execute Task"
             echo
             if [ "${{ steps.tasks.outputs.count }}" = "0" ]; then
-              echo "No implementation task resolved; nothing checked."
+              echo "❌ This agent session's pull request closes no Issue."
+              echo "A comment asking for a \`Closes #NN\` line was posted."
+              echo
+              echo "Nothing downstream works without it: the reviewer has no"
+              echo "acceptance criteria, the task will not close on merge, and"
+              echo "the parent Feature's rollup will not run."
             elif [ "${ANY_BLOCKED:-0}" = "1" ]; then
               echo "⚠️ At least one dispatched task has an open blocker."
               echo "A warning comment was posted."
