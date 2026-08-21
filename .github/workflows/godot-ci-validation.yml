@@ -1,7 +1,55 @@
 name: Godot CI Validation
 
 on:
+  # This used to fire on every PR, including the many that only touch prose.
+  # `paths-ignore` is evaluated by GitHub before a runner is allocated, so an
+  # ignored PR costs nothing at all -- unlike an `if:` guard or a
+  # changed-files action, which both boot a runner just to decide not to work.
+  #
+  # The list is a deny-list on purpose. An allow-list (`paths: ['**.gd', ...]`)
+  # fails unsafe: the day someone adds a new asset directory, validation
+  # silently stops covering it. A deny-list fails safe -- an unrecognized new
+  # path runs the check, and a false positive costs two minutes of a free
+  # runner. That matters here because the Godot surface is scattered across
+  # `scripts/`, `scenes/`, `resources/`, `rules/`, `addons/` and `tests/`,
+  # while the files that provably cannot break `--import`/`--quit` are the
+  # concentrated ones: markdown, Issue templates, agent prompts.
+  #
+  # Note the ignores stop short of the validation harness itself
+  # (`.github/scripts/validate-godot.sh`, `.github/actions/setup-godot/`, this
+  # file): changing how validation runs should still run validation.
+  #
+  # A PR runs the check if *any* changed file falls outside the list, so a
+  # branch touching both `docs/DESIGN.md` and `scripts/rules.gd` is validated.
+  # Only pure-prose PRs skip.
+  #
+  # BEWARE if this ever becomes a required status check: a workflow skipped by
+  # a path filter reports no status at all, so PRs would hang forever on
+  # "Expected -- Waiting for status to be reported". Unlike a job skipped by
+  # `if:`, which reports success. At that point keep the trigger unfiltered and
+  # gate the job instead. As of writing the `main protector` ruleset requires
+  # only linear history, so this is safe.
   pull_request:
+    paths-ignore:
+      # `**.md`, not `**/*.md` -- the latter is ambiguous about matching
+      # root-level files like AGENTS.md.
+      - '**.md'
+      - 'LICENSE'
+      - 'docs/**'
+      # The Python balance harness is decoupled by design: it reads exported
+      # JSON and never feeds back into the Godot project. See sim/README.md.
+      - 'sim/**'
+      # Agent control plane. Prompts, templates and the dashboard renderer
+      # cannot affect whether the engine boots.
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/agents/**'
+      - '.github/instructions/**'
+      - '.github/workflows/agent-*.yml'
+      - '.github/scripts/agent-metrics.py'
+      - '.github/scripts/render-dashboard.py'
+
+  # The escape hatch: run validation by hand against any branch, whatever the
+  # filter above decided.
   workflow_dispatch:
 
 jobs:
