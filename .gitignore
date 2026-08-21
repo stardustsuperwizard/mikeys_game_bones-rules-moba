@@ -28,5 +28,13 @@ addons/*
 __pycache__/
 *.pyc
 
+# Python virtual environments and test artifacts
+venv/
+.venv/
+env/
+.env/
+.pytest_cache/
+.hypothesis/
+
 # Generated rules data (Python harness only)
 rules/data/generated/
