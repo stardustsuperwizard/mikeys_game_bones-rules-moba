@@ -9,7 +9,8 @@ name: Execute Task
 # available, Auto will be used automatically." Anything this workflow
 # dispatched for you would therefore run on Auto -- a blind draw from a pool
 # that is mostly non-Anthropic -- which is why the `agent:execute` label mode
-# was removed. You dispatch, from the agents panel, with a model you chose.
+# was removed. You dispatch it yourself, from an agent session or the
+# assignee screen, with a model you chose.
 #
 # What is left is the one check a human reliably forgets: whether the task
 # you just started still has an open blocker. The control plane Issue shows
@@ -24,9 +25,9 @@ on:
     types:
       - assigned
 
-  # The agents-panel path is neither an assignment nor a label, so the draft
-  # pull request the session opens early is the only "work has started"
-  # signal available for it.
+  # A pasted agent session -- the mobile and agents-panel path -- is neither
+  # an assignment nor a label, so the draft pull request the session opens
+  # early is the only "work has started" signal available for it.
   pull_request:
     types:
       - opened
@@ -76,7 +77,7 @@ jobs:
           set -euo pipefail
 
           # One task on the assign and dispatch paths; however many the pull
-          # request says it closes on the panel path.
+          # request says it closes on the pasted-session path.
           if [ -n "${PR_NUMBER:-}" ]; then
             gh pr view "$PR_NUMBER" \
               --repo "$GITHUB_REPOSITORY" \

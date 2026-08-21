@@ -287,8 +287,8 @@ def render(model: dict, repo: str | None) -> str:
     if ready:
         out += [
             "Open the task, copy its **Run This Task** block, then paste it "
-            "into the Copilot agents panel with the `executor` agent and a "
-            "model you chose.",
+            "into a new Copilot agent session — mobile or desktop — on the "
+            "model you chose. Pick the model, not a custom agent.",
             "",
         ]
         out += task_table(

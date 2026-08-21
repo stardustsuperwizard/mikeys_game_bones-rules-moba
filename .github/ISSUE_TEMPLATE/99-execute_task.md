@@ -16,24 +16,72 @@ It MUST:
 - be assigned to Copilot only after planning is complete.
 
 The implementation PR closes THIS Issue, not the parent Feature.
+
+Section order is deliberate and mirrors agent-01-planner.yml. An execution
+session starts cold and reads top-down, so the task description and the
+contract lead; the specifics follow. Keep the two in sync.
 -->
 
 ## Run This Task
 
-Open the Copilot **agents panel**, select the `executor` agent and your model,
-then paste this:
+Start a Copilot agent session — mobile or desktop — and paste this as the
+task description:
 
 ````text
 Work GitHub issue #<this-issue-number> in this repository.
 
-Read that issue first. Its Objective, Scope, Architecture
-Constraints, Acceptance Criteria and Out of Scope sections
-are the authoritative contract. Implement only what they
-require, run .github/scripts/validate-godot.sh, and report
-the command and its result.
+Read that issue first, then read the "Executing an
+Implementation Task" section of
+.github/copilot-instructions.md -- that is your contract.
+
+The issue's Objective, Scope, Architecture Constraints,
+Acceptance Criteria and Out of Scope sections are
+authoritative. Implement only what they require. Do not
+create issues. Do not close the parent Feature. Report
+discovered out-of-scope work instead of doing it.
+
+Run .github/scripts/validate-godot.sh and report the
+command and its result.
 
 Your pull request must include: Closes #<this-issue-number>
 ````
+
+**Pick the model, not the agent.** The `executor` profile adds nothing a
+cloud session can use: its `tools:` and `model:` keys are both ignored there,
+and its prose is already in `.github/copilot-instructions.md`, which every
+cloud session reads. On GitHub Mobile, selecting a custom agent costs you the
+model picker — and no picker means Auto.
+
+Assigning this Issue to Copilot works too: same model choice, no paste, no
+agent.
+
+---
+
+## Implementation Agent Contract
+
+The full contract is *Executing an Implementation Task* in
+`.github/copilot-instructions.md`, which you are already reading whether you
+loaded a profile or not. This is its short form.
+
+Implement only the Scope and Acceptance Criteria below. The parent Feature
+provides context only; it does not expand this task's scope, and neither do
+sibling tasks.
+
+Do not:
+
+- broaden this task;
+- redesign architecture;
+- implement sibling tasks;
+- make speculative improvements;
+- create additional GitHub Issues;
+- close the parent Feature.
+
+If additional work is discovered, report it under `Discovered out-of-scope
+work` rather than implementing it.
+
+Run `.github/scripts/validate-godot.sh` before reporting completion. The
+implementation pull request must close this Issue —
+`Closes #<this-issue-number>` — and must not close the parent Feature.
 
 ---
 
@@ -108,31 +156,3 @@ This section exists so the Issue remains understandable when read alone.
 -->
 
 - Blocked by: <issue number or "none">
-
-## Implementation Agent Contract
-
-The implementation agent MUST:
-
-- implement only the Scope and Acceptance Criteria above;
-- preserve the listed Architecture Constraints;
-- avoid speculative improvements;
-- avoid implementing sibling tasks;
-- report discovered out-of-scope work rather than implementing it;
-- run `.github/scripts/validate-godot.sh`;
-- report any unsatisfied acceptance criterion.
-
-The implementation agent MUST NOT:
-
-- create additional GitHub Issues;
-- redesign architecture;
-- expand this task;
-- close the parent Feature.
-
-## Completion
-
-The implementation pull request must include:
-
-`Closes #<this-implementation-issue-number>`
-
-It must not close the parent Feature unless explicitly instructed by the
-planner because that pull request completes the entire Feature.
