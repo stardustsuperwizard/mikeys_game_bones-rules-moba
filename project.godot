@@ -18,6 +18,10 @@ config/features=PackedStringArray("4.7")
 
 enabled=PackedStringArray("res://addons/mikeys_basic_ai/plugin.cfg", "res://addons/mikeys_basic_networking/plugin.cfg", "res://addons/mikeys_game_bones/plugin.cfg")
 
+[autoload]
+
+TestBootstrap="*res://tests/test_bootstrap.gd"
+
 [input]
 
 move_forward={
