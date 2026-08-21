@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="MobaStatBlock" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://rules/core/moba_stat_block.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+health = 500
+health_regen = 5.0
+resource = 250
+resource_regen = 3.0
+attack_damage = 50
+attack_speed = 1.0
+attack_range = 2.0
+armor = 30
+magic_resistance = 25
+movement_speed = 5.0
+crit_chance = 0.05
+crit_damage = 2.0
+ability_haste = 0
+armor_pen_flat = 0
+armor_pen_percent = 0.0
+magic_pen_flat = 0
+magic_pen_percent = 0.0
+lifesteal = 0.0
+omnivamp = 0.0
+tenacity = 0.0
