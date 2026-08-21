@@ -1,0 +1,65 @@
+[gd_resource type="Resource" script_class="MobaAbility" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://rules/abilities/moba_ability.gd" id="1"]
+[ext_resource type="Script" path="res://rules/effects/moba_crowd_control_spec.gd" id="2"]
+[ext_resource type="Script" path="res://rules/effects/moba_stat_modifier.gd" id="3"]
+
+[sub_resource type="Resource" script_class="MobaCrowdControlSpec" id="4"]
+script = ExtResource("2")
+type = 0
+magnitude = 0.5
+duration = 2.0
+affected_by_tenacity = true
+
+[sub_resource type="Resource" script_class="MobaStatModifier" id="5"]
+script = ExtResource("3")
+stat = "attack_damage"
+amount = 20.0
+is_percentage = false
+duration = 0.0
+stacking = 1
+max_stacks = 3
+
+[sub_resource type="Resource" script_class="MobaStatModifier" id="6"]
+script = ExtResource("3")
+stat = "armor"
+amount = -10.0
+is_percentage = false
+duration = 5.0
+stacking = 1
+max_stacks = 2
+
+[resource]
+script = ExtResource("1")
+id = "sample_complete"
+name = "Sample Complete Ability"
+discipline = 1
+targeting_type = 1
+aim_assist = 1
+aim_cone_degrees = 45.0
+magnetism = 0.8
+acquisition_range = 15.0
+damage_type = 0
+base_damage = 50.0
+scaling = {"attack_damage": 0.6}
+resource_cost = 60.0
+cooldown = 8.0
+cast_time = 0.3
+channel_duration = 0.0
+channel_tick_interval = 0.0
+range = 20.0
+projectile_speed = 0.0
+area_radius = 0.0
+duration = 0.0
+charges = 1
+usable_in_air = false
+touch_viable = true
+crowd_control = SubResource("4")
+buffs = [SubResource("5")]
+debuffs = [SubResource("6")]
+max_stacks = 3
+cancellable_by_movement = false
+cancellable_by_hard_cc = true
+refund_resource_on_cancel = 0.5
+on_cancel = 1
+on_channel_break = 0
