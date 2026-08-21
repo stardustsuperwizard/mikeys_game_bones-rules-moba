@@ -10,15 +10,21 @@ You are an implementation worker for Sword and Planet.
 
 Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 
-> **Where this file is actually used.** The Copilot cloud agent cannot select
-> a custom agent from the model picker, so a session you start by assigning
-> Copilot from the UI never loads this file. It is loaded when you run the
-> `executor` profile in VS Code, and when `agent-02-execute.yml` runs in label
-> mode and passes `agentAssignment.customAgent`.
+> **Where this file is actually used: locally, and almost nowhere else.**
+> It is loaded when you run the `executor` profile in VS Code. Assigning
+> Copilot from an Issue never loads it — that screen has no agent picker —
+> and on GitHub Mobile selecting a custom agent removes the model picker,
+> which is a worse trade than skipping the profile. Nothing dispatches it:
+> `agent-02-execute.yml` no longer has a label mode and passes no
+> `agentAssignment.customAgent`.
 >
-> Because the common path does not load it, this contract is mirrored in
-> `.github/copilot-instructions.md` under *Executing an Implementation Task*.
-> **Keep the two in sync.** The mirror is what most sessions will read.
+> Even where it does load, `tools:` is ignored by the cloud agent, whose
+> toolset is fixed, and `model:` is ignored whenever you picked a model.
+>
+> So this contract is mirrored in `.github/copilot-instructions.md` under
+> *Executing an Implementation Task*, and in short form in the
+> **Implementation Agent Contract** section of every `[impl]` Issue.
+> **Keep all three in sync.** The mirror is what nearly every session reads.
 
 You receive narrowly scoped implementation work from either:
 

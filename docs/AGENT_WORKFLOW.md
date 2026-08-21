@@ -86,7 +86,7 @@ know what reviewed a PR.
 Single-valued `vars.PLANNER_MODEL` / `vars.REVIEWER_MODEL` are still honoured
 and, when set, are used as the entire list.
 
-### Two entry points, and why neither is a workflow
+### Three entry points, and why none of them is a workflow
 
 Execution is manual. Nothing in this repository dispatches a session for you,
 and that is a consequence of one fact rather than a preference:
@@ -109,27 +109,42 @@ codebase whose `.tscn` and `.tres` serialization is unforgiving. There was
 once an `agent:execute` label that made exactly that trade. It has been
 removed.
 
-What is left is two ways in, both of which you drive:
+What is left is three ways in, all of which you drive:
 
 | Entry point | Model | Custom agent | Linked to the Issue |
 | --- | --- | --- | --- |
-| **Agents panel** — start a session | **your choice** | **`executor`** | via the Run This Task block |
+| **Desktop agents panel** — start a session | **your choice** | `executor` | via the Run This Task block |
+| **GitHub Mobile** — new agent session | **your choice**, *or* a custom agent — never both | either, not both | via the Run This Task block |
 | Issue → assign Copilot | **your choice** | no | yes |
 
-The agents panel is the only place you get both, which makes it the preferred
-path — and it is available on GitHub Mobile. What it does not give you is a
-link back to the Issue, because it takes a free-text task description instead.
+Only the desktop panel offers both pickers at once. Mobile makes them
+exclusive: choose Copilot Agent and you get the model list, choose a custom
+agent and the model list disappears — which, per the documentation quoted
+above, means Auto. The assignee screen offers a model and no agent anywhere.
 
-That gap is closed by the **Run This Task** block the planner writes at the
-top of every `[impl]` Issue: a pre-filled description carrying the Issue's own
-number and a `Closes #n` line. Copy it, open the agents panel, pick `executor`
-and your model, paste. The resulting PR closes the right Issue.
+**Take the model. Every time.** The `executor` profile is worth nothing to a
+cloud session: its `tools:` list is ignored because the cloud agent's toolset
+is fixed, its `model:` line is ignored because you just picked one, and its
+prose is mirrored into *Executing an Implementation Task* in
+`.github/copilot-instructions.md`, which **every** cloud session reads no
+matter how it started. Trading a live model choice for a file the session
+already has is the `agent:execute` bargain again, and it was a bad bargain
+the first time.
 
-The assignee screen on an Issue offers a model picker but no agent picker.
-That is a property of that screen, not of mobile. When a session runs without
-the `executor` profile the contract still applies: it is in the Issue body,
-and in *Executing an Implementation Task* in
-`.github/copilot-instructions.md`, which the cloud agent always reads.
+What a pasted session does not give you for free is a link back to the Issue,
+because it takes a free-text task description instead. That gap is closed by
+the **Run This Task** block the planner writes at the top of every `[impl]`
+Issue: a pre-filled description carrying the Issue's own number, a pointer to
+the contract in `.github/copilot-instructions.md`, and a `Closes #n` line.
+Copy it, start a session on the model you chose, paste. The resulting PR
+closes the right Issue.
+
+Directly beneath it the planner writes an **Implementation Agent Contract**
+section — the short form of the same contract, ahead of the Objective rather
+than below Dependencies, because an execution session starts cold and reads
+top-down. So the contract reaches the session three ways: the repository
+instructions file, the pasted description, and the Issue body itself. Losing
+any one of them is survivable.
 
 ### `model:` in an agent file takes a display name
 
@@ -324,13 +339,13 @@ Every stage but execution starts because a label was added, and each workflow
 - **No workflow fires on its own output**, so there are no dispatch loops.
 
 Execution is the exception, because a label cannot carry a model. See
-*Two entry points, and why neither is a workflow* above.
+*Three entry points, and why none of them is a workflow* above.
 
 | Trigger | Added by | Consumed by | Means |
 | --- | --- | --- | --- |
 | `plan` label | Issue template | `agent-01-planner.yml` | Filed, not yet decomposed |
 | `agent:plan` label | You | `agent-01-planner.yml` | This Issue is ready to be planned |
-| **the agents panel** | You | — | Run this task, on the model and agent you picked |
+| **a pasted agent session** | You | — | Run this task, on the model you picked |
 | **assigning Copilot** | You | `agent-02-execute.yml` | Run this task on the model you picked |
 | `agent:review` label | You | `agent-03-review.yml` | Re-review this PR |
 | `planned` label | Planner | — | Feature has been decomposed |
@@ -431,10 +446,11 @@ is ready right now, grouped by Feature, with a ⚠️ against any task expected 
 touch `.tscn`, `.tres`, `project.godot`, or `addons/`. It renders on demand,
 so add `dashboard:update` first if it looks stale — see *The control plane*.
 
-Open the Implementation Task, copy its **Run This Task** block, then open the
-Copilot agents panel, select the `executor` agent and your model, and paste.
-This is the only path that gives you both, and it works from GitHub Mobile.
-Assigning Copilot from the Issue is the alternative: model but no agent.
+Open the Implementation Task, copy its **Run This Task** block, start a new
+Copilot agent session on the model you chose — mobile or desktop — and paste.
+Pick the model, not a custom agent; see *Three entry points* for
+why. Assigning Copilot from the Issue is the alternative: same model choice,
+no paste.
 
 `agent-02-execute.yml` spends no AI credits and dispatches nothing. It fires
 when you assign Copilot, and when a session opens its draft pull request, and
@@ -705,7 +721,7 @@ Do not edit the Issue by hand — the next run overwrites the body.
 
 For small, mechanical, fully specified work — a rename, a doc fix, a
 Task-template Issue with no architectural content — skip planning. File the
-Issue and dispatch it straight from the agents panel or by assigning Copilot.
+Issue and dispatch it straight from an agent session or by assigning Copilot.
 Nothing requires an Issue to have come from the planner.
 
 Review still applies if the change touches `.tscn`, `.tres`, `project.godot`,
