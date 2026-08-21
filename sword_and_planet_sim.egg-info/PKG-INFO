@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: sword-and-planet-sim
+Version: 0.1.0
+Summary: Python balance harness for Sword and Planet MOBA RPG
+Requires-Python: >=3.11
+Provides-Extra: dev
+Requires-Dist: pytest==7.4.4; extra == "dev"
+Requires-Dist: hypothesis==6.92.1; extra == "dev"
+Requires-Dist: numpy==1.26.3; extra == "dev"
+Requires-Dist: jsonschema==4.20.0; extra == "dev"
