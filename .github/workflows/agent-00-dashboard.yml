@@ -1,0 +1,165 @@
+name: Agent Control Plane
+
+# Regenerates the derived control plane into a pinned Issue.
+#
+# This replaced a Projects v2 board. The board had to be *written* by every
+# workflow, needed a PAT because GITHUB_TOKEN cannot write Projects v2, and
+# went wrong whenever a run failed midway. Worse, it could never cause
+# anything: there is no repository-level Actions trigger for a project item
+# change, so a board can only ever be a report.
+#
+# So this is a report, honestly. Every state it shows is computed fresh from
+# issues, GitHub issue dependencies, sub-issue links, open pull requests and
+# the reviewer's `review:*` labels. Nothing is stored, so nothing can drift —
+# a failed run leaves this Issue stale, never leaves the repository wrong.
+#
+# Spends no AI credits and needs no secrets beyond GITHUB_TOKEN.
+
+on:
+  issues:
+    types:
+      - opened
+      - closed
+      - reopened
+      - labeled
+      - unlabeled
+      - deleted
+      - transferred
+
+  # `pull_request`, not `pull_request_target`: every PR here comes from a
+  # `copilot/*` branch in this repository, so the token is writable and the
+  # fork-token hazard of _target buys nothing. A fork PR simply will not
+  # refresh the board until the next issue event or the nightly run.
+  pull_request:
+    types:
+      - opened
+      - closed
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+      - labeled
+      - unlabeled
+
+  schedule:
+    # Nightly, so a run that failed or was cancelled cannot leave the board
+    # stale for longer than a day.
+    - cron: "17 6 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  # Only the most recent render matters — an in-flight one is reading state
+  # that a newer event has already superseded.
+  group: agent-dashboard
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    name: Render Control Plane
+    runs-on: ubuntu-latest
+
+    # Creating and labelling the dashboard Issue fires `opened` and
+    # `labeled` back at this workflow. Those runs terminate on their own —
+    # body edits are not subscribed — but rendering the board because the
+    # board changed is pure waste, so skip it.
+    if: >
+      github.event_name != 'issues' ||
+      !contains(github.event.issue.labels.*.name, 'dashboard')
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+      # The Issue carrying the dashboard is found by this label, not by title
+      # or by searching for the body marker, so renaming it is harmless.
+      DASHBOARD_LABEL: dashboard
+      DASHBOARD_TITLE: Agent Control Plane
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Find or Create the Dashboard Issue
+        id: issue
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! gh label list --repo "$GITHUB_REPOSITORY" \
+                 --json name --jq '.[].name' \
+               | grep -qx "$DASHBOARD_LABEL"; then
+            gh label create "$DASHBOARD_LABEL" \
+              --repo "$GITHUB_REPOSITORY" \
+              --color "5319E7" \
+              --description "Generated agent control plane" \
+              --force
+          fi
+
+          NUMBER=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --label "$DASHBOARD_LABEL" \
+            --limit 1 \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -z "$NUMBER" ]; then
+            echo "No dashboard Issue yet; creating one."
+            URL=$(gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$DASHBOARD_TITLE" \
+              --label "$DASHBOARD_LABEL" \
+              --body "<!-- agent-control-plane --> Generating…")
+            NUMBER="${URL##*/}"
+
+            # A repository allows three pinned Issues. If all three are
+            # taken this fails, and an unpinned dashboard is still a working
+            # dashboard, so it is not worth failing the run over.
+            gh issue pin "$NUMBER" --repo "$GITHUB_REPOSITORY" \
+              || echo "::warning::Could not pin #$NUMBER. Pin it by hand."
+          fi
+
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Dashboard is #$NUMBER"
+
+      - name: Render
+        shell: bash
+        run: |
+          set -euo pipefail
+          .github/scripts/render-dashboard.py > dashboard.md
+          wc -c dashboard.md
+
+      - name: Publish
+        shell: bash
+        env:
+          NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          set -euo pipefail
+
+          # Editing a body sends no notifications, so this can run as often
+          # as it likes without becoming noise.
+          gh issue edit "$NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file dashboard.md
+
+          echo "Published to #$NUMBER"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          {
+            echo "## Agent Control Plane"
+            echo
+            echo "Rendered to issue #${NUMBER:-?}."
+            echo
+            if [ -f dashboard.md ]; then
+              cat dashboard.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

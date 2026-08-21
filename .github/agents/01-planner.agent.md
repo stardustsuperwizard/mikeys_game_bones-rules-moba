@@ -150,7 +150,9 @@ For every promoted Implementation Task:
 
    - `implementation`
    - `machine`
-   - `agent:execute`
+
+   Do not apply `agent:*` labels. Those are dispatch triggers a human adds;
+   a pre-applied trigger is a spent one.
 
 5. Include:
    - plan reference;
@@ -186,7 +188,7 @@ gh issue create \
   --repo stardustsuperwizard/sword-and-planet \
   --title "[impl] <task title>" \
   --body-file <prepared-body-file> \
-  --label "implementation,machine,agent:execute" \
+  --label "implementation,machine" \
   --parent <parent-feature-number>
 ```
 
