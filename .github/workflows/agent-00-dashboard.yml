@@ -19,9 +19,8 @@ name: Agent Control Plane
 on:
   # The refresh button. Add `dashboard:update` to any Issue -- the pinned
   # control plane Issue itself is the obvious place -- and this runs. The
-  # label is removed before the render starts, so it is a button rather than
-  # a state: re-adding it is another refresh, and a failed run leaves you
-  # free to just add it again.
+  # last step of every run clears the label again, so it is a button rather
+  # than a state: re-adding it is another refresh.
   #
   # This subscribes to `labeled` on every Issue, but the job below runs only
   # for this one label name. Every other label event terminates in the
@@ -99,31 +98,14 @@ jobs:
       DASHBOARD_LABEL: dashboard
       DASHBOARD_TITLE: Agent Control Plane
 
-      # The trigger label, consumed on sight. Distinct from DASHBOARD_LABEL:
-      # that one marks *which Issue is the board*, this one is a request to
-      # redraw it.
+      # The trigger label, consumed by the last step of every run. Distinct
+      # from DASHBOARD_LABEL: that one marks *which Issue is the board*, this
+      # one is a request to redraw it.
       REFRESH_LABEL: dashboard:update
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      # First, so the button is free again even if the render fails below.
-      # Nothing subscribes to `unlabeled`, so this cannot re-trigger the
-      # workflow.
-      - name: Consume the Refresh Label
-        if: github.event_name == 'issues'
-        shell: bash
-        env:
-          LABELED_ISSUE: ${{ github.event.issue.number }}
-        run: |
-          set -euo pipefail
-
-          gh issue edit "$LABELED_ISSUE" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "$REFRESH_LABEL" || true
-
-          echo "Refresh requested from #$LABELED_ISSUE"
 
       - name: Find or Create the Dashboard Issue
         id: issue
@@ -201,6 +183,45 @@ jobs:
             --body-file dashboard.md
 
           echo "Published to #$NUMBER"
+
+      # A render is a render no matter what started it, so the request is
+      # cleared the same way every time: sweep every Issue carrying the
+      # label, rather than only the one whose `labeled` event fired. A
+      # dispatch or a re-enabled cron run therefore also resets the button,
+      # and a request that arrives while a render is already in flight is
+      # not left behind on some other Issue.
+      #
+      # `always()`, so a failed render still clears it. The board is stale
+      # either way, and a stale board with the button already pressed is a
+      # dead end -- you could not ask again without removing the label by
+      # hand first. Nothing subscribes to `unlabeled`, so this cannot
+      # re-trigger the workflow.
+      - name: Consume the Refresh Label
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NUMBERS=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --label "$REFRESH_LABEL" \
+            --limit 100 \
+            --json number \
+            --jq '.[].number')
+
+          if [ -z "$NUMBERS" ]; then
+            echo "No $REFRESH_LABEL to consume."
+            exit 0
+          fi
+
+          for NUMBER in $NUMBERS; do
+            gh issue edit "$NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$REFRESH_LABEL" \
+              && echo "Consumed $REFRESH_LABEL from #$NUMBER" \
+              || echo "::warning::Could not remove $REFRESH_LABEL from #$NUMBER"
+          done
 
       - name: Summary
         if: always()

@@ -625,10 +625,21 @@ It runs **on demand**, not on every event:
 | Add `dashboard:update` to any Issue | The normal way. Works from any GitHub client, including mobile |
 | Run the workflow manually | From the Actions tab, when you are already there |
 
-`dashboard:update` is a button, not a state. The workflow removes it as its
-first step — before rendering, not after — so re-adding it is another
-refresh, and a run that fails leaves you free to just add it again. Nothing
-subscribes to `unlabeled`, so removing it cannot re-trigger anything.
+`dashboard:update` is a button, not a state. The last step of every run
+clears it, so re-adding it is another refresh. Nothing subscribes to
+`unlabeled`, so removing it cannot re-trigger anything.
+
+That step is deliberately **trigger-agnostic**: it sweeps every Issue carrying
+the label rather than only the one whose `labeled` event fired. A render is a
+render, so a manual dispatch — or a re-enabled `schedule` run — clears a
+pending request too, instead of leaving a label sitting on an Issue whose
+refresh has already happened.
+
+It runs under `if: always()`, so a *failed* render still clears the label. The
+board is stale either way, and a stale board with the button already pressed
+is a dead end — you could not ask again without removing the label by hand.
+The cost is that a failed refresh looks the same as one that was never
+requested; the step summary and the run's own failure are where you see it.
 
 The label is applied to *any* Issue; the pinned control plane Issue itself is
 the obvious place, since that is what you are looking at when you notice it is
