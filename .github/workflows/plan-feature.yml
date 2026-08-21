@@ -118,8 +118,6 @@ jobs:
           )
 
           important_files = [
-              "AGENTS.md",
-              ".github/copilot-instructions.md",
               ".github/agents/planner.agent.md",
               ".github/ISSUE_TEMPLATE/07-implementation.md",
               ".github/templates/implementation-plan.md",
