@@ -1,0 +1,32 @@
+name: Balance Deep Suite
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+jobs:
+  balance-deep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-godot
+        with:
+          godot-version: 4.7.1-stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        shell: bash
+        run: pip install -e "sim/[dev]"
+
+      - name: Run balance deep suite
+        shell: bash
+        run: pytest sim/ -m deep -v

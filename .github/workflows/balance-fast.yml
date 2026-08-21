@@ -1,0 +1,41 @@
+name: Balance Fast Suite
+
+on:
+  pull_request:
+    paths:
+      - 'rules/**'
+      - 'sim/**'
+      - '.github/workflows/balance-*.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'rules/**'
+      - 'sim/**'
+      - '.github/workflows/balance-*.yml'
+
+jobs:
+  balance-fast:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-godot
+        with:
+          godot-version: 4.7.1-stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        shell: bash
+        run: pip install -e "sim/[dev]"
+
+      - name: Run balance fast suite
+        shell: bash
+        run: pytest sim/ -m "not deep" -v
