@@ -50,9 +50,22 @@ jobs:
       PROJECT_NUMBER: "1"
 
       # Planning is where the decisions are made, so it gets the strong
-      # model. Overridable without a commit via the PLANNER_MODEL repository
-      # variable; see docs/AGENT_WORKFLOW.md for the exact id caveat.
-      PLANNER_MODEL: ${{ vars.PLANNER_MODEL || 'claude-opus-5' }}
+      # model. This is a *preference list*, not a single id: Copilot CLI
+      # resolves model availability per requesting identity, and the identity
+      # here is the Actions GITHUB_TOKEN, not your seat in the picker. A model
+      # the picker offers can still come back "not available" to this job, so
+      # the run step walks the list and uses the first one that starts.
+      #
+      # Keep every entry in the strong tier. Falling back to a cheap model
+      # would silently defeat the whole point of paying for planning.
+      #
+      # Overridable without a commit via the PLANNER_MODELS repository
+      # variable (comma-separated). The older single-valued PLANNER_MODEL is
+      # still honoured and, if set, is tried first.
+      PLANNER_MODELS: >-
+        ${{ vars.PLANNER_MODELS
+        || vars.PLANNER_MODEL
+        || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
 
       # Soft cap for this planning session.
       PLANNER_MAX_AI_CREDITS: "30"
@@ -341,16 +354,31 @@ jobs:
       # Copilot CLI model ids are not published as a stable list; they are
       # shown in the --model help text. Dumping them costs nothing and means
       # a rejected id is self-diagnosing instead of a mystery failure.
+      #
+      # The help text lists what the CLI *supports*, which is a superset of
+      # what this workflow's identity is *entitled* to. Goes to the log as
+      # well as the summary, because the summary is not where anyone looks
+      # first when a job fails.
       - name: Show Available Models
         continue-on-error: true
         shell: bash
         run: |
           set +e
+
+          copilot --version
+          copilot --help 2>&1 | sed -n '/--model/,/^[[:space:]]*$/p' \
+            > model-help.txt
+
+          echo "Candidate models for this run: $PLANNER_MODELS"
+          cat model-help.txt
+
           {
             echo "<details><summary>Copilot CLI model ids</summary>"
             echo ""
+            echo "Candidates tried in order: \`$PLANNER_MODELS\`"
+            echo ""
             echo '```'
-            copilot --help 2>&1 | sed -n '/--model/,/^[[:space:]]*$/p'
+            cat model-help.txt
             echo '```'
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -368,16 +396,66 @@ jobs:
           #
           # --output-format json emits JSONL events, which we parse in the
           # following step rather than trusting terminal-formatted output.
+          #
+          # PLANNER_MODELS is a preference list. An unavailable model is
+          # rejected at startup, before any token is billed, so retrying the
+          # real prompt on the next candidate is free — cheaper than probing
+          # each id first. Only the availability error is retried; anything
+          # else means the model ran and failed, and re-running it on another
+          # model would burn credits reproducing the same failure.
 
-          copilot \
-            -p "$(cat planner-prompt.txt)" \
-            --model "$PLANNER_MODEL" \
-            --output-format json \
-            --no-ask-user \
-            --max-ai-credits "$PLANNER_MAX_AI_CREDITS" \
-            --allow-all-tools \
-            --excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent" \
-            > copilot-output.jsonl
+          resolved=""
+
+          IFS=',' read -r -a candidates <<< "$PLANNER_MODELS"
+
+          for candidate in "${candidates[@]}"; do
+            model="$(echo "$candidate" | tr -d '[:space:]')"
+            [ -n "$model" ] || continue
+
+            echo "::group::Planning with $model"
+
+            status=0
+
+            copilot \
+              -p "$(cat planner-prompt.txt)" \
+              --model "$model" \
+              --output-format json \
+              --no-ask-user \
+              --max-ai-credits "$PLANNER_MAX_AI_CREDITS" \
+              --allow-all-tools \
+              --excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent" \
+              > copilot-output.jsonl 2> copilot-error.txt || status=$?
+
+            cat copilot-error.txt
+            echo "::endgroup::"
+
+            if [ "$status" -eq 0 ]; then
+              resolved="$model"
+              break
+            fi
+
+            if ! grep -q 'from --model flag is not available' copilot-error.txt; then
+              echo "::error::Copilot failed on $model for a reason other than" \
+                   "model availability; not retrying on another model."
+              exit "$status"
+            fi
+
+            echo "::warning::$model is not available to this workflow's" \
+                 "identity. Trying the next candidate."
+          done
+
+          if [ -z "$resolved" ]; then
+            echo "::error::None of these models were available to the Actions" \
+                 "GITHUB_TOKEN identity: $PLANNER_MODELS. Availability is" \
+                 "resolved per identity, so a model offered in your own picker" \
+                 "can still be refused here. Check the Copilot model policy at" \
+                 "https://github.com/settings/copilot/features, then set the" \
+                 "PLANNER_MODELS repository variable."
+            exit 1
+          fi
+
+          echo "PLANNER_MODEL_USED=$resolved" >> "$GITHUB_ENV"
+          echo "Planned on $resolved." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Extract and Validate Planner JSON
         if: steps.duplicate_check.outputs.already_planned != 'true'
