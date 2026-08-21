@@ -2,50 +2,66 @@ name: Agent Control Plane
 
 # Regenerates the derived control plane into a pinned Issue.
 #
-# This replaced a Projects v2 board. The board had to be *written* by every
-# workflow, needed a PAT because GITHUB_TOKEN cannot write Projects v2, and
-# went wrong whenever a run failed midway. Worse, it could never cause
-# anything: there is no repository-level Actions trigger for a project item
-# change, so a board can only ever be a report.
+# Most repository state is now read through GitHub issue *views* -- saved
+# label queries, evaluated when you look at them, nothing to run and nothing
+# to keep fresh. See docs/AGENT_WORKFLOW.md. What a view cannot express is
+# the **dependency graph**: there is no label for "blocked by #12", so
+# "ready to dispatch, in dependency order" has to be computed. That is the
+# one job left here, and it is why this workflow still exists.
 #
-# So this is a report, honestly. Every state it shows is computed fresh from
-# issues, GitHub issue dependencies, sub-issue links, open pull requests and
-# the reviewer's `review:*` labels. Nothing is stored, so nothing can drift —
-# a failed run leaves this Issue stale, never leaves the repository wrong.
+# Every state it shows is computed fresh from issues, GitHub issue
+# dependencies, sub-issue links, open pull requests and the reviewer's
+# `review:*` labels. Nothing is stored, so nothing can drift -- a failed run
+# leaves this Issue stale, never leaves the repository wrong.
 #
 # Spends no AI credits and needs no secrets beyond GITHUB_TOKEN.
 
 on:
+  # The refresh button. Add `dashboard:update` to any Issue -- the pinned
+  # control plane Issue itself is the obvious place -- and this runs. The
+  # label is removed before the render starts, so it is a button rather than
+  # a state: re-adding it is another refresh, and a failed run leaves you
+  # free to just add it again.
+  #
+  # This subscribes to `labeled` on every Issue, but the job below runs only
+  # for this one label name. Every other label event terminates in the
+  # skipped-job check, costing nothing.
   issues:
     types:
-      - opened
-      - closed
-      - reopened
       - labeled
-      - unlabeled
-      - deleted
-      - transferred
-
-  # `pull_request`, not `pull_request_target`: every PR here comes from a
-  # `copilot/*` branch in this repository, so the token is writable and the
-  # fork-token hazard of _target buys nothing. A fork PR simply will not
-  # refresh the board until the next issue event or the nightly run.
-  pull_request:
-    types:
-      - opened
-      - closed
-      - reopened
-      - ready_for_review
-      - converted_to_draft
-      - labeled
-      - unlabeled
-
-  schedule:
-    # Nightly, so a run that failed or was cancelled cannot leave the board
-    # stale for longer than a day.
-    - cron: "17 6 * * *"
 
   workflow_dispatch:
+
+  # Commented out, not deleted, while the right cadence is being worked out.
+  #
+  # This is the expensive trigger: it fires on every PR event including
+  # `opened`, so it stacks a render onto the moment a PR is created --
+  # alongside `agent-03-review.yml` and `godot-ci-validation.yml`, which is
+  # exactly the pile-up worth avoiding. Re-enable it only if the control
+  # plane going stale between manual refreshes turns out to cost more than
+  # the noise.
+  #
+  # `pull_request`, not `pull_request_target`: every PR here comes from a
+  # `copilot/*` branch in this repository, so the token is writable and the
+  # fork-token hazard of _target buys nothing.
+  #
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - closed
+  #     - reopened
+  #     - ready_for_review
+  #     - converted_to_draft
+  #     - labeled
+  #     - unlabeled
+
+  # Also commented out. This was the staleness bound: a nightly run meant a
+  # missed refresh could not leave the board wrong for longer than a day.
+  # Without it, staleness is bounded by you remembering to add the label --
+  # which is the trade being tested.
+  #
+  # schedule:
+  #   - cron: "17 6 * * *"
 
 permissions:
   contents: read
@@ -63,13 +79,17 @@ jobs:
     name: Render Control Plane
     runs-on: ubuntu-latest
 
-    # Creating and labelling the dashboard Issue fires `opened` and
-    # `labeled` back at this workflow. Those runs terminate on their own —
-    # body edits are not subscribed — but rendering the board because the
-    # board changed is pure waste, so skip it.
+    # `issues.labeled` fires for every label on every Issue; only one label
+    # name means "render". Written as a not-issues escape hatch rather than a
+    # list of allowed events so that uncommenting `pull_request` or
+    # `schedule` above needs no second edit here.
+    #
+    # This also breaks the one loop available to it: creating and labelling
+    # the dashboard Issue fires `labeled` with the name `dashboard`, which
+    # does not match, so a render can never cause a render.
     if: >
       github.event_name != 'issues' ||
-      !contains(github.event.issue.labels.*.name, 'dashboard')
+      github.event.label.name == 'dashboard:update'
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -79,9 +99,31 @@ jobs:
       DASHBOARD_LABEL: dashboard
       DASHBOARD_TITLE: Agent Control Plane
 
+      # The trigger label, consumed on sight. Distinct from DASHBOARD_LABEL:
+      # that one marks *which Issue is the board*, this one is a request to
+      # redraw it.
+      REFRESH_LABEL: dashboard:update
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      # First, so the button is free again even if the render fails below.
+      # Nothing subscribes to `unlabeled`, so this cannot re-trigger the
+      # workflow.
+      - name: Consume the Refresh Label
+        if: github.event_name == 'issues'
+        shell: bash
+        env:
+          LABELED_ISSUE: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          gh issue edit "$LABELED_ISSUE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "$REFRESH_LABEL" || true
+
+          echo "Refresh requested from #$LABELED_ISSUE"
 
       - name: Find or Create the Dashboard Issue
         id: issue
@@ -89,13 +131,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! gh label list --repo "$GITHUB_REPOSITORY" \
-                 --json name --jq '.[].name' \
-               | grep -qx "$DASHBOARD_LABEL"; then
+          EXISTING=$(gh label list --repo "$GITHUB_REPOSITORY" \
+            --limit 200 --json name --jq '.[].name')
+
+          if ! grep -qx "$DASHBOARD_LABEL" <<<"$EXISTING"; then
             gh label create "$DASHBOARD_LABEL" \
               --repo "$GITHUB_REPOSITORY" \
               --color "5319E7" \
               --description "Generated agent control plane" \
+              --force
+          fi
+
+          # A label that does not exist cannot be added, so the refresh
+          # button would have no way to appear. Creating it here means the
+          # first manual dispatch is enough to set it up.
+          if ! grep -qx "$REFRESH_LABEL" <<<"$EXISTING"; then
+            gh label create "$REFRESH_LABEL" \
+              --repo "$GITHUB_REPOSITORY" \
+              --color "5319E7" \
+              --description "Add to re-render the control plane; consumed on run" \
               --force
           fi
 

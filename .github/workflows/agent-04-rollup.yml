@@ -7,11 +7,12 @@ name: Roll Up Parent Status
 # this workflow says so in a comment.
 #
 # A comment, specifically, because a comment notifies you. The control plane
-# Issue rendered by agent-00-dashboard.yml shows the same fact, but nobody
-# gets a push notification from a regenerated dashboard.
+# Issue shows the same fact once it is re-rendered, and an issue view can be
+# filtered to surface it -- but neither one pushes.
 #
-# Task and Feature *status* is not written anywhere: it is derived on demand
-# by .github/scripts/render-dashboard.py. See docs/AGENT_WORKFLOW.md.
+# Task and Feature *status* is not written anywhere as a field: it is a label
+# query where a label can express it, and otherwise derived on demand by
+# .github/scripts/render-dashboard.py. See docs/AGENT_WORKFLOW.md.
 
 on:
   issues:

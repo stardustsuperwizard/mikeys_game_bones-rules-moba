@@ -248,6 +248,8 @@ this comparison is possible.
 
 Five workflows in `.github/workflows/`, numbered in the order work moves
 through them. Two spend AI credits; three are plumbing and cost nothing.
+`agent-00-dashboard.yml` no longer runs on every event — it renders on
+demand now. See *Issue views* and *The control plane* below.
 
 ```
 Intake Issue        [plan] in title, `plan` + type label
@@ -301,7 +303,7 @@ Implementation Task
    you do the human checks and close the Feature
 
 
-        every event above, plus nightly
+        you add  dashboard:update  (or dispatch it)
                     │
                     ▼
 ┌────────────────────────────────────────────────┐
@@ -326,14 +328,23 @@ Execution is the exception, because a label cannot carry a model. See
 
 | Trigger | Added by | Consumed by | Means |
 | --- | --- | --- | --- |
-| `plan` label | Issue template | — | Intake ticket, type marker |
+| `plan` label | Issue template | `agent-01-planner.yml` | Filed, not yet decomposed |
 | `agent:plan` label | You | `agent-01-planner.yml` | This Issue is ready to be planned |
 | **the agents panel** | You | — | Run this task, on the model and agent you picked |
 | **assigning Copilot** | You | `agent-02-execute.yml` | Run this task on the model you picked |
 | `agent:review` label | You | `agent-03-review.yml` | Re-review this PR |
 | `planned` label | Planner | — | Feature has been decomposed |
-| `review:*` label | Reviewer | `agent-00-dashboard.yml` | Last verdict on a PR |
+| `review:*` label | Reviewer | — | Last verdict on a PR |
+| `dashboard:update` label | You | `agent-00-dashboard.yml` | Re-render the control plane |
 | `dashboard` label | `agent-00` | `agent-00-dashboard.yml` | This Issue is the generated control plane |
+
+`plan` is the one row that is not a trigger — nothing fires on it. It is a
+state marker: every intake template applies it, and the planner consumes it
+on success, so a Feature carries it from the moment it is filed until it has
+actually been decomposed, and never afterwards. `plan` and `planned` are
+mutually exclusive by construction, which is what makes
+`is:issue is:open label:plan` an exact awaiting-planning queue rather than an
+approximate one. See *Issue views* below.
 
 Review is the one thing that fires without a tap, on `ready_for_review`. That
 is deliberate: it is a safety net on work you already chose to start, and
@@ -391,7 +402,8 @@ gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/sword-and-planet
   dangling `depends_on`, non-empty acceptance criteria;
 - creates one `[impl]` sub-issue per task with native `--parent` and
   `--add-blocked-by` relationships;
-- posts the plan as a comment on the Feature.
+- posts the plan as a comment on the Feature;
+- adds `planned` and consumes both `agent:plan` and `plan`.
 
 Comments are read as amendments to the body, and later comments win over the
 original text. The workflow skips its own machine comments so a re-plan does
@@ -401,18 +413,23 @@ A second run is blocked by the `<!-- automated-planner-complete -->` marker.
 To genuinely re-plan, run the workflow manually with `force: true` — and close
 the stale sub-issues yourself first, because nothing removes them for you.
 
-If the run **fails**, it removes `agent:plan` and comments with a link to the
-failed run. That is deliberate: `agent:plan` is what puts a Feature under
-*Planning* on the control plane, so leaving it on a failed run would park the
-Feature there forever. Giving the label back returns the Feature to *Awaiting
-planning* — which is true — and re-adding it is the same clean retry as
-always. Check for partial sub-issues before you do.
+If the run **fails**, it removes `agent:plan`, leaves `plan` in place, and
+comments with a link to the failed run. That is deliberate: `agent:plan` is
+what puts a Feature in the planning view, so leaving it on a failed run would
+park the Feature there forever. Giving the label back returns the Feature to
+the awaiting-planning view — which is true, because `plan` never came off —
+and re-adding `agent:plan` is the same clean retry as always. Check for
+partial sub-issues before you do.
+
+`plan` comes off in one place only, the success path, so a Feature can never
+fall out of the intake queue without a plan to show for it.
 
 ### Step 2 — Execution
 
 Work tasks in dependency order. The **Agent Control Plane** Issue lists what
 is ready right now, grouped by Feature, with a ⚠️ against any task expected to
-touch `.tscn`, `.tres`, `project.godot`, or `addons/`.
+touch `.tscn`, `.tres`, `project.godot`, or `addons/`. It renders on demand,
+so add `dashboard:update` first if it looks stale — see *The control plane*.
 
 Open the Implementation Task, copy its **Run This Task** block, then open the
 Copilot agents panel, select the `executor` agent and your model, and paste.
@@ -449,7 +466,7 @@ criterion.
 
 The first line is machine-readable:
 
-| Verdict | PR label | Shows on the control plane as | Next action |
+| Verdict | PR label | Means | Next action |
 | --- | --- | --- | --- |
 | `PASS` | `review:pass` | Ready to merge | Merge, squash, delete branch |
 | `FIX` | `review:fix` | Needs your attention | Bounded correction on the same PR |
@@ -457,10 +474,11 @@ The first line is machine-readable:
 | `DESIGN AMBIGUITY` | `review:design-ambiguity` | Needs your attention | Stop, decide it yourself |
 
 These four labels are load-bearing, not decoration: they are the only part of
-a task's derived state that is not implied by the issue graph, so the control
-plane reads them directly. `agent-03-review.yml` clears the other three before
-adding one, which is what makes "the `review:*` label on a PR" and "the most
-recent verdict" the same thing.
+a PR's state that is not implied by the issue graph, so a "needs attention"
+view is exactly `label:review:fix,review:planning-failure,review:design-ambiguity`.
+`agent-03-review.yml` clears the other three before adding one, which is what
+makes "the `review:*` label on a PR" and "the most recent verdict" the same
+thing — and what keeps those views from double-counting a PR.
 
 Fix cycles are **not** dispatched automatically. Nothing re-summons Copilot on
 an adverse verdict, because an auto-fix loop can burn credits without
@@ -478,8 +496,9 @@ It writes no status, because status is derived — its whole job is to
 Feature saying so.
 
 A comment specifically, because a comment sends a push notification. The
-control plane Issue shows the same Feature under *Awaiting your sign-off*, but
-nobody gets pinged by a regenerated dashboard.
+control plane Issue shows the same Feature under *Awaiting your sign-off* once
+it is re-rendered, and an issue view can be filtered to surface it — but
+neither one pushes.
 
 What is left is human: confirm the Feature's own acceptance criteria hold end
 to end, do the **Human Validation Required** checks in the Godot editor, then
@@ -514,17 +533,62 @@ Each implementation sub-issue:
 The parent Feature stays open while its sub-issues are implemented.
 `agent-04-rollup.yml` comments on it when the last one closes; you close it.
 
-This structure is also what the control plane reads. A task is an issue with a
+This structure is also what the issue views read. A task is an issue with a
 parent; a Feature is an issue with sub-issues. That is deliberately structural
 rather than label-based — labels on tasks have drifted before, the graph has
 not.
 
+### Issue views
+
+There is no dashboard. State is a **label query**, saved as a GitHub issue
+view, and the label vocabulary above is designed so that each state is one
+filter. Views cost nothing, cannot go stale, and are edited in the UI without
+a workflow run, a token, or a pinned Issue to keep clean.
+
+The views worth having, and the queries behind them:
+
+| View | Query |
+| --- | --- |
+| Awaiting planning | `is:issue is:open label:plan -label:"agent:plan"` |
+| Planning in flight | `is:issue is:open label:"agent:plan"` |
+| Planned Features | `is:issue is:open label:planned` |
+| Open tasks | `is:issue is:open label:implementation` |
+| Awaiting review | `is:pr is:open draft:false -label:"review:pass","review:fix","review:planning-failure","review:design-ambiguity"` |
+| Needs your attention | `is:pr is:open label:"review:fix","review:planning-failure","review:design-ambiguity"` |
+| Ready to merge | `is:pr is:open label:"review:pass"` |
+
+Quote any label containing a colon. `label:agent:plan` is parsed as a label
+named `agent` qualified by a stray `plan`, and silently returns the wrong
+set; `label:"agent:plan"` is unambiguous. Commas inside a single `label:`
+qualifier are OR.
+
+Two properties make these queries exact rather than approximate, and both are
+enforced by the workflows:
+
+- **`plan` and `planned` are mutually exclusive.** The planner adds one and
+  removes the other in the same step, and only on success. So *Awaiting
+  planning* is never a Feature that already has tasks, and never silently
+  loses one that failed to plan.
+- **A PR carries at most one `review:*` label.** `agent-03-review.yml` clears
+  the other three before adding one, so *Needs your attention* and *Ready to
+  merge* cannot both claim the same PR.
+
+The `-label:"agent:plan"` exclusion is what separates "queued" from
+"running": `agent:plan` is consumed by the planner on success and given back
+on failure, so a Feature is in exactly one of the two views at any moment.
+
+What a view cannot express is the **dependency graph** — there is no label
+for "blocked by #12", and no query that orders tasks by it. That is the one
+question views leave unanswered, and it happens to be the question you
+actually ask: *what can I dispatch right now?* It is why the control plane
+below still exists.
+
 ### The control plane
 
 `agent-00-dashboard.yml` regenerates a pinned Issue titled **Agent Control
-Plane** on every issue and pull request event, and nightly. It spends no AI
-credits, needs no secrets beyond `GITHUB_TOKEN`, and is the one place that
-answers *what should I dispatch next?*
+Plane**. It spends no AI credits, needs no secrets beyond `GITHUB_TOKEN`, and
+answers the one thing a view cannot: what is unblocked right now, grouped by
+Feature, in dependency order.
 
 Every state it shows is **derived** — computed from the repository graph at
 the moment it runs, and stored nowhere:
@@ -552,7 +616,37 @@ a `review:fix` label is still present, because that label persists through the
 bounded correction that answers it. Testing draft-ness first is what stops
 every in-flight fix from showing as waiting on you.
 
-Run the same derivation locally at any time:
+#### Rendering it
+
+It runs **on demand**, not on every event:
+
+| How | When to use it |
+| --- | --- |
+| Add `dashboard:update` to any Issue | The normal way. Works from any GitHub client, including mobile |
+| Run the workflow manually | From the Actions tab, when you are already there |
+
+`dashboard:update` is a button, not a state. The workflow removes it as its
+first step — before rendering, not after — so re-adding it is another
+refresh, and a run that fails leaves you free to just add it again. Nothing
+subscribes to `unlabeled`, so removing it cannot re-trigger anything.
+
+The label is applied to *any* Issue; the pinned control plane Issue itself is
+the obvious place, since that is what you are looking at when you notice it is
+stale. The workflow ignores which Issue it came from.
+
+Two triggers are **commented out in the workflow rather than deleted**, so
+they can be restored with an editor and no thought:
+
+- **`pull_request`** — the expensive one. It fired on every PR event including
+  `opened`, stacking a render onto PR creation alongside `agent-03-review.yml`
+  and `godot-ci-validation.yml`. Re-enable it if a stale control plane starts
+  costing more than the noise does.
+- **`schedule`** (nightly `17 6 * * *`) — this was the staleness *bound*: a
+  missed refresh could not leave the board wrong for longer than a day.
+  Without it, staleness is bounded only by you remembering to press the
+  button. That is the live trade-off, and the cheapest one to reverse.
+
+Run the same derivation locally at any time, no workflow involved:
 
 ```bash
 .github/scripts/render-dashboard.py            # the markdown
@@ -578,9 +672,10 @@ written by eleven steps across four workflows through a shared
    maintained a copy of facts GitHub already stored, and any failed run left
    the copy wrong.
 
-Derived state cannot drift. A failed dashboard run leaves the Issue stale —
-visibly, with its own timestamp — and never leaves the repository misdescribed.
-The nightly run bounds staleness at a day.
+Derived state cannot drift. A failed render leaves the Issue stale — visibly,
+with its own timestamp — and never leaves the repository misdescribed. That
+property is what makes an on-demand refresh safe: the worst an un-pressed
+button can do is show you yesterday.
 
 #### Finding and re-creating it
 
@@ -589,7 +684,11 @@ so renaming it is harmless. If it is ever deleted, the next run creates and
 pins a new one. If three Issues are already pinned the pin fails with a
 warning and the dashboard still works.
 
-Do not edit it by hand — the next run overwrites the body.
+The `dashboard:update` label is created by the workflow too, on any run — so
+if it does not exist yet, dispatch the workflow once from the Actions tab and
+the button will be there afterwards.
+
+Do not edit the Issue by hand — the next run overwrites the body.
 
 ## When to collapse to one session
 
@@ -725,7 +824,7 @@ example schema — do not expect clean per-model cost.
 
 | File | Purpose |
 | --- | --- |
-| `.github/workflows/agent-00-dashboard.yml` | Rewrites the pinned control plane Issue from derived state |
+| `.github/workflows/agent-00-dashboard.yml` | Rewrites the pinned control plane Issue from derived state, on `dashboard:update` or dispatch |
 | `.github/workflows/agent-01-planner.yml` | Decomposes a Feature into `[impl]` sub-issues |
 | `.github/workflows/agent-02-execute.yml` | Warns when a dispatched task still has an open blocker |
 | `.github/workflows/agent-03-review.yml` | Reviews a PR against its task contract, emits a verdict |
@@ -762,4 +861,5 @@ Re-check these with the commands rather than trusting this table.
 | `customAgent` exists on that input | same command |
 | Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"sword-and-planet"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
 | `gh agent-task create` has no `--model` | `gh agent-task create --help` |
+| The `plan` queue is not stale | `gh issue list --label plan --json number,title,labels` — nothing here should also carry `planned` |
 | Derived state matches reality | `.github/scripts/render-dashboard.py --json` |

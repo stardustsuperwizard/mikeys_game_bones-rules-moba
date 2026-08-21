@@ -693,6 +693,15 @@ jobs:
             "0E8A16" \
             "Feature has been decomposed into implementation tasks"
 
+          # `plan` is applied by the Issue templates, but a template silently
+          # drops a label the repository does not define — so an intake Issue
+          # would arrive unlabelled and never appear in the awaiting-planning
+          # view. Defining it here makes the vocabulary self-healing.
+          ensure_label \
+            "plan" \
+            "2C3199" \
+            "Intake Issue awaiting decomposition"
+
       - name: Create Implementation Task Sub-Issues
         if: steps.duplicate_check.outputs.already_planned != 'true'
         shell: python
@@ -1069,7 +1078,9 @@ jobs:
               "still lets you pick the model, but not the agent.",
               "",
               "The **Agent Control Plane** Issue lists every task that is "
-              "ready to dispatch right now, in dependency order.",
+              "ready to dispatch right now, in dependency order. It renders "
+              "on demand, so add `dashboard:update` to any Issue to refresh "
+              "it -- these new tasks are not on it yet.",
           ])
 
           body = "\n".join(lines)
@@ -1112,14 +1123,25 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --remove-label "agent:plan" || true
 
+          # `plan` is the intake marker every Issue template applies. It means
+          # "filed, not yet decomposed", which is what the awaiting-planning
+          # issue view queries for. Decomposition is exactly what just
+          # happened, so the Issue leaves that view here and only here — a
+          # failed run keeps `plan`, so nothing is ever silently dropped from
+          # the queue.
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "plan" || true
+
           echo "Feature #$ISSUE_NUMBER planned successfully."
 
-      # Nothing records a failed plan as *status*, because status is derived
-      # and there is no field to write it to. What matters is that the
-      # Feature must not sit under "Planning" on the control plane forever:
-      # `agent:plan` is what puts it there, so a failed run gives the label
-      # back. The Feature returns to "Awaiting planning", which is true, and
-      # re-adding the label is the same clean retry it always was.
+      # Nothing records a failed plan as *status*, because status is a label
+      # query and there is no field to write it to. What matters is that the
+      # Feature must not sit in the planning view forever: `agent:plan` is
+      # what puts it there, so a failed run gives the label back. `plan` was
+      # never removed -- that only happens on success -- so the Feature is
+      # back in the awaiting-planning view, which is true, and re-adding
+      # `agent:plan` is the same clean retry it always was.
       #
       # The comment is the part that notifies you.
       - name: Report Planning Failure
@@ -1148,7 +1170,8 @@ jobs:
           No Implementation Tasks were created, or only some were — check the
           Issue's sub-issues before retrying, and close any partial ones.
 
-          \`agent:plan\` has been removed, so this Feature now shows under
-          **Awaiting planning** again. Re-add the label to retry.
+          \`agent:plan\` has been removed and \`plan\` was left in place, so
+          this Feature is back in the awaiting-planning view. Re-add
+          \`agent:plan\` to retry.
           EOF
           )"
