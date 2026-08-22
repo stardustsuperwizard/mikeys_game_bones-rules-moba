@@ -54,6 +54,11 @@ static func run() -> bool:
 	if not _test_malformed_table_detection():
 		all_passed = false
 
+	# Test 12: DEAD must not expire via tick(), even when entered with a
+	# positive duration - DEAD is durationless and terminal.
+	if not _test_dead_does_not_expire():
+		all_passed = false
+
 	if all_passed:
 		return true
 	return false
@@ -506,9 +511,10 @@ static func _test_malformed_table_detection() -> bool:
 
 	# Case 2: a structurally valid, complete table (right columns, string
 	# values, all 10 states) but with one unrecognized policy value must
-	# still load successfully - malformed values are not a load-time
-	# concern - but the bad value must be caught (and denied) at the point
-	# of use, not silently treated as permissive.
+	# fail to load, with the failure detectable via `load_failed` - policy
+	# values are validated against each column's known vocabulary at load
+	# time, the same way unrecognized state names are handled, so a bad
+	# value never reaches a use-site check in the first place.
 	var reference_machine = MobaStateMachine.new()
 	reference_machine._ready()
 	var internal_table: Dictionary = reference_machine.get_state_table_for_testing()
@@ -526,14 +532,56 @@ static func _test_malformed_table_detection() -> bool:
 	var machine_b = MobaStateMachine.new()
 	machine_b._ready()
 	load_result = machine_b.load_state_table_for_testing(valid_table)
-	if not load_result or machine_b.load_failed:
-		printerr("FAIL: a structurally valid table should load successfully even with a bad policy value")
+	if load_result or not machine_b.load_failed:
+		printerr("FAIL: an unrecognized policy value should set load_failed and return false")
 		ok = false
 
 	machine_b.current_state = MobaState.BASIC_ATTACK_WINDUP
 	if machine_b.can(&"ability"):
-		printerr("FAIL: an unrecognized policy value must not be silently treated as permissive")
+		printerr("FAIL: can() must not silently permit an action after a load failure")
 		ok = false
 	machine_b.free()
 
+	return ok
+
+
+## Verify DEAD never expires via tick(), even if entered with a positive
+## duration. DEAD is durationless (like IDLE/MOVING/CROWD_CONTROLLED): a
+## `remaining` timer must never be retained for it, so tick() can never
+## fire the expiry-to-IDLE path from DEAD. Only revive() may leave DEAD.
+static func _test_dead_does_not_expire() -> bool:
+	var machine = MobaStateMachine.new()
+	machine._ready()
+	var ok = true
+
+	var signal_log = {"count": 0, "from": -1, "to": -1}
+	machine.state_changed.connect(func(from, to):
+		signal_log["count"] += 1
+		signal_log["from"] = from
+		signal_log["to"] = to
+	)
+
+	var success = machine.try_enter(MobaState.DEAD, 2.0)
+	if not success or machine.current_state != MobaState.DEAD:
+		printerr("FAIL: try_enter(DEAD, 2.0) should succeed and reach DEAD")
+		ok = false
+
+	if machine.remaining != 0.0:
+		printerr("FAIL: DEAD must not retain a duration timer, remaining=%f" % machine.remaining)
+		ok = false
+
+	machine.tick(2.0)
+	if machine.current_state != MobaState.DEAD:
+		printerr("FAIL: DEAD must not expire via tick(), got %s" % MobaState.state_to_string(machine.current_state))
+		ok = false
+
+	# Only the entry into DEAD should have emitted; tick() must not emit
+	# a spurious expiry transition out of DEAD.
+	if signal_log["count"] != 1 or signal_log["to"] != MobaState.DEAD:
+		printerr("FAIL: tick() must not emit state_changed after DEAD entry, count=%d to=%d" % [
+			signal_log["count"], signal_log["to"]
+		])
+		ok = false
+
+	machine.free()
 	return ok

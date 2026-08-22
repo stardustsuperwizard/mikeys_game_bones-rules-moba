@@ -28,6 +28,18 @@ const _DURATIONLESS_STATES = [
 	MobaState.CROWD_CONTROLLED,
 ]
 
+## Recognized policy values per column, used to validate the state table at
+## load time (mirrors how unrecognized state names are already handled: a
+## bad value is a load failure, not a silently-permissive or use-site-only
+## concern).
+const _COLUMN_VOCABULARIES = {
+	"move": ["yes", "no", "cancels", "locked", "air_control", "per_cc"],
+	"basic_attack": ["yes", "no", "per_cc"],
+	"ability": ["yes", "no", "flagged", "per_cc"],
+	"jump": ["yes", "no", "per_cc"],
+	"interruptible_by_hard_cc": ["yes", "no", "per_cc", "breaks_channel", "displacement_only"],
+}
+
 
 func _ready() -> void:
 	_load_state_table()
@@ -91,6 +103,11 @@ func _parse_state_table(data: Variant) -> bool:
 			var value = state_data[column_name]
 			if value is not String:
 				push_error("State %s column %s value must be string, got %s" % [state_name_str, column_name, typeof(value)])
+				load_failed = true
+				return false
+
+			if value not in _COLUMN_VOCABULARIES[column_name]:
+				push_error("State %s column %s has unrecognized policy value: %s" % [state_name_str, column_name, value])
 				load_failed = true
 				return false
 
@@ -186,16 +203,16 @@ func movement_policy() -> StringName:
 	if current_state not in _state_table:
 		push_error("Current state %d not in state table" % current_state)
 		return &"no"
-	
+
 	var state_data = _state_table[current_state]
 	var move_value = state_data.get("move", "no")
-	
+
 	# Validate that it's a recognized movement policy
 	var valid_policies = ["yes", "no", "cancels", "locked", "air_control", "per_cc"]
 	if move_value not in valid_policies:
 		push_error("Unknown movement policy in state %d: %s" % [current_state, move_value])
 		return &"no"
-	
+
 	return StringName(move_value)
 
 
@@ -222,22 +239,25 @@ func try_enter(state: int, duration: float = 0.0, cause: int = MobaState.Airborn
 	# duration to be meaningful. Durationless states are entered normally.
 	if duration <= 0.0 and state not in _DURATIONLESS_STATES:
 		return false
-	
+
 	# Re-entering the same state succeeds without emitting signal
 	if state == current_state:
 		return true
-	
+
 	# Perform the transition
 	var from_state = current_state
 	current_state = state
 	time_in_state = 0.0
-	# Normalize zero-or-negative durations (only reachable here for
-	# durationless states) to 0.0 so `remaining` never goes negative.
-	remaining = duration if duration > 0.0 else 0.0
-	
+	# Durationless states never retain a `remaining` timer, regardless of
+	# what duration was passed in - this is what makes them durationless.
+	# Without this, e.g. try_enter(DEAD, 2.0) would store remaining=2.0 and
+	# tick() would later expire DEAD back to IDLE, which must never happen
+	# since DEAD is terminal and only revive() may leave it.
+	remaining = 0.0 if state in _DURATIONLESS_STATES else duration
+
 	if state == MobaState.AIRBORNE:
 		_airborne_cause = cause
-	
+
 	state_changed.emit(from_state, state)
 	return true
 
@@ -247,11 +267,11 @@ func try_enter(state: int, duration: float = 0.0, cause: int = MobaState.Airborn
 ## Emits state_changed(current, IDLE) when duration expires.
 func tick(delta: float) -> void:
 	time_in_state += delta
-	
+
 	# Only decrement remaining if it was set (duration > 0)
 	if remaining > 0.0:
 		remaining -= delta
-		
+
 		# Check if duration expired
 		if remaining <= 0.0:
 			# Return to IDLE
@@ -259,7 +279,13 @@ func tick(delta: float) -> void:
 			current_state = MobaState.IDLE
 			time_in_state = 0.0
 			remaining = 0.0
-			state_changed.emit(from_state, MobaState.IDLE)
+			# Only emit a real transition. Durationless states (including
+			# DEAD) never carry a positive `remaining` (see try_enter()),
+			# so this branch cannot fire for them; the guard is kept as an
+			# explicit safeguard against ever emitting state_changed(X, X)
+			# from the expiry path.
+			if from_state != MobaState.IDLE:
+				state_changed.emit(from_state, MobaState.IDLE)
 
 
 ## Exit the DEAD state and return to IDLE.
