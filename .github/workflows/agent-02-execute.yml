@@ -257,6 +257,20 @@ jobs:
 
           echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
+      # Needed before the executor session even starts: the executor's own
+      # hard rules (below) tell it to run `validate-godot.sh` itself, and
+      # the outer "Re-run Validation" / "Apply GDScript Formatting" /
+      # "Evaluate Pre-PR Fix" steps all shell out to it later too. Every
+      # other workflow that calls validate-godot.sh installs Godot first
+      # (see godot-ci-validation.yml, balance-fast.yml, balance-deep.yml) --
+      # this one was missing it, so validate-godot.sh's own
+      # `command -v godot` guard was hitting its `exit 127` unconditionally.
+      - name: Setup Godot
+        if: steps.context.outputs.ok == 'true'
+        uses: ./.github/actions/setup-godot
+        with:
+          godot-version: 4.7.1-stable
+
       - name: Build Executor Request
         if: steps.context.outputs.ok == 'true'
         shell: python
@@ -394,8 +408,17 @@ jobs:
         run: |
           set -uo pipefail
 
-          .github/scripts/validate-godot.sh > validate-output.txt 2>&1
-          status=$?
+          # GitHub Actions invokes `shell: bash` steps with `-e` already
+          # active (bash --noprofile --norc -e -o pipefail {0}), regardless
+          # of this script's own `set` line -- `set -uo pipefail` cannot
+          # unset a flag it never named. Without `|| status=$?` here, a
+          # nonzero exit from validate-godot.sh would abort this step
+          # immediately, before `status` is ever assigned, skipping the
+          # warning below and the "Report Validation Failure" step
+          # entirely (its condition needs a real status value to match).
+          status=0
+          .github/scripts/validate-godot.sh > validate-output.txt 2>&1 \
+            || status=$?
 
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
