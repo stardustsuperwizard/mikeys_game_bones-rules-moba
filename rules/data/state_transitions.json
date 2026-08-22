@@ -1,0 +1,72 @@
+{
+  "IDLE": {
+    "move": "yes",
+    "basic_attack": "yes",
+    "ability": "yes",
+    "jump": "yes",
+    "interruptible_by_hard_cc": "yes"
+  },
+  "MOVING": {
+    "move": "yes",
+    "basic_attack": "yes",
+    "ability": "yes",
+    "jump": "yes",
+    "interruptible_by_hard_cc": "yes"
+  },
+  "BASIC_ATTACK_WINDUP": {
+    "move": "cancels",
+    "basic_attack": "no",
+    "ability": "no",
+    "jump": "no",
+    "interruptible_by_hard_cc": "yes"
+  },
+  "BASIC_ATTACK_RECOVERY": {
+    "move": "yes",
+    "basic_attack": "no",
+    "ability": "yes",
+    "jump": "yes",
+    "interruptible_by_hard_cc": "yes"
+  },
+  "ABILITY_CAST": {
+    "move": "cancels",
+    "basic_attack": "no",
+    "ability": "no",
+    "jump": "no",
+    "interruptible_by_hard_cc": "yes"
+  },
+  "ABILITY_CHANNEL": {
+    "move": "no",
+    "basic_attack": "no",
+    "ability": "no",
+    "jump": "no",
+    "interruptible_by_hard_cc": "breaks_channel"
+  },
+  "DASHING": {
+    "move": "locked",
+    "basic_attack": "no",
+    "ability": "no",
+    "jump": "no",
+    "interruptible_by_hard_cc": "displacement_only"
+  },
+  "AIRBORNE": {
+    "move": "air_control",
+    "basic_attack": "no",
+    "ability": "flagged",
+    "jump": "no",
+    "interruptible_by_hard_cc": "yes"
+  },
+  "CROWD_CONTROLLED": {
+    "move": "per_cc",
+    "basic_attack": "per_cc",
+    "ability": "per_cc",
+    "jump": "per_cc",
+    "interruptible_by_hard_cc": "per_cc"
+  },
+  "DEAD": {
+    "move": "no",
+    "basic_attack": "no",
+    "ability": "no",
+    "jump": "no",
+    "interruptible_by_hard_cc": "no"
+  }
+}

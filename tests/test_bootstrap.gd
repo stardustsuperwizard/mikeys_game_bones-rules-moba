@@ -35,6 +35,12 @@ func _ready() -> void:
 		if formulas_passed:
 			print("\nFormulas Test PASSED")
 		
+		# Run the state machine test
+		var state_machine_passed = StateMachineTest.run()
+		
+		if state_machine_passed:
+			print("\nState Machine Test PASSED")
+		
 		# Exit after the tests complete to avoid loading the main scene
 		call_deferred("_quit_engine")
 
