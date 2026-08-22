@@ -298,7 +298,6 @@ jobs:
               gh repo view "$GITHUB_REPOSITORY" \
                 --json defaultBranchRef --jq '.defaultBranchRef.name'
             )
-
             # actions/checkout runs with fetch-depth: 1, so the local clone
             # only ever holds single-commit shallow slices of each ref --
             # "origin/$DEFAULT_BRANCH" and this branch's tip share no
