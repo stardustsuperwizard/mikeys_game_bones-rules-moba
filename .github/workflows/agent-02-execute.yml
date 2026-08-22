@@ -18,8 +18,11 @@ name: Execute Task
 #      correctly but omit the closing keyword even when explicitly instructed
 #      to include it.
 #
-#      When that happens, this workflow will repair the PR automatically ONLY
-#      when it can infer exactly one open Issue labeled `implementation`.
+#      When that happens, this workflow repairs the PR automatically. It
+#      resolves the task deterministically from the PR title's "[NN] ..."
+#      tag when present and valid; otherwise it falls back to inferring
+#      exactly one open Issue labeled `implementation` from the branch name,
+#      title, or body.
 #
 #      If inference is ambiguous, it refuses to guess and posts a comment
 #      asking for the closing reference manually.
@@ -126,25 +129,23 @@ jobs:
       # Prompt-started Copilot sessions can create a complete implementation
       # PR but fail to include `Closes #NN`.
       #
-      # Example:
+      # This step repairs that omission. Its primary, deterministic source is
+      # the "[NN] ..." title tag every planner-generated task prompt asks the
+      # executor to use: if the title starts with a bracketed number naming
+      # an open Issue labeled `implementation`, that is authoritative.
       #
-      #   copilot/90-work-on-issue
-      #
-      # can plainly identify Issue #90 even though GitHub reports zero
-      # closingIssuesReferences.
-      #
-      # This step repairs that omission only when there is exactly ONE
-      # candidate that:
+      # When the title tag is missing or invalid -- a human-authored PR, or
+      # a session that ignored the convention -- it falls back to scanning
+      # for any candidate that:
       #
       #   - exists in this repository;
       #   - is OPEN; and
       #   - has the `implementation` label.
       #
-      # Candidates come from:
+      # drawn from:
       #
-      #   - the Copilot branch name;
-      #   - the PR title; and
-      #   - Issue references already present in the PR body.
+      #   - the Copilot branch name (e.g. copilot/90-work-on-issue); and
+      #   - Issue references already present in the PR title or body.
       #
       # If exactly one candidate survives validation, prepend:
       #
@@ -168,29 +169,8 @@ jobs:
             --json title,body,headRefName \
             > pr.json
 
-          # Collect every plausible Issue number visible in the branch,
-          # title, or PR body.
-          {
-            jq -r '.headRefName' pr.json \
-              | grep -oE '[0-9]+' || true
-
-            jq -r '.title + "\n" + (.body // "")' pr.json \
-              | grep -oE '#[0-9]+' \
-              | tr -d '#' || true
-          } \
-            | sort -un \
-            > candidates.txt
-
-          echo "Candidate Issue numbers:"
-          cat candidates.txt || true
-
-          # Keep only open Issues labeled `implementation`.
-          : > valid-tasks.txt
-
-          while read -r N; do
-            [ -n "$N" ] || continue
-
-            gh issue view "$N" \
+          is_valid_task() {
+            gh issue view "$1" \
               --repo "$GITHUB_REPOSITORY" \
               --json state,labels,number \
               --jq '
@@ -198,9 +178,54 @@ jobs:
                 | select([.labels[].name] | index("implementation"))
                 | .number
               ' \
-              >> valid-tasks.txt \
-              2>/dev/null || true
-          done < candidates.txt
+              2>/dev/null
+          }
+
+          # Primary, deterministic source: every planner-generated task
+          # prompt asks the executor to title the pull request "[NN] ...".
+          # When the title honors that convention and NN is a valid open
+          # Implementation Task, that is authoritative and the fuzzy scan
+          # below never runs -- there is nothing to disambiguate.
+          TITLE_TASK=$(
+            jq -r '.title' pr.json \
+              | grep -oE '^\[[0-9]+\]' \
+              | tr -d '[]' \
+              || true
+          )
+
+          : > valid-tasks.txt
+
+          if [ -n "$TITLE_TASK" ]; then
+            is_valid_task "$TITLE_TASK" >> valid-tasks.txt || true
+          fi
+
+          if [ -s valid-tasks.txt ]; then
+            echo "Resolved from PR title tag: [$TITLE_TASK]"
+          else
+            # Fallback: the title tag is missing or does not name a valid
+            # open Implementation Task -- e.g. a human-authored PR, or an
+            # agent session that ignored the convention. Collect every
+            # plausible Issue number visible in the branch, title, or PR
+            # body instead.
+            {
+              jq -r '.headRefName' pr.json \
+                | grep -oE '[0-9]+' || true
+
+              jq -r '.title + "\n" + (.body // "")' pr.json \
+                | grep -oE '#[0-9]+' \
+                | tr -d '#' || true
+            } \
+              | sort -un \
+              > candidates.txt
+
+            echo "Candidate Issue numbers:"
+            cat candidates.txt || true
+
+            while read -r N; do
+              [ -n "$N" ] || continue
+              is_valid_task "$N" >> valid-tasks.txt || true
+            done < candidates.txt
+          fi
 
           sort -un valid-tasks.txt -o valid-tasks.txt
 

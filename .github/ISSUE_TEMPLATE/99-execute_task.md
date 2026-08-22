@@ -1,7 +1,7 @@
 ---
 name: Implementation Task
 about: A bounded engineering task emitted by the planner. Not for human-authored feature requests.
-title: '[impl] '
+title: '[impl] [<parent-feature-number>] '
 labels: implementation, machine
 assignees: ''
 ---
@@ -43,7 +43,9 @@ discovered out-of-scope work instead of doing it.
 Run .github/scripts/validate-godot.sh and report the
 command and its result.
 
-Your pull request must include: Closes #<this-issue-number>
+Title the pull request starting with [<this-issue-number>], for
+example "[<this-issue-number>] <what it does>", and include in its
+description: Closes #<this-issue-number>
 ````
 
 **Pick the model, not the agent.** The `executor` profile adds nothing a
@@ -80,7 +82,8 @@ If additional work is discovered, report it under `Discovered out-of-scope
 work` rather than implementing it.
 
 Run `.github/scripts/validate-godot.sh` before reporting completion. The
-implementation pull request must close this Issue —
+implementation pull request must be titled starting with
+`[<this-issue-number>]` and must close this Issue —
 `Closes #<this-issue-number>` — and must not close the parent Feature.
 
 ---

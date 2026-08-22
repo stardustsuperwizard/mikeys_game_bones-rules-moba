@@ -84,8 +84,10 @@ repository patterns do not need escalation.
 
 ### Completion report
 
-The pull request must close the Implementation Task Issue — `Closes #<n>` —
-and must not close the parent Feature. Report:
+The pull request title must start with `[<n>]`, where `<n>` is the
+Implementation Task Issue number (for example `[94] Add moba cooldown
+ledger`), and its description must close that Issue — `Closes #<n>` — and
+must not close the parent Feature. Report:
 
 1. **Files changed** — each file and why.
 2. **Acceptance criteria** — each one, and whether it is satisfied.

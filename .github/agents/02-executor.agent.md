@@ -149,7 +149,8 @@ Report:
    - Write `None` if there were none.
 
 When running from a GitHub Implementation Task Issue, the implementation pull
-request must close that Implementation Task Issue.
+request title must start with `[<n>]`, where `<n>` is that Issue's number,
+and the pull request must close that Implementation Task Issue.
 
 Do not close the parent Feature unless explicitly instructed because the pull
 request completes the entire Feature.
