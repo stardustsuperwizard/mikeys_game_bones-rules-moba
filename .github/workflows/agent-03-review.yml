@@ -94,6 +94,29 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: List Changed GDScript Files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json files \
+            --jq '.files[].path' \
+            | grep -E '\.gd$' \
+            > changed-gd-files.txt || true
+
+      # Best-effort: a lint-tooling hiccup must not block a review that
+      # would otherwise work -- it just runs without the static-analysis
+      # section. Diff-scoped by design; see lint-gdscript/action.yml.
+      - name: Lint Changed GDScript Files
+        id: lint
+        continue-on-error: true
+        uses: ./.github/actions/lint-gdscript
+        with:
+          mode: check
+          files-list-file: changed-gd-files.txt
+
       - name: Build Review Request
         id: build
         uses: ./.github/actions/build-review-request
@@ -101,6 +124,8 @@ jobs:
           mode: pr
           pr-number: ${{ env.PR_NUMBER }}
           max-diff-chars: ${{ env.MAX_DIFF_CHARS }}
+          lint-report-file: >-
+            ${{ steps.lint.outcome == 'success' && steps.lint.outputs.report-file || '' }}
 
       - name: Run Reviewer Session
         id: session

@@ -1,9 +1,15 @@
 name: Execute Task
 
 # Implements a GitHub Implementation Task Issue end to end using the
-# Copilot CLI, reviews its own diff before a pull request exists, applies
-# one bounded fix pass if that review says FIX, and opens the pull request
-# that closes the Issue.
+# Copilot CLI, applies gdformat to whatever GDScript it touched, reviews
+# its own diff before a pull request exists, applies one bounded fix pass
+# if that review says FIX, and opens the pull request that closes the
+# Issue.
+#
+# The gdformat pass is unconditional and needs no model: mechanical,
+# diff-scoped (see lint-gdscript/action.yml for why not whole-repo), and
+# committed before the pre-PR review runs so the reviewer never spends
+# judgment on something a formatter already fixed for free.
 #
 # This is the scripted alternative to assigning the Issue to the Copilot
 # cloud agent from the Issues UI. The two are different products with
@@ -399,6 +405,55 @@ jobs:
             tail -c 4000 validate-output.txt
           fi
 
+      # Best-effort, like the review-and-fix section below: a lint-tooling
+      # hiccup must degrade to "skip formatting" rather than fail the job.
+      # Runs before "Prepare Diff and Draft Title" so IMPL_SHA and
+      # execute-diff.txt both include any formatting commit -- the pre-PR
+      # review sees the final, formatted diff, and a later FIX-but-not-
+      # applied reset lands back on formatted code, not unformatted code.
+      - name: List Changed GDScript Files
+        if: steps.context.outputs.ok == 'true' && steps.commit.outputs.made == 'true' && steps.validate.outputs.status == '0'
+        id: gd-files
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --name-only "$BASE_SHA" HEAD -- '*.gd' > changed-gd-files.txt || true
+
+          echo "Changed GDScript files:"
+          cat changed-gd-files.txt || echo "(none)"
+
+      - name: Apply GDScript Formatting
+        if: steps.gd-files.outcome == 'success'
+        id: format
+        continue-on-error: true
+        uses: ./.github/actions/lint-gdscript
+        with:
+          mode: fix
+          files-list-file: changed-gd-files.txt
+
+      - name: Commit Formatting Fixes
+        if: steps.format.outcome == 'success' && steps.format.outputs.formatted == 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git add -u -- '*.gd'
+          git commit -m "style: apply gdformat"
+
+          # gdformat shouldn't change behavior, but this is a cheap safety
+          # net: if it somehow did, drop the formatting commit and continue
+          # unformatted rather than block the whole task on a formatter
+          # edge case.
+          if ! .github/scripts/validate-godot.sh > format-validate-output.txt 2>&1; then
+            echo "::warning::Validation failed after applying gdformat." \
+                 "Reverting the formatting commit and continuing unformatted."
+            tail -c 4000 format-validate-output.txt
+            git reset --hard HEAD~1
+          fi
+
       # From here on, HAS_IMPLEMENTATION means "there is a valid commit
       # worth opening a pull request for" -- true for every remaining case
       # in this job, including a pre-PR review that fails outright. Keeping
@@ -444,6 +499,8 @@ jobs:
           pr-title: ${{ env.PR_TITLE }}
           pr-branch: ${{ env.BRANCH }}
           max-diff-chars: ${{ env.MAX_DIFF_CHARS }}
+          lint-report-file: >-
+            ${{ steps.format.outcome == 'success' && steps.format.outputs.report-file || '' }}
 
       # continue-on-error: the pre-PR review is best-effort. A budget or
       # availability failure here must not throw away a working

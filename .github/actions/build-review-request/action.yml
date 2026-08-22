@@ -34,6 +34,14 @@ inputs:
     description: Diff is truncated past this many characters
     required: false
     default: "150000"
+  lint-report-file:
+    description: >-
+      Path to a gdformat/gdlint report (lint-gdscript's report-file
+      output) to fold into the prompt as a "STATIC ANALYSIS" section, so
+      lint findings surface in the same review report instead of a
+      separate check the human has to cross-reference. Optional -- omit
+      to review without one.
+    required: false
 
 outputs:
   prompt-file:
@@ -129,6 +137,7 @@ runs:
       shell: python
       env:
         MAX_DIFF_CHARS: ${{ inputs.max-diff-chars }}
+        LINT_REPORT_FILE: ${{ inputs.lint-report-file }}
       run: |
         import json
         import os
@@ -202,6 +211,14 @@ runs:
         if changed:
             sections.append(f"# FILES CHANGED\n\n{changed}")
 
+        lint_report_path = os.environ.get("LINT_REPORT_FILE", "")
+
+        if lint_report_path and pathlib.Path(lint_report_path).exists():
+            sections.append(
+                "# STATIC ANALYSIS (gdformat / gdlint)\n\n"
+                + pathlib.Path(lint_report_path).read_text(errors="replace")
+            )
+
         diff = pathlib.Path("review-diff.txt").read_text(errors="replace")
         truncated = len(diff) > max_diff
 
@@ -220,6 +237,16 @@ runs:
 
         context = "\n\n---\n\n".join(sections)
 
+        lint_instruction = (
+            "\n        - A STATIC ANALYSIS section, if present, is gdformat/gdlint"
+            " output already computed for you -- don't re-derive it. Weigh it"
+            " like any other finding: a real formatting/lint violation is"
+            " worth a line in Findings, but don't let style nits alone drive"
+            " the verdict to FIX when the substance of the change is sound."
+            if lint_report_path and pathlib.Path(lint_report_path).exists()
+            else ""
+        )
+
         prompt = f"""
         You are the review agent for Sword and Planet.
 
@@ -230,7 +257,7 @@ runs:
 
         HARD RULES:
 
-        - Do not edit repository files.
+        - Do not edit repository files.{lint_instruction}
         - Do not execute shell commands.
         - Do not create or modify GitHub Issues or comments yourself.
         - Do not implement fixes.
