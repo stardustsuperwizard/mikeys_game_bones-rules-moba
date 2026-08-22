@@ -40,17 +40,17 @@ var _ability_states: Dictionary = {}
 func start(ability_id: StringName, base_cooldown: float, haste: float, max_charges: int) -> void:
 	# Initialize if we've never seen this ability before
 	if not ability_id in _ability_states:
-		var state = _AbilityState.new()
+		var state: _AbilityState = _AbilityState.new()
 		state.max_charges = max_charges
 		state.available_charges = max_charges
 		state.timer_duration = 0.0
 		state.timer_remaining = 0.0
 		_ability_states[ability_id] = state
 	
-	var state = _ability_states[ability_id]
+	var state: _AbilityState = _ability_states[ability_id]
 	
 	# Decrement a charge
-	state.available_charges = maxf(0, state.available_charges - 1)
+	state.available_charges = maxi(0, state.available_charges - 1)
 	
 	# Start the timer only if none is currently running
 	if state.timer_remaining <= 0.0:
@@ -72,7 +72,7 @@ func remaining(ability_id: StringName) -> float:
 	if not ability_id in _ability_states:
 		return 0.0
 	
-	var state = _ability_states[ability_id]
+	var state: _AbilityState = _ability_states[ability_id]
 	return maxf(0.0, state.timer_remaining)
 
 
@@ -90,7 +90,7 @@ func charges(ability_id: StringName) -> int:
 	if not ability_id in _ability_states:
 		return 0
 	
-	var state = _ability_states[ability_id]
+	var state: _AbilityState = _ability_states[ability_id]
 	return state.available_charges
 
 
@@ -108,7 +108,7 @@ func is_ready(ability_id: StringName) -> bool:
 	if not ability_id in _ability_states:
 		return true
 	
-	var state = _ability_states[ability_id]
+	var state: _AbilityState = _ability_states[ability_id]
 	return state.available_charges > 0 and state.timer_remaining <= 0.0
 
 
@@ -116,12 +116,13 @@ func is_ready(ability_id: StringName) -> bool:
 ##
 ## Decrements each running timer. When a timer expires and charges are still below max_charges,
 ## grants one charge and restarts the timer from its stored duration, correctly carrying any
-## overshoot so that large deltas do not lose time.
+## overshoot so that large deltas do not lose time. When max_charges is reached, the timer
+## stops at 0.0.
 ##
 ## Args:
 ##     delta: Time elapsed in seconds
 func tick(delta: float) -> void:
-	for state in _ability_states.values():
+	for state: _AbilityState in _ability_states.values():
 		if state.timer_remaining > 0.0:
 			state.timer_remaining -= delta
 			
@@ -129,3 +130,7 @@ func tick(delta: float) -> void:
 			while state.timer_remaining <= 0.0 and state.available_charges < state.max_charges:
 				state.available_charges += 1
 				state.timer_remaining += state.timer_duration
+			
+			# Stop the timer when max charges is reached
+			if state.available_charges >= state.max_charges:
+				state.timer_remaining = 0.0
