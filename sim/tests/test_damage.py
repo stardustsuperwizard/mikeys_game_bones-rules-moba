@@ -13,6 +13,7 @@ Shared cases:
   - effective_armor(100, flat_pen=20, percent_pen=0.30) == 56.0
   - effective_armor(10, flat_pen=30) == 0.0
   - physical_damage(50, 50) ≈ 33.33
+  - physical_damage(200, 50) ≈ 133.33 (with 2.0 crit multiplier applied to raw)
   - true_damage(42.5) == 42.5 (unaffected by penetration)
   - mitigation_multiplier(0) == 1.0 (zero defense yields 1.0 multiplier)
   - mitigation_multiplier(-30) == 1.0 (negative defense clamps to 1.0 multiplier)
@@ -118,18 +119,14 @@ class TestPhysicalDamage:
 
     def test_crit_multiplier_applied_to_raw_damage_before_mitigation(self):
         """A 2.0 crit multiplier applied to raw damage before mitigation.
-
-        With non-zero armor. The crit multiplier (100 * 2.0 = 200) is applied
-        before armor calculation.
-
+        
+        With non-zero armor and non-zero penetration. The crit multiplier
+        (100 * 2.0 = 200) is applied before armor calculation.
+        
         Calculation: physical_damage(100, 50) = 200 * mitigation_multiplier(50)
         = 200 * (100 / 150) ≈ 133.33
-
-        NOTE: This test is not a shared conformance case with GDScript.
-        The GDScript suite asserts apply_crit(50.0, 2.0) == 100.0, and
-        sim/formulas.py provides no apply_crit function. The composable shared
-        form (physical_damage with crit-adjusted raw) is not asserted on the
-        GDScript side, so this test remains Python-only.
+        
+        Shared conformance case with rules/tests/formulas_test.gd.
         """
         # Apply 2.0 crit multiplier to raw damage of 100
         crit_raw = 100 * 2.0
@@ -177,13 +174,12 @@ class TestTrueDamage:
         assert true_damage(0) == 0
 
     def test_true_damage_unaffected_by_potential_penetration(self):
-        """True damage is unaffected by armor and penetration arguments.
-
-        The true_damage function signature accepts no penetration parameters
-        (unlike physical_damage). It simply returns the raw input unchanged,
-        making the value inherently invariant to any armor or penetration stats.
-        This test verifies that true_damage(42.5) always equals 42.5.
-
+        """True damage is unaffected by armor and any penetration arguments.
+        
+        Unlike physical_damage, true_damage simply returns raw input unchanged.
+        This test verifies that true_damage(42.5) always equals 42.5, regardless
+        of what penetration might have done to physical damage.
+        
         Shared conformance case with rules/tests/formulas_test.gd.
         """
         raw = 42.5

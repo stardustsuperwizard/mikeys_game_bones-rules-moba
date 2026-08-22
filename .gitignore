@@ -21,7 +21,11 @@ addons/*
 !addons/mikeys_*
 
 # Additional ignores
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/agents/**
+!.claude/commands/
+!.claude/commands/**
 .DS_Store
 
 # Python bytecode from repository tooling
