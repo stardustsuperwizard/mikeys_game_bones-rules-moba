@@ -16,8 +16,10 @@ extends SceneTree
 
 var _failures: Array[String] = []
 
+
 func _initialize() -> void:
 	_run()
+
 
 func _run() -> void:
 	var scene := (load("res://scenes/main.tscn") as PackedScene).instantiate()
@@ -40,28 +42,51 @@ func _run() -> void:
 	# --- click the ground -> walk there and settle ---------------------
 	var goal := Vector3(2, 0, 2)
 	await _click_world_point(controller, camera, goal + Vector3(0, 0.01, 0))
-	var arrived := await _wait_until(func() -> bool:
-		return _flat_distance(body.global_position, goal) <= controller.arrival_distance, 240)
+	var arrived := await _wait_until(
+		func() -> bool:
+			return _flat_distance(body.global_position, goal) <= controller.arrival_distance,
+		240
+	)
 	for i in 40:
 		await physics_frame
 	var settled := _flat_distance(body.global_position, goal)
 	if not arrived or settled > controller.arrival_distance + 0.15:
-		_fail("ground click: player settled %.2fm from %v (arrival_distance %.2f)" % [settled, goal, controller.arrival_distance])
+		_fail(
+			(
+				"ground click: player settled %.2fm from %v (arrival_distance %.2f)"
+				% [settled, goal, controller.arrival_distance]
+			)
+		)
 	else:
-		print("PASS ground click -> walked to %v and stopped (%.2fm off)" % [body.global_position, settled])
+		print(
+			(
+				"PASS ground click -> walked to %v and stopped (%.2fm off)"
+				% [body.global_position, settled]
+			)
+		)
 
 	# --- click behind the player -> body turns to face the walk --------
 	var behind := Vector3(-4, 0, 6)
 	await _click_world_point(controller, camera, behind + Vector3(0, 0.01, 0))
-	var faced := await _wait_until(func() -> bool:
-		var to_goal := behind - body.global_position
-		var want := atan2(-to_goal.x, -to_goal.z)
-		return absf(rad_to_deg(wrapf(want - body.global_rotation.y, -PI, PI))) <= 15.0, 180)
+	var faced := await _wait_until(
+		func() -> bool:
+			var to_goal := behind - body.global_position
+			var want := atan2(-to_goal.x, -to_goal.z)
+			return absf(rad_to_deg(wrapf(want - body.global_rotation.y, -PI, PI))) <= 15.0,
+		180
+	)
 	if not faced:
-		_fail("turn toward order: yaw %.1f deg never lined up with the goal" % rad_to_deg(body.global_rotation.y))
+		_fail(
+			(
+				"turn toward order: yaw %.1f deg never lined up with the goal"
+				% rad_to_deg(body.global_rotation.y)
+			)
+		)
 	else:
 		print("PASS click behind -> body turned to face the destination")
-	await _wait_until(func() -> bool: return _flat_distance(body.global_position, behind) <= 0.5, 240)
+	await _wait_until(
+		func() -> bool: return _flat_distance(body.global_position, behind) <= 0.5, 240
+	)
 
 	# --- click a wall -> walk up to it and stop flush ------------------
 	# The north wall's inner face is at z = -9.9. Clicking high up the wall
@@ -84,13 +109,36 @@ func _run() -> void:
 	if not touched:
 		_fail("wall click: player never reached the wall (at %v)" % body.global_position)
 	elif absf(gap - BODY_RADIUS) > 0.05:
-		_fail("wall click: player settled %.2fm from the wall face, wanted flush at %.2f" % [gap, BODY_RADIUS])
+		_fail(
+			(
+				"wall click: player settled %.2fm from the wall face, wanted flush at %.2f"
+				% [gap, BODY_RADIUS]
+			)
+		)
 	elif frames_to_stop > 5:
-		_fail("wall click: order held for %d frames after contact -- stopped by the stall guard, not by the wall" % frames_to_stop)
+		_fail(
+			(
+				(
+					"wall click: order held for %d frames after contact --"
+					+ " stopped by the stall guard, not by the wall"
+				)
+				% frames_to_stop
+			)
+		)
 	elif _flat_distance(wall_resting, body.global_position) > 0.02:
-		_fail("wall click: player kept moving after the order cleared (%v -> %v)" % [wall_resting, body.global_position])
+		_fail(
+			(
+				"wall click: player kept moving after the order cleared (%v -> %v)"
+				% [wall_resting, body.global_position]
+			)
+		)
 	else:
-		print("PASS wall click -> walked to the wall, stopped flush (%.2fm from face) %d frames after contact" % [gap, frames_to_stop])
+		print(
+			(
+				"PASS wall click -> walked to the wall, stopped flush (%.2fm from face) %d frames after contact"
+				% [gap, frames_to_stop]
+			)
+		)
 
 	# --- click along a wall you are already against -> slide, don't stall
 	# Standing flush on the north wall, clicking it far to the west is a
@@ -102,24 +150,44 @@ func _run() -> void:
 	var slide_start := body.global_position
 	var slide_goal_x := -6.0
 	await _click_world_point(controller, camera, Vector3(slide_goal_x, 3, WALL_FACE_Z))
-	var slid := await _wait_until(func() -> bool:
-		return not controller._has_destination, 600)
+	var slid := await _wait_until(func() -> bool: return not controller._has_destination, 600)
 	var slide_miss := absf(body.global_position.x - slide_goal_x)
 	if not slid or slide_miss > 0.8:
-		_fail("wall slide: player stopped at x=%.2f (from x=%.2f), wanted within 0.8m of x=%.1f" % [body.global_position.x, slide_start.x, slide_goal_x])
+		_fail(
+			(
+				"wall slide: player stopped at x=%.2f (from x=%.2f), wanted within 0.8m of x=%.1f"
+				% [body.global_position.x, slide_start.x, slide_goal_x]
+			)
+		)
 	elif absf(body.global_position.z - (WALL_FACE_Z + BODY_RADIUS)) > 0.05:
 		_fail("wall slide: player came off the wall, z=%.2f" % body.global_position.z)
 	else:
-		print("PASS click along the touched wall -> slid to %.2fm of the spot, still flush" % slide_miss)
+		print(
+			(
+				"PASS click along the touched wall -> slid to %.2fm of the spot, still flush"
+				% slide_miss
+			)
+		)
 
 	# --- click a hostile actor -> approach and attack ------------------
 	var dummy := _make_dummy(scene, Vector3(2, 0, -3))
 	await physics_frame
 	await _click_world_point(controller, camera, dummy.global_position + Vector3(0, 1, 0))
-	var hurt := await _wait_until(func() -> bool:
-		return not is_instance_valid(dummy) or dummy.character_sheet.current_hp < dummy.character_sheet.max_hp, 360)
+	var hurt := await _wait_until(
+		func() -> bool:
+			return (
+				not is_instance_valid(dummy)
+				or dummy.character_sheet.current_hp < dummy.character_sheet.max_hp
+			),
+		360
+	)
 	if not hurt:
-		_fail("attack click: dummy never took damage (player at %v, dummy at %v)" % [body.global_position, dummy.global_position])
+		_fail(
+			(
+				"attack click: dummy never took damage (player at %v, dummy at %v)"
+				% [body.global_position, dummy.global_position]
+			)
+		)
 	else:
 		print("PASS attack click -> closed to melee and dealt damage")
 
@@ -129,7 +197,12 @@ func _run() -> void:
 	await _click_world_point(controller, camera, door.global_position)
 	var opened := await _wait_until(func() -> bool: return door.is_open(), 360)
 	if not opened:
-		_fail("door click: door never opened (player at %v, door at %v)" % [body.global_position, door.global_position])
+		_fail(
+			(
+				"door click: door never opened (player at %v, door at %v)"
+				% [body.global_position, door.global_position]
+			)
+		)
 	else:
 		print("PASS door click -> closed and opened the door")
 
@@ -160,12 +233,17 @@ func _run() -> void:
 
 	_finish()
 
+
 func _flat_distance(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
 
-func _click_world_point(controller: PlayerController3D, camera: Camera3D, world_point: Vector3) -> void:
+
+func _click_world_point(
+	controller: PlayerController3D, camera: Camera3D, world_point: Vector3
+) -> void:
 	await physics_frame
 	controller._issue_order_from_click(camera.unproject_position(world_point))
+
 
 func _wait_until(predicate: Callable, max_frames: int) -> bool:
 	for i in max_frames:
@@ -173,6 +251,7 @@ func _wait_until(predicate: Callable, max_frames: int) -> bool:
 			return true
 		await physics_frame
 	return predicate.call()
+
 
 func _make_dummy(parent: Node, position: Vector3) -> Actor:
 	var dummy := (load("res://scenes/player/player.tscn") as PackedScene).instantiate() as Actor
@@ -182,6 +261,7 @@ func _make_dummy(parent: Node, position: Vector3) -> Actor:
 	(dummy.get_node("Body") as Node3D).position = position
 	parent.add_child(dummy)
 	return dummy
+
 
 func _make_door(parent: Node, position: Vector3) -> Door:
 	var door := Door.new()
@@ -201,8 +281,10 @@ func _make_door(parent: Node, position: Vector3) -> Door:
 	door.global_position = position
 	return door
 
+
 func _fail(message: String) -> void:
 	_failures.append(message)
+
 
 func _finish() -> void:
 	if _failures.is_empty():

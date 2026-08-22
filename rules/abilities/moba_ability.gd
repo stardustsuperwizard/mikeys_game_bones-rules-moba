@@ -61,8 +61,10 @@ enum OnChannelBreak {
 ## Unique snake_case identifier. Validated against ^[a-z][a-z0-9_]*$.
 @export var id: String = "":
 	set(value):
-		assert(value == "" or _is_valid_ability_id(value),
-				"MobaAbility.id must match ^[a-z][a-z0-9_]*$: " + value)
+		assert(
+			value == "" or _is_valid_ability_id(value),
+			"MobaAbility.id must match ^[a-z][a-z0-9_]*$: " + value
+		)
 		id = value
 
 ## Human-readable display name.
@@ -175,10 +177,15 @@ enum OnChannelBreak {
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 static func _is_valid_ability_id(value: String) -> bool:
 	if value.is_empty():
 		return false
-	if not value[0].to_lower() == value[0] or not value[0].unicode_at(0) >= 97 or not value[0].unicode_at(0) <= 122:
+	if (
+		not value[0].to_lower() == value[0]
+		or not value[0].unicode_at(0) >= 97
+		or not value[0].unicode_at(0) <= 122
+	):
 		return false
 	for ch in value:
 		var code := ch.unicode_at(0)

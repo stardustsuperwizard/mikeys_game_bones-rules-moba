@@ -41,7 +41,9 @@ static func mitigation_multiplier(defense: float) -> float:
 ##
 ## Returns:
 ##     Effective defense after applying penetration
-static func effective_defense(defense: float, flat_pen: float = 0.0, percent_pen: float = 0.0) -> float:
+static func effective_defense(
+	defense: float, flat_pen: float = 0.0, percent_pen: float = 0.0
+) -> float:
 	var reduced = maxf(0.0, defense - flat_pen)
 	var result = reduced * (1.0 - percent_pen)
 	return maxf(0.0, result)
@@ -62,7 +64,9 @@ static func effective_defense(defense: float, flat_pen: float = 0.0, percent_pen
 ##
 ## Returns:
 ##     Final damage after armor mitigation
-static func physical_damage(raw: float, armor: float, flat_pen: float = 0.0, percent_pen: float = 0.0) -> float:
+static func physical_damage(
+	raw: float, armor: float, flat_pen: float = 0.0, percent_pen: float = 0.0
+) -> float:
 	var eff_armor = effective_defense(armor, flat_pen, percent_pen)
 	return raw * mitigation_multiplier(eff_armor)
 
@@ -80,7 +84,9 @@ static func physical_damage(raw: float, armor: float, flat_pen: float = 0.0, per
 ##
 ## Returns:
 ##     Final damage after resistance mitigation
-static func magical_damage(raw: float, resistance: float, flat_pen: float = 0.0, percent_pen: float = 0.0) -> float:
+static func magical_damage(
+	raw: float, resistance: float, flat_pen: float = 0.0, percent_pen: float = 0.0
+) -> float:
 	var eff_resistance = effective_defense(resistance, flat_pen, percent_pen)
 	return raw * mitigation_multiplier(eff_resistance)
 

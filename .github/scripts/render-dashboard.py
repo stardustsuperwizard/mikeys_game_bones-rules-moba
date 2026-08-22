@@ -38,7 +38,7 @@ PR_FIELDS = [
     "number", "title", "url", "isDraft", "labels", "closingIssuesReferences",
 ]
 
-# Verdict labels the reviewer applies. agent-03-review.yml clears the other
+# Verdict labels the reviewer applies. agent-04-review.yml clears the other
 # three before adding one, so at most one of these is ever present and it is
 # always the most recent verdict.
 VERDICT_PASS = "review:pass"

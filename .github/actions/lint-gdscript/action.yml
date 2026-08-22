@@ -1,0 +1,141 @@
+name: Lint GDScript
+description: >-
+  Runs gdformat and gdlint (gdtoolkit) against a given list of GDScript
+  files and writes one Markdown report. Deliberately diff-scoped by the
+  caller, not whole-repo: this check was introduced onto an existing
+  codebase with pre-existing drift, so gating on files a change actually
+  touches lets new/touched code be held to the standard immediately without
+  blocking unrelated work on legacy debt. "check" mode never modifies
+  files (used for review); "fix" mode applies gdformat for real (used
+  before a pull request opens).
+
+inputs:
+  mode:
+    description: '"check" to report only, or "fix" to apply gdformat for real'
+    required: true
+  files-list-file:
+    description: >-
+      Path to a file listing one GDScript path per line to target. An
+      empty or missing file is a clean no-op -- gdtoolkit is never even
+      installed.
+    required: true
+
+outputs:
+  report-file:
+    description: Path to a Markdown report, written even when clean
+    value: gdscript-lint-report.md
+  clean:
+    description: >-
+      "true" if gdformat (check mode) or gdlint (either mode, run after any
+      fix) reported nothing
+    value: ${{ steps.run.outputs.clean }}
+  formatted:
+    description: >-
+      "true" if fix mode actually changed one or more files. Always
+      "false" in check mode.
+    value: ${{ steps.run.outputs.formatted }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Lint and Format
+      id: run
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        FILES_LIST_FILE: ${{ inputs.files-list-file }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -s "$FILES_LIST_FILE" ]; then
+          echo "No GDScript files to check." > gdscript-lint-report.md
+          echo "clean=true" >> "$GITHUB_OUTPUT"
+          echo "formatted=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Pinned to the 4.x line: gdtoolkit's parser targets Godot 4.x
+        # GDScript syntax, matching setup-godot's default (4.7.1-stable).
+        pip install --quiet "gdtoolkit==4.*"
+
+        mapfile -t FILES < "$FILES_LIST_FILE"
+
+        echo "Targeting ${#FILES[@]} file(s):"
+        printf '  %s\n' "${FILES[@]}"
+
+        FORMATTED=false
+
+        if [ "$MODE" = "fix" ]; then
+          gdformat "${FILES[@]}" || true
+
+          if ! git diff --quiet -- "${FILES[@]}"; then
+            FORMATTED=true
+          fi
+
+          FORMAT_CLEAN=true
+        else
+          set +e
+          gdformat --check --diff "${FILES[@]}" > gdformat-output.txt 2>&1
+          FORMAT_STATUS=$?
+          set -e
+
+          if [ "$FORMAT_STATUS" -ne 0 ]; then
+            FORMAT_CLEAN=false
+          else
+            FORMAT_CLEAN=true
+          fi
+        fi
+
+        # gdlint has no auto-fix. Run it after any formatting above, so in
+        # fix mode the report reflects what's left for a human or the
+        # reviewer/fixer agents to actually decide about.
+        set +e
+        gdlint "${FILES[@]}" > gdlint-output.txt 2>&1
+        LINT_STATUS=$?
+        set -e
+
+        CLEAN=true
+        [ "$FORMAT_CLEAN" = "false" ] && CLEAN=false
+        [ "$LINT_STATUS" -ne 0 ] && CLEAN=false
+
+        {
+          echo "## GDScript Lint / Format"
+          echo ""
+
+          if [ "$MODE" = "fix" ]; then
+            if [ "$FORMATTED" = "true" ]; then
+              echo "\`gdformat\` reformatted one or more files (see the" \
+                   "separate formatting commit, if any)."
+            else
+              echo "\`gdformat\`: no changes needed."
+            fi
+          elif [ "$FORMAT_CLEAN" = "false" ]; then
+            echo "### Formatting (\`gdformat --check\`)"
+            echo ""
+            echo '```diff'
+            cat gdformat-output.txt
+            echo '```'
+          else
+            echo "\`gdformat\`: clean."
+          fi
+
+          echo ""
+
+          if [ "$LINT_STATUS" -ne 0 ]; then
+            echo "### Lint (\`gdlint\`)"
+            echo ""
+            echo '```'
+            cat gdlint-output.txt
+            echo '```'
+          else
+            echo "\`gdlint\`: clean."
+          fi
+        } > gdscript-lint-report.md
+
+        echo "clean=$CLEAN" >> "$GITHUB_OUTPUT"
+        echo "formatted=$FORMATTED" >> "$GITHUB_OUTPUT"

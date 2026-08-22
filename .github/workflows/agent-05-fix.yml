@@ -1,0 +1,425 @@
+name: Agent - PR Fix
+
+# Applies a bounded correction to a pull request in response to its most
+# recent `VERDICT: FIX` review comment, on the same branch.
+#
+# This is the automated counterpart of running `/fix-review <pr-number>`
+# locally, or commenting `@copilot` on a `review:fix` pull request.
+#
+# The gathering and prompt-building work is shared with
+# agent-02-execute.yml's pre-PR review-and-fix gate via the
+# `build-fix-request` and `run-copilot-session` composite actions. This
+# workflow's own job is everything specific to fixing an *existing* pull
+# request: checking out its branch, pushing the correction, and posting the
+# result as a comment on it.
+#
+# No AWNN number, unlike Plan/Execute/Rollup: those three are the flow a
+# human walks through step by step (01 -> 02 -> 03), coupled by that
+# numbering on purpose. Fix (like Review) is a reactive support agent
+# instead -- it runs on demand (the `agent:fix` label) or as part of
+# Execute's own pre-PR pass, not as a sequential step in that flow.
+#
+# Unlike `agent-04-review.yml`, this workflow writes to the repository: it
+# edits files, runs validation, and pushes a commit. That is a bigger blast
+# radius than posting a comment, so — deliberately, unlike the reviewer's
+# automatic trigger on `ready_for_review` — it never fires on its own just
+# because a PR picked up `review:fix`. A human decides when to spend it, by
+# adding `agent:fix` (works from GitHub Mobile) or running it manually.
+#
+# `build-fix-request` re-reads the latest verdict even though `agent:fix`
+# implies a human already believes it says FIX: labels can be applied to
+# the wrong PR, and a stale `review:fix` label can survive a later review
+# that changed the verdict. Re-reading the latest verdict comment costs
+# nothing (no model call, just `gh`/`jq`) and a wasted Copilot session for a
+# mislabeled PR is not free.
+
+on:
+  pull_request:
+    types:
+      - labeled
+
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull Request number to fix"
+        required: true
+        type: number
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  copilot-requests: write
+
+concurrency:
+  group: agent-fix-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    name: Agent - PR Fix
+    runs-on: ubuntu-latest
+
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' &&
+       github.event.label.name == 'agent:fix')
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+
+      PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
+
+      # The fix cycle turns a review's specific findings into a code change
+      # with nobody checking it before it goes back through review, so a
+      # cheap model that "fixes" a finding without preserving the invariant
+      # behind it is worse than no automated fixer -- the same reasoning
+      # `agent-04-review.yml` applies to the reviewer. Unlike that job this
+      # one is not blind analysis, it works from a bounded worklist, so it
+      # does not need the top tier by default; it must still never fall back
+      # to a cheap tier automatically. Preference list, per-identity
+      # availability -- see the long note in agent-01-planner.yml.
+      #
+      # Overridable via the FIXER_MODELS repository variable
+      # (comma-separated).
+      FIXER_MODELS: >-
+        ${{ vars.FIXER_MODELS
+        || 'claude-sonnet-5,claude-sonnet-4.5,claude-opus-5' }}
+
+      # Soft cap for this fix session. Higher than the reviewer's, because
+      # this session also edits files and re-runs validation, not just
+      # reads. The Copilot CLI rejects any value below 30 before it starts
+      # work, so 30 is the floor, not a tuning choice.
+      FIXER_MAX_AI_CREDITS: "100"
+
+      # Context only -- the checked-out repository is the source of truth
+      # for editing. Past this the diff shown to the model is truncated.
+      MAX_DIFF_CHARS: "150000"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Pull Request
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json number,url,headRefName,isCrossRepository \
+            > pr-meta.json
+
+          # A fork PR's branch cannot be pushed to with this token. Fail
+          # fast and say why, rather than discovering it after paying for a
+          # Copilot session.
+          if [ "$(jq -r '.isCrossRepository' pr-meta.json)" = "true" ]; then
+            echo "::error::PR #$PR_NUMBER is from a fork. This workflow" \
+                 "pushes to the head branch directly and cannot do that" \
+                 "across repositories. Fix it by hand or from a branch in" \
+                 "this repository instead."
+            exit 1
+          fi
+
+          echo "head_ref=$(jq -r '.headRefName' pr-meta.json)" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$(jq -r '.url' pr-meta.json)" >> "$GITHUB_OUTPUT"
+
+      # No model call -- pure gh/jq/python -- so it is cheap to run
+      # unconditionally just to learn the current verdict, before deciding
+      # whether a Copilot session is warranted at all.
+      - name: Build Fix Request
+        id: build
+        uses: ./.github/actions/build-fix-request
+        with:
+          mode: pr
+          pr-number: ${{ env.PR_NUMBER }}
+          max-diff-chars: ${{ env.MAX_DIFF_CHARS }}
+
+      # Only VERDICT: FIX is a bounded correction this agent should attempt.
+      # Every other outcome -- including "no verdict comment at all" -- gets
+      # a comment explaining why nothing happened, not a Copilot session.
+      - name: Require a FIX Verdict
+        if: steps.build.outputs.verdict != 'FIX'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERDICT="${{ steps.build.outputs.verdict }}"
+
+          case "$VERDICT" in
+            none)
+              MSG="No \`<!-- agent-review-verdict -->\` comment was found on this pull request. Run the reviewer first (the \`agent:review\` label, or \`agent-04-review.yml\`) before requesting a fix."
+              ;;
+            unrecognized)
+              MSG="The most recent review comment did not contain a recognisable \`VERDICT:\` line. Nothing was fixed."
+              ;;
+            PASS)
+              MSG="The most recent review verdict is \`PASS\`. There is nothing to fix."
+              ;;
+            PLANNING*)
+              MSG="The most recent review verdict is \`PLANNING FAILURE\`. This is not a bounded implementation defect -- it needs to go back through planning (re-run \`/plan-feature\` on the parent Feature), not an automated fix."
+              ;;
+            DESIGN*)
+              MSG="The most recent review verdict is \`DESIGN AMBIGUITY\`. Only a human can resolve this -- the fixer does not guess at design intent."
+              ;;
+            *)
+              MSG="The most recent review verdict is \`$VERDICT\`, which this workflow does not act on."
+              ;;
+          esac
+
+          {
+            echo "<!-- agent-fix-skipped -->"
+            echo ""
+            echo "## Fix cycle not started"
+            echo ""
+            echo "$MSG"
+          } > skip-comment.md
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file skip-comment.md
+
+          gh pr edit "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "agent:fix" || true
+
+          cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure Git Identity
+        if: steps.build.outputs.verdict == 'FIX'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Check Out Pull Request Branch
+        if: steps.build.outputs.verdict == 'FIX'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh pr checkout "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+
+          echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Run Fixer Session
+        if: steps.build.outputs.verdict == 'FIX'
+        id: session
+        uses: ./.github/actions/run-copilot-session
+        with:
+          prompt-file: ${{ steps.build.outputs.prompt-file }}
+          models: ${{ env.FIXER_MODELS }}
+          max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
+          # Same tool set as the executor: this session needs to edit,
+          # run shell commands, and commit. Only sub-agent spawning stays
+          # excluded.
+          excluded-tools: "task,write_agent"
+          step-label: "Fixing"
+
+      # The prompt tells the model to commit but never push. This is the
+      # single place that decides whether anything reaches the branch: a
+      # session that edited files but never committed, or committed nothing
+      # at all, does not get pushed just because it talked as if it had.
+      - name: Push Commit If One Was Made
+        if: steps.build.outputs.verdict == 'FIX'
+        id: push
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::The fixer left uncommitted changes. Nothing was" \
+                 "pushed -- committing is part of its contract."
+            git status --porcelain
+
+            echo '{"reason":"uncommitted_changes",' \
+                 '"headline":"The fixer left uncommitted changes instead of committing or making no changes",' \
+                 '"guidance":"This is a session-behavior fault, not a budget or availability one. Re-adding agent:fix retries from a clean branch."}' \
+              > fixer-failure.json
+
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=uncommitted_changes" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          NEW_SHA=$(git rev-parse HEAD)
+
+          if [ "$NEW_SHA" = "$BASE_SHA" ]; then
+            echo "::warning::No commit was made. The fixer made no changes" \
+                 "to the branch."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=no_commit" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git push origin "HEAD:${{ steps.pr.outputs.head_ref }}"
+
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Fix
+        if: >-
+          steps.build.outputs.verdict == 'FIX' &&
+          steps.push.outputs.pushed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPORT="${{ steps.session.outputs.assistant-text-file }}"
+
+          {
+            echo "<!-- agent-fix-applied -->"
+            echo ""
+            echo "## Automated Fix Applied"
+            echo ""
+            if [ -s "$REPORT" ]; then
+              cat "$REPORT"
+            else
+              echo "The fixer pushed a commit but produced no final report." \
+                   "Inspect the diff directly."
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "Commit \`${{ steps.push.outputs.sha }}\` pushed to" \
+                 "\`${{ steps.pr.outputs.head_ref }}\` by" \
+                 "\`.github/agents/05-fixer.agent.md\` via" \
+                 "\`agent-05-fix.yml\` on \`${{ steps.session.outputs.resolved-model }}\`."
+            echo ""
+            echo "This does not change the \`review:fix\` label. Re-review" \
+                 "with the \`agent:review\` label when ready."
+          } > fix-comment.md
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file fix-comment.md
+
+          gh pr edit "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "agent:fix" || true
+
+          cat fix-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report No Commit Pushed
+        if: >-
+          steps.build.outputs.verdict == 'FIX' &&
+          steps.push.outputs.pushed == 'false' &&
+          steps.push.outputs.reason == 'no_commit'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "<!-- agent-fix-no-commit -->"
+            echo ""
+            echo "## Automated fix produced no change"
+            echo ""
+            echo "The fixer session completed without committing anything."
+            echo "It may have found nothing it was able to fix within its"
+            echo "guardrails, or it may have deliberately left a finding for"
+            echo "a human to decide. Check the session log:"
+            echo ""
+            echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > no-commit-comment.md
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file no-commit-comment.md
+
+          gh pr edit "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "agent:fix" || true
+
+      # Deliberately just `failure()`, not also gated on the verdict check
+      # having passed: a hard crash in "Resolve Pull Request" itself (bad
+      # PR number, a `gh` API blip) exits nonzero before a verdict is ever
+      # known, and that must still produce a comment rather than a silent
+      # red run with no trace anywhere.
+      - name: Report Fix Failure
+        if: failure()
+        shell: python
+        env:
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository
+            }}/actions/runs/${{ github.run_id }}
+        run: |
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          pr_number = os.environ["PR_NUMBER"]
+          run_url = os.environ["RUN_URL"]
+
+          failure = {}
+
+          for candidate in ("fixer-failure.json", "copilot-session-failure.json"):
+              path = pathlib.Path(candidate)
+
+              if path.exists():
+                  try:
+                      failure = json.loads(path.read_text())
+                  except json.JSONDecodeError:
+                      failure = {}
+                  break
+
+          reason = failure.get("reason", "unknown")
+
+          lines = [
+              "<!-- agent-fix-failed -->",
+              "",
+              "## Automated fix did not complete",
+              "",
+              "**No commit was pushed.** This pull request is unchanged.",
+              "",
+          ]
+
+          if failure:
+              lines += [
+                  f"**{failure.get('headline', 'The fix run failed')}**",
+                  "",
+                  f"Reason: `{reason}`",
+                  "",
+              ]
+
+              guidance = failure.get("guidance")
+
+              if guidance:
+                  lines += [guidance, ""]
+          else:
+              lines += [
+                  "The run failed outside the Copilot session -- resolving the"
+                  " pull request, checking out the branch, pushing, or"
+                  " publishing the comment.",
+                  "",
+              ]
+
+          lines += [
+              f"Full run log: {run_url}",
+              "",
+              "`agent:fix` has been removed, so re-adding it is a clean retry.",
+          ]
+
+          body = "\n".join(lines)
+
+          subprocess.run(
+              ["gh", "pr", "comment", pr_number, "--repo", repo, "--body", body],
+              check=True,
+          )
+
+          subprocess.run(
+              [
+                  "gh", "pr", "edit", pr_number, "--repo", repo,
+                  "--remove-label", "agent:fix",
+              ],
+              check=False,
+          )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("\n" + body + "\n")

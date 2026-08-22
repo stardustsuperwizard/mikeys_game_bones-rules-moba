@@ -100,7 +100,7 @@ For each Feature Issue:
 11. Record every created Implementation Task Issue number and URL in the
     plan comment.
 
-12. Review runs separately, as `agent-03-review.yml` on the implementation
+12. Review runs separately, as `agent-04-review.yml` on the implementation
     pull request. Do not invoke a reviewer yourself.
 
 13. Handle reviewer results as follows:
@@ -186,11 +186,16 @@ Create a sub-issue using the equivalent of:
 ```bash
 gh issue create \
   --repo stardustsuperwizard/sword-and-planet \
-  --title "[impl] <task title>" \
+  --title "[impl] [<parent-feature-number>] <task title>" \
   --body-file <prepared-body-file> \
   --label "implementation,machine" \
   --parent <parent-feature-number>
 ```
+
+The `[<parent-feature-number>]` title tag duplicates the `--parent` link in
+human-readable form: GitHub's Issues list does not surface sub-issue
+relationships, so the tag is what lets a person scanning that list see which
+Feature a task belongs to at a glance.
 
 When the task depends on another Issue, include the appropriate GitHub Issue
 dependency relationship, for example:
