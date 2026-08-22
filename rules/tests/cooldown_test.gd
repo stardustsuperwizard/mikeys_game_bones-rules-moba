@@ -344,16 +344,27 @@ static func _test_no_timer_reset() -> Array[String]:
 
 	var remaining_at_05 = combatant._cooldowns.remaining(&"test_ability")
 
-	combatant.commit_activate(&"test_ability")
+	var second_commit_result = combatant.commit_activate(&"test_ability")
 
 	var remaining_after_second = combatant._cooldowns.remaining(&"test_ability")
+	var charges_after_second = combatant._cooldowns.charges(&"test_ability")
 
-	if remaining_after_second > remaining_at_05 + 0.01:
+	if second_commit_result != MobaCombatant.ActivationFailure.OK:
+		violations.append(
+			"no_timer_reset: second commit should succeed, got %d" % second_commit_result
+		)
+
+	if not _approx_equal(remaining_after_second, remaining_at_05, 0.01):
 		violations.append(
 			(
 				"no_timer_reset: timer was reset (expected ~%f, got %f)"
 				% [remaining_at_05, remaining_after_second]
 			)
+		)
+
+	if charges_after_second != 0:
+		violations.append(
+			"no_timer_reset: charges should be 0 after second use, got %d" % charges_after_second
 		)
 
 	return violations

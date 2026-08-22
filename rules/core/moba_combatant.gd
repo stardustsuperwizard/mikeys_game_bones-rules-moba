@@ -233,22 +233,21 @@ func can_activate(ability_id: StringName) -> int:
 	if ability.resource_cost > _current_resource:
 		return ActivationFailure.INSUFFICIENT_RESOURCE
 
-	# Check cooldown and charges
-	if not _cooldowns.is_ready(ability_id):
-		var available_charges = _cooldowns.charges(ability_id)
-		if available_charges <= 0:
-			return ActivationFailure.NO_CHARGES
-		else:
-			return ActivationFailure.ON_COOLDOWN
+	# Check cooldown and charges. A charge remaining while the recharge timer is
+	# still running does not block activation; only being out of charges does.
+	var available_charges: int = _cooldowns.charges(ability_id)
+	if available_charges <= 0 and _cooldowns.remaining(ability_id) > 0.0:
+		return ActivationFailure.NO_CHARGES
 
 	return ActivationFailure.OK
 
 
 ## Commit an ability activation: spend resource and start cooldown atomically.
-## Returns the failure reason if activation cannot proceed; spends nothing and starts no cooldown if not OK.
+## Returns the failure reason if activation cannot proceed; spends nothing and
+## starts no cooldown if not OK.
 ## If can_activate() returns OK, this call will succeed and spend resource + start cooldown.
 func commit_activate(ability_id: StringName) -> int:
-	var check = can_activate(ability_id)
+	var check: int = can_activate(ability_id)
 	if check != ActivationFailure.OK:
 		return check
 
@@ -258,7 +257,7 @@ func commit_activate(ability_id: StringName) -> int:
 	spend_resource(ability.resource_cost)
 
 	# Start cooldown with current haste
-	var haste = get_stat(MobaStatBlock.ABILITY_HASTE)
+	var haste: float = get_stat(MobaStatBlock.ABILITY_HASTE)
 	_cooldowns.start(ability_id, ability.cooldown, haste, ability.charges)
 
 	return ActivationFailure.OK
