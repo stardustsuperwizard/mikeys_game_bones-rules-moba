@@ -13,7 +13,7 @@ Shared cases:
   - effective_armor(100, flat_pen=20, percent_pen=0.30) == 56.0
   - effective_armor(10, flat_pen=30) == 0.0
   - physical_damage(50, 50) ≈ 33.33
-  - physical_damage(100, 50) with a 2.0 crit multiplier (raw * 2.0) ≈ 66.67
+  - physical_damage(200, 50) ≈ 133.33 (with 2.0 crit multiplier applied to raw)
   - true_damage(42.5) == 42.5 (unaffected by penetration)
   - mitigation_multiplier(0) == 1.0 (zero defense yields 1.0 multiplier)
   - mitigation_multiplier(-30) == 1.0 (negative defense clamps to 1.0 multiplier)
