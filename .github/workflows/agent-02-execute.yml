@@ -623,18 +623,19 @@ jobs:
             echo "fix_applied=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # The pull request body only ever carries the executor's own
+      # completion report -- the same shape a human-run or cloud-agent
+      # session's body would have. The review verdict is NOT written here;
+      # it goes to a comment in "Publish Pre-PR Review" below, the same
+      # place `agent-03-review.yml` posts it. Keeping `## Review` blank
+      # here (never filled by this step) matches every other PR in this
+      # repo: the verdict lives in the comment feed, not the body.
       - name: Push Branch and Open Pull Request
         if: steps.prep.outcome == 'success'
         id: pr
         shell: python
         env:
-          REVIEW_OK: ${{ steps.review-eval.outputs.review_ok }}
-          VERDICT: ${{ steps.review-eval.outputs.verdict }}
-          REVIEW_FILE: ${{ steps.review-verdict.outputs.review-file }}
-          REVIEWER_MODEL: ${{ steps.review-session.outputs.resolved-model }}
           FIX_APPLIED: ${{ steps.fix-eval.outputs.fix_applied }}
-          FIX_TEXT_FILE: ${{ steps.fix-session.outputs.assistant-text-file }}
-          FIXER_MODEL: ${{ steps.fix-session.outputs.resolved-model }}
           EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.assistant-text-file }}
           EXECUTOR_MODEL: ${{ steps.exec-session.outputs.resolved-model }}
         run: |
@@ -648,24 +649,22 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
 
           def read(path):
-              p = pathlib.Path(path)
-              return p.read_text(errors="replace").strip() if p.exists() else ""
+              p = pathlib.Path(path) if path else None
+              return p.read_text(errors="replace").strip() if p and p.exists() else ""
 
-          exec_report = read(os.environ["EXEC_TEXT_FILE"]) or (
+          exec_report = read(os.environ.get("EXEC_TEXT_FILE")) or (
               "The executor pushed a commit but produced no final report."
               " Inspect the diff directly."
           )
 
-          review_ok = os.environ["REVIEW_OK"] == "true"
-          verdict = os.environ["VERDICT"]
           fix_applied = os.environ.get("FIX_APPLIED") == "true"
 
           # Last-resort safety net: "Evaluate Pre-PR Fix" is supposed to
           # leave HEAD at IMPL_SHA whenever fix_applied is false (it resets
           # there itself). If that reset somehow didn't take (e.g. the
           # `git reset --hard` call itself failed), force it here rather
-          # than push a commit the pull request body is about to describe
-          # as "unfixed".
+          # than push a commit the pull request's own report is about to
+          # describe as unfixed.
           impl_sha = os.environ.get("IMPL_SHA")
 
           if not fix_applied and impl_sha:
@@ -677,100 +676,21 @@ jobs:
               if current_sha != impl_sha:
                   subprocess.run(["git", "reset", "--hard", impl_sha], check=True)
 
-          lines = [f"Closes #{issue_number}", "", exec_report, ""]
-
-          label = ""
-
-          if not review_ok:
-              lines += [
-                  "## Pre-PR Automated Review",
-                  "",
-                  "The automated pre-PR review did not complete (budget,"
-                  " availability, or a malformed response) -- see the"
-                  " workflow run log. This pull request has not been"
-                  " reviewed at all yet.",
-                  "",
-                  "## Review",
-                  "",
-                  "```",
-                  "VERDICT:",
-                  "```",
-                  "",
-              ]
-          elif verdict == "FIX" and fix_applied:
-              fix_report = read(os.environ["FIX_TEXT_FILE"]) or (
-                  "No final report was produced."
-              )
-
-              lines += [
-                  "## Pre-PR Automated Review",
-                  "",
-                  f"Reviewed before opening (on `{os.environ['REVIEWER_MODEL']}`)"
-                  " and found issues that were fixed automatically before"
-                  f" this pull request opened (on `{os.environ['FIXER_MODEL']}`).",
-                  "",
-                  "<details><summary>Original findings</summary>",
-                  "",
-                  read(os.environ["REVIEW_FILE"]),
-                  "",
-                  "</details>",
-                  "",
-                  "<details><summary>Fix applied</summary>",
-                  "",
-                  fix_report,
-                  "",
-                  "</details>",
-                  "",
-                  "The code changed after the review above, so it has not"
-                  " been re-reviewed. Add `agent:review` for a fresh"
-                  " verdict.",
-                  "",
-                  "## Review",
-                  "",
-                  "```",
-                  "VERDICT:",
-                  "```",
-                  "",
-              ]
-          elif verdict == "FIX" and not fix_applied:
-              lines += [
-                  "## Pre-PR Automated Review",
-                  "",
-                  "Reviewed before opening and found issues. An automatic"
-                  " fix was attempted and did not land cleanly, so this"
-                  " pull request is unfixed -- see the workflow run log.",
-                  "",
-                  "## Review",
-                  "",
-                  f"VERDICT: {verdict}",
-                  "",
-                  read(os.environ["REVIEW_FILE"]),
-              ]
-              label = "review:fix"
-          else:
-              lines += [
-                  "## Pre-PR Automated Review",
-                  "",
-                  f"Reviewed before opening, on `{os.environ['REVIEWER_MODEL']}`.",
-                  "",
-                  "## Review",
-                  "",
-                  f"VERDICT: {verdict}",
-                  "",
-                  read(os.environ["REVIEW_FILE"]),
-              ]
-              label = {
-                  "PASS": "review:pass",
-                  "PLANNING FAILURE": "review:planning-failure",
-                  "DESIGN AMBIGUITY": "review:design-ambiguity",
-              }.get(verdict, "")
-
-          lines += [
+          lines = [
+              f"Closes #{issue_number}",
+              "",
+              exec_report,
+              "",
+              "## Review",
+              "",
+              "```",
+              "VERDICT:",
+              "```",
               "",
               "## Agent Session Metadata",
               "",
               f"- Implementation model: {os.environ['EXECUTOR_MODEL']}",
-              f"- Review model: {os.environ.get('REVIEWER_MODEL') or ''}",
+              "- Review model: ",
               "- Reasoning level: default",
               "- Rework cycles: " + ("1" if fix_applied else "0"),
               "- Steering messages: none",
@@ -798,7 +718,6 @@ jobs:
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
               handle.write(f"pr_url={pr_url}\n")
-              handle.write(f"label={label}\n")
 
           subprocess.run(
               ["gh", "issue", "comment", issue_number, "--repo", repo,
@@ -817,45 +736,158 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write(f"### Execute Task\n\nOpened {pr_url}.\n")
 
-      # Best-effort: the pull request is already open by this point, so a
-      # label-API hiccup here must not turn into a job failure that tells
+      # Best-effort: the pull request is already open by this point, so
+      # anything failing here must not turn into a job failure that tells
       # the Issue "no pull request was opened" when one clearly was.
-      - name: Apply Pre-PR Review Label
-        if: steps.pr.outputs.label != ''
+      #
+      # This is deliberately the *only* place the pre-PR review's findings
+      # ever reach GitHub as text. Whether that text is a real
+      # `<!-- agent-review-verdict -->` comment (the exact format and
+      # marker `agent-03-review.yml` posts, so `agent-05-fix.yml` and a
+      # human both recognise it identically) depends on whether it's still
+      # accurate for the code as pushed:
+      #
+      #   - review_ok false, or FIX-and-fixed: NOT posted as a verdict --
+      #     either there is no verdict, or the code changed after the one
+      #     that exists, so publishing it as *the* verdict would describe
+      #     code that no longer exists. Both get a plainly-labeled
+      #     informational comment instead, and no review:* label, so
+      #     `agent:review` on this pull request is a first review, not a
+      #     wasted repeat of one that already happened.
+      #   - PASS / unfixed-FIX / PLANNING FAILURE / DESIGN AMBIGUITY: this
+      #     verdict is still exactly what the current code would get from
+      #     `agent-03-review.yml`, so it's posted as the real thing, label
+      #     included. Re-adding `agent:review` here would be paying for a
+      #     second opinion on unchanged code -- the label already visible
+      #     on the pull request is the signal that already happened.
+      - name: Publish Pre-PR Review
+        if: steps.pr.outcome == 'success'
         continue-on-error: true
-        shell: bash
+        shell: python
+        env:
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+          REVIEW_OK: ${{ steps.review-eval.outputs.review_ok }}
+          VERDICT: ${{ steps.review-eval.outputs.verdict }}
+          REVIEW_FILE: ${{ steps.review-verdict.outputs.review-file }}
+          REVIEWER_MODEL: ${{ steps.review-session.outputs.resolved-model }}
+          FIX_APPLIED: ${{ steps.fix-eval.outputs.fix_applied }}
+          FIX_TEXT_FILE: ${{ steps.fix-session.outputs.assistant-text-file }}
+          FIXER_MODEL: ${{ steps.fix-session.outputs.resolved-model }}
         run: |
-          set -euo pipefail
+          import os
+          import pathlib
+          import re
+          import subprocess
 
-          LABEL="${{ steps.pr.outputs.label }}"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          pr_url = os.environ["PR_URL"]
+          pr_number = re.search(r"(\d+)$", pr_url).group(1)
 
-          ensure_label () {
-            if ! gh label list \
-                --repo "$GITHUB_REPOSITORY" \
-                --limit 200 \
-                --json name \
-                --jq '.[].name' |
-                grep -Fxq "$1"
-            then
-              gh label create "$1" \
-                --repo "$GITHUB_REPOSITORY" \
-                --color "$2" \
-                --description "$3"
-            fi
-          }
+          def read(path):
+              p = pathlib.Path(path) if path else None
+              return p.read_text(errors="replace").strip() if p and p.exists() else ""
 
-          ensure_label "review:pass" "0E8A16" "Automated review returned PASS"
-          ensure_label "review:fix" "D93F0B" "Automated review returned FIX"
-          ensure_label "review:planning-failure" "B60205" \
-            "Automated review returned PLANNING FAILURE"
-          ensure_label "review:design-ambiguity" "FBCA04" \
-            "Automated review returned DESIGN AMBIGUITY"
+          review_ok = os.environ["REVIEW_OK"] == "true"
+          verdict = os.environ["VERDICT"]
+          fix_applied = os.environ.get("FIX_APPLIED") == "true"
+          reviewer_model = os.environ.get("REVIEWER_MODEL") or ""
 
-          PR_NUMBER=$(echo "${{ steps.pr.outputs.pr_url }}" | grep -oE '[0-9]+$')
+          label = ""
 
-          gh pr edit "$PR_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --add-label "$LABEL"
+          if not review_ok:
+              body = (
+                  "<!-- agent-execute-review-failed -->\n\n"
+                  "## Pre-PR review did not complete\n\n"
+                  "The automated review run before this pull request opened"
+                  " did not finish (budget, availability, or a malformed"
+                  " response) -- see the workflow run log. This pull"
+                  " request has not been reviewed at all yet. Add"
+                  " `agent:review` for a first pass."
+              )
+          elif verdict == "FIX" and fix_applied:
+              fix_report = read(os.environ.get("FIX_TEXT_FILE")) or (
+                  "No final report was produced."
+              )
+
+              body = (
+                  "<!-- agent-fix-applied -->\n\n"
+                  "## Automated Fix Applied (pre-PR)\n\n"
+                  f"Reviewed before opening (on `{reviewer_model}`) and"
+                  " found issues that were fixed automatically before this"
+                  f" pull request opened (on"
+                  f" `{os.environ.get('FIXER_MODEL') or ''}`).\n\n"
+                  "<details><summary>Original findings</summary>\n\n"
+                  f"{read(os.environ['REVIEW_FILE'])}\n\n"
+                  "</details>\n\n"
+                  "<details><summary>Fix applied</summary>\n\n"
+                  f"{fix_report}\n\n"
+                  "</details>\n\n"
+                  "The code changed after the review above, so it has not"
+                  " been re-reviewed as-is. Add `agent:review` for a fresh"
+                  " verdict."
+              )
+          else:
+              note = (
+                  "\n\nAn automatic fix was attempted and did not land"
+                  " cleanly, so this pull request is unfixed."
+                  if verdict == "FIX"
+                  else ""
+              )
+
+              body = (
+                  "<!-- agent-review-verdict -->\n\n"
+                  f"## Automated Review — `{verdict}`\n\n"
+                  f"{read(os.environ['REVIEW_FILE'])}{note}\n\n"
+                  "---\n\n"
+                  "Reviewed by `.github/agents/03-reviewer.agent.md` via"
+                  f" `agent-02-execute.yml`'s pre-PR pass on"
+                  f" `{reviewer_model}`.\n"
+                  "Re-run by adding the `agent:review` label."
+              )
+
+              label = {
+                  "PASS": "review:pass",
+                  "FIX": "review:fix",
+                  "PLANNING FAILURE": "review:planning-failure",
+                  "DESIGN AMBIGUITY": "review:design-ambiguity",
+              }.get(verdict, "")
+
+          subprocess.run(
+              ["gh", "pr", "comment", pr_number, "--repo", repo, "--body", body],
+              check=True,
+          )
+
+          if label:
+              LABELS = {
+                  "review:pass": ("0E8A16", "Automated review returned PASS"),
+                  "review:fix": ("D93F0B", "Automated review returned FIX"),
+                  "review:planning-failure": (
+                      "B60205", "Automated review returned PLANNING FAILURE"
+                  ),
+                  "review:design-ambiguity": (
+                      "FBCA04", "Automated review returned DESIGN AMBIGUITY"
+                  ),
+              }
+              color, description = LABELS[label]
+
+              existing = subprocess.run(
+                  ["gh", "label", "list", "--repo", repo, "--limit", "200",
+                   "--json", "name", "--jq", ".[].name"],
+                  capture_output=True, text=True, check=True,
+              ).stdout.splitlines()
+
+              if label not in existing:
+                  subprocess.run(
+                      ["gh", "label", "create", label, "--repo", repo,
+                       "--color", color, "--description", description],
+                      check=True,
+                  )
+
+              subprocess.run(
+                  ["gh", "pr", "edit", pr_number, "--repo", repo,
+                   "--add-label", label],
+                  check=True,
+              )
 
       - name: Report No Commit Produced
         if: >-
