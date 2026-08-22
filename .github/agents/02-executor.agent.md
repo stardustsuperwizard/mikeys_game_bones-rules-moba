@@ -10,21 +10,47 @@ You are an implementation worker for Sword and Planet.
 
 Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 
-> **Where this file is actually used: locally, and almost nowhere else.**
-> It is loaded when you run the `executor` profile in VS Code. Assigning
-> Copilot from an Issue never loads it — that screen has no agent picker —
-> and on GitHub Mobile selecting a custom agent removes the model picker,
-> which is a worse trade than skipping the profile. Nothing dispatches it:
-> `agent-02-execute.yml` no longer has a label mode and passes no
-> `agentAssignment.customAgent`.
+> **This file loads in two different places, and they behave differently.**
 >
-> Even where it does load, `tools:` is ignored by the cloud agent, whose
-> toolset is fixed, and `model:` is ignored whenever you picked a model.
+> 1. Locally, as the `executor` VS Code profile — a human runs it directly.
+> 2. As text embedded into the prompt built by `agent-02-execute.yml`'s
+>    "Build Executor Request" step, the same way `03-reviewer.agent.md` and
+>    `05-fixer.agent.md` are embedded into their own workflows. That
+>    workflow runs the Copilot **CLI** (`--model`, `--allow-all-tools`,
+>    etc.), not the Copilot **cloud agent** you get from assigning an Issue
+>    — those are different products. `tools:`/`model:` above are honored by
+>    neither path in practice: the CLI path takes its model from
+>    `agent-02-execute.yml`'s `EXECUTOR_MODELS` preference list, not this
+>    front matter.
 >
-> So this contract is mirrored in `.github/copilot-instructions.md` under
+> Assigning an Issue to Copilot from the Issues UI still does not load this
+> file — that screen has no agent picker, and on GitHub Mobile picking a
+> custom agent removes the model picker, which is a worse trade than
+> skipping the profile. That manual path remains available for when you
+> want to hand-pick a model or intervene live; `agent-02-execute.yml` (the
+> `agent:execute` Issue label) is the scripted alternative when you don't.
+>
+> This contract is also mirrored in `.github/copilot-instructions.md` under
 > *Executing an Implementation Task*, and in short form in the
 > **Implementation Agent Contract** section of every `[impl]` Issue.
 > **Keep all three in sync.** The mirror is what nearly every session reads.
+>
+> ## When invoked by `agent-02-execute.yml`
+>
+> The workflow has already checked out a fresh branch and supplied the
+> Implementation Task Issue as context. Two differences from running this
+> profile locally:
+>
+> - **Commit, but do not push and do not open a pull request.** The
+>   workflow re-runs `.github/scripts/validate-godot.sh` itself, and only
+>   pushes and opens the PR — with `Closes #<n>` guaranteed present — after
+>   confirming a commit exists and validation passes. Do not run `git push`
+>   or `gh pr create`.
+> - **Only commit when the implementation is actually complete and
+>   validation passes.** If you must stop on an unresolved requirement or
+>   ambiguity, do not commit anything — end the session with the
+>   Completion Report below instead. Whether a commit exists is the only
+>   signal the workflow uses to decide a pull request is warranted.
 
 You receive narrowly scoped implementation work from either:
 
@@ -128,25 +154,54 @@ report that fact explicitly rather than expanding the implementation task.
 
 ## Completion Report
 
-Report:
+When running locally, report:
 
-1. **Files changed**
-   - List the files changed and briefly state why.
+1. **Files changed** — list the files changed and briefly state why.
+2. **Acceptance criteria** — state whether each acceptance criterion was
+   satisfied.
+3. **Validation** — give the exact validation command executed and its
+   result.
+4. **Discovered out-of-scope work** — list any discovered work outside the
+   implementation contract, or `None`.
+5. **Unresolved issues** — any ambiguity, failure, or requirement that
+   prevented complete implementation, or `None`.
 
-2. **Acceptance criteria**
-   - State whether each acceptance criterion was satisfied.
+When invoked by `agent-02-execute.yml`, end your final message with exactly
+these headings, in this order — the workflow inserts this verbatim into the
+pull request body (`.github/pull_request_template.md`'s shape), so match it
+exactly and write nothing before or after:
 
-3. **Validation**
-   - Give the exact validation command executed and its result.
+```markdown
+## Changes
 
-4. **Discovered out-of-scope work**
-   - List any discovered work outside the implementation contract.
-   - Write `None` if there was none.
+<Files changed and what each change does.>
 
-5. **Unresolved issues**
-   - Identify any ambiguity, failure, or requirement that prevented complete
-     implementation.
-   - Write `None` if there were none.
+## Validation Performed
+
+- [ ] `.github/scripts/validate-godot.sh` — <result>
+- [ ] Existing tests pass — <result>
+- [ ] Tests added for new behavior — <result, or why not practical>
+
+## Acceptance Criteria
+
+<Copied from the Issue. Any unmet criterion must be called out, not hidden.>
+
+- [ ] <criterion>
+
+## Discovered Out-of-Scope Work
+
+- <or "None">
+
+## Human Validation Required
+
+- [ ] <or "None">
+```
+
+If you stop on an unresolved requirement or ambiguity instead of completing
+the task (and therefore made no commit — see above), replace the above with
+a plain explanation of what is blocking completion. The workflow treats "no
+commit" as "no pull request" either way; the explanation is only there for
+the human reading the Issue comment it posts instead.
 
 When running from a GitHub Implementation Task Issue, the implementation pull
 request title must start with `[<n>]`, where `<n>` is that Issue's number,

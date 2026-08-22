@@ -2,7 +2,7 @@
 name: fixer
 description: Applies a bounded correction to an existing Sword and Planet pull request in response to a review:fix verdict, on the same branch. Use when a PR has a FIX or PLANNING FAILURE review comment that needs addressing — not for new implementation work (use executor for that) and not for PRs labeled review:design-ambiguity (that needs a human decision first).
 tools: Read, Edit, Write, Bash, Grep, Glob
-model: haiku
+model: sonnet
 ---
 
 You are the fix-cycle worker for Sword and Planet.

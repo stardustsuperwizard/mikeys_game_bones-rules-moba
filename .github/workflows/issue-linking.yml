@@ -1,0 +1,532 @@
+name: PR to Issue Linking
+
+# Guards around manually dispatched Copilot implementation work.
+#
+# Execution is deliberately manual: no programmatic path can reliably choose
+# the model for a Copilot cloud agent session. You dispatch the task yourself
+# from GitHub, including GitHub Mobile, with the model you want.
+#
+# This workflow handles the repository bookkeeping around that session:
+#
+#   1. Warn if an Implementation Task was started while it still has an
+#      open blocker.
+#
+#   2. Ensure the pull request is actually linked to its Implementation Task
+#      with a GitHub closing reference such as `Closes #90`.
+#
+#      Prompt-started Copilot sessions sometimes create the implementation
+#      correctly but omit the closing keyword even when explicitly instructed
+#      to include it.
+#
+#      When that happens, this workflow repairs the PR automatically. It
+#      resolves the task deterministically from the PR title's "[NN] ..."
+#      tag when present and valid; otherwise it falls back to inferring
+#      exactly one open Issue labeled `implementation` from the branch name,
+#      title, or body.
+#
+#      If inference is ambiguous, it refuses to guess and posts a comment
+#      asking for the closing reference manually.
+
+on:
+  issues:
+    types:
+      - assigned
+
+  # A pasted/independent Copilot agent session is not necessarily represented
+  # by an Issue assignment. Its pull request is therefore our reliable signal
+  # that implementation work has started.
+  #
+  # `opened` only, never `synchronize`: this workflow deals with dispatch
+  # bookkeeping, not every change to the implementation branch.
+  pull_request:
+    types:
+      - opened
+
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Implementation Task Issue number to check"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: >-
+    agent-execute-${{
+      github.event.pull_request.number
+      || github.event.issue.number
+      || inputs.issue_number
+    }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Check Dependencies
+    runs-on: ubuntu-latest
+
+    # Run automatically only for Copilot-created PRs or Copilot assignments.
+    # Human PRs normally do not need to close an Implementation Task.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       (startsWith(github.event.pull_request.head.ref, 'copilot/') ||
+        github.event.pull_request.user.login == 'Copilot')) ||
+      (github.event.action == 'assigned' &&
+       github.event.assignee.login == 'copilot-swe-agent')
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------------
+      # First pass:
+      #
+      # If the PR already has a real GitHub closing reference, use it.
+      #
+      # Assignment/manual-dispatch paths already know their Issue number.
+      #
+      # A prompt-started Copilot session may return zero here even though the
+      # branch clearly identifies the Issue. The next step handles that case.
+      # ----------------------------------------------------------------------
+      - name: Resolve Implementation Tasks
+        id: tasks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : > tasks.txt
+
+          if [ -n "${PR_NUMBER:-}" ]; then
+            gh pr view "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json closingIssuesReferences \
+              --jq '.closingIssuesReferences[].number' \
+              > tasks.txt
+          else
+            echo "${{ inputs.issue_number || github.event.issue.number }}" \
+              > tasks.txt
+          fi
+
+          COUNT=$(grep -c . tasks.txt || true)
+
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No GitHub closing reference exists yet."
+          else
+            echo "Checking: $(tr '\n' ' ' < tasks.txt)"
+          fi
+
+      # ----------------------------------------------------------------------
+      # Prompt-started Copilot sessions can create a complete implementation
+      # PR but fail to include `Closes #NN`.
+      #
+      # This step repairs that omission. Its primary, deterministic source is
+      # the "[NN] ..." title tag every planner-generated task prompt asks the
+      # executor to use: if the title starts with a bracketed number naming
+      # an open Issue labeled `implementation`, that is authoritative.
+      #
+      # When the title tag is missing or invalid -- a human-authored PR, or
+      # a session that ignored the convention -- it falls back to scanning
+      # for any candidate that:
+      #
+      #   - exists in this repository;
+      #   - is OPEN; and
+      #   - has the `implementation` label.
+      #
+      # drawn from:
+      #
+      #   - the Copilot branch name (e.g. copilot/90-work-on-issue); and
+      #   - Issue references already present in the PR title or body.
+      #
+      # If exactly one candidate survives validation, prepend:
+      #
+      #   Closes #NN
+      #
+      # to the PR body.
+      #
+      # If zero or multiple candidates survive, do NOT guess.
+      # ----------------------------------------------------------------------
+      - name: Repair Missing Closing Reference
+        id: repair
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.tasks.outputs.count == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json title,body,headRefName \
+            > pr.json
+
+          is_valid_task() {
+            gh issue view "$1" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json state,labels,number \
+              --jq '
+                select(.state == "OPEN")
+                | select([.labels[].name] | index("implementation"))
+                | .number
+              ' \
+              2>/dev/null
+          }
+
+          # Primary, deterministic source: every planner-generated task
+          # prompt asks the executor to title the pull request "[NN] ...".
+          # When the title honors that convention and NN is a valid open
+          # Implementation Task, that is authoritative and the fuzzy scan
+          # below never runs -- there is nothing to disambiguate.
+          TITLE_TASK=$(
+            jq -r '.title' pr.json \
+              | grep -oE '^\[[0-9]+\]' \
+              | tr -d '[]' \
+              || true
+          )
+
+          : > valid-tasks.txt
+
+          if [ -n "$TITLE_TASK" ]; then
+            is_valid_task "$TITLE_TASK" >> valid-tasks.txt || true
+          fi
+
+          if [ -s valid-tasks.txt ]; then
+            echo "Resolved from PR title tag: [$TITLE_TASK]"
+          else
+            # Fallback: the title tag is missing or does not name a valid
+            # open Implementation Task -- e.g. a human-authored PR, or an
+            # agent session that ignored the convention. Collect every
+            # plausible Issue number visible in the branch, title, or PR
+            # body instead.
+            {
+              jq -r '.headRefName' pr.json \
+                | grep -oE '[0-9]+' || true
+
+              jq -r '.title + "\n" + (.body // "")' pr.json \
+                | grep -oE '#[0-9]+' \
+                | tr -d '#' || true
+            } \
+              | sort -un \
+              > candidates.txt
+
+            echo "Candidate Issue numbers:"
+            cat candidates.txt || true
+
+            while read -r N; do
+              [ -n "$N" ] || continue
+              is_valid_task "$N" >> valid-tasks.txt || true
+            done < candidates.txt
+          fi
+
+          sort -un valid-tasks.txt -o valid-tasks.txt
+
+          VALID_COUNT=$(grep -c . valid-tasks.txt || true)
+
+          echo "Valid open Implementation Tasks: $VALID_COUNT"
+
+          if [ "$VALID_COUNT" -ne 1 ]; then
+            echo "repaired=false" >> "$GITHUB_OUTPUT"
+            echo "candidate_count=$VALID_COUNT" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          TASK=$(grep . valid-tasks.txt)
+          KEYWORD="Closes #$TASK"
+
+          echo "Unambiguously resolved PR #$PR_NUMBER to Issue #$TASK."
+          echo "Adding: $KEYWORD"
+
+          # Preserve the complete existing PR body and prepend the closing
+          # reference. Using the API directly avoids changing any other PR
+          # metadata.
+          CURRENT_BODY=$(jq -r '.body // ""' pr.json)
+
+          if [ -n "$CURRENT_BODY" ]; then
+            NEW_BODY="${KEYWORD}"$'\n\n'"${CURRENT_BODY}"
+          else
+            NEW_BODY="${KEYWORD}"
+          fi
+
+          jq -n \
+            --arg body "$NEW_BODY" \
+            '{body: $body}' \
+            > update-pr.json
+
+          gh api \
+            --method PATCH \
+            "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
+            --input update-pr.json \
+            > /dev/null
+
+          # Do not depend on GitHub's closingIssuesReferences index becoming
+          # consistent before this workflow continues. We already proved which
+          # task this is, so make it the authoritative task for this run.
+          echo "$TASK" > tasks.txt
+
+          echo "repaired=true" >> "$GITHUB_OUTPUT"
+          echo "task=$TASK" >> "$GITHUB_OUTPUT"
+          echo "candidate_count=1" >> "$GITHUB_OUTPUT"
+
+          echo "Successfully linked PR #$PR_NUMBER to Issue #$TASK."
+
+      # ----------------------------------------------------------------------
+      # If automatic repair was impossible, retain the old safe behavior:
+      # explain exactly what is wrong, comment on the PR, and fail.
+      #
+      # We deliberately refuse to guess between multiple Implementation Tasks.
+      # ----------------------------------------------------------------------
+      - name: Require a Closing Reference
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.tasks.outputs.count == '0' &&
+          steps.repair.outputs.repaired != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MARKER="<!-- agent-execute-no-closing-ref -->"
+
+          gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json title,body,headRefName \
+            > pr.json
+
+          {
+            jq -r '.headRefName' pr.json \
+              | grep -oE '[0-9]+' || true
+
+            jq -r '.title + "\n" + (.body // "")' pr.json \
+              | grep -oE '#[0-9]+' \
+              | tr -d '#' || true
+          } \
+            | sort -un \
+            > candidates.txt
+
+          : > suggest.txt
+
+          while read -r N; do
+            [ -n "$N" ] || continue
+
+            gh issue view "$N" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json state,labels,number \
+              --jq '
+                select(.state == "OPEN")
+                | select([.labels[].name] | index("implementation"))
+                | .number
+              ' \
+              >> suggest.txt \
+              2>/dev/null || true
+          done < candidates.txt
+
+          sort -un suggest.txt -o suggest.txt
+
+          SUGGEST_COUNT=$(grep -c . suggest.txt || true)
+
+          if [ "$SUGGEST_COUNT" -eq 1 ]; then
+            TASK=$(grep . suggest.txt)
+            KEYWORD="Closes #$TASK"
+            NOTE="This pull request appears to be working **#$TASK**, but automatic repair did not complete."
+          elif [ "$SUGGEST_COUNT" -gt 1 ]; then
+            KEYWORD="Closes #<task>"
+            TASKS=$(tr '\n' ' ' < suggest.txt)
+            NOTE="Multiple open Implementation Tasks were found: **$TASKS**. The workflow will not guess which one this PR closes."
+          else
+            KEYWORD="Closes #<task>"
+            NOTE="No single open Implementation Task could be inferred from the branch name, title, or body."
+          fi
+
+          echo "::error::This pull request closes no Issue. Add a \"$KEYWORD\" line to its body."
+
+          # Do not spam duplicate comments across reruns.
+          if gh pr view "$PR_NUMBER" \
+               --repo "$GITHUB_REPOSITORY" \
+               --json comments \
+               --jq '.comments[].body' \
+             | grep -qF "$MARKER"; then
+            echo "Already requested a closing reference on PR #$PR_NUMBER."
+            exit 1
+          fi
+
+          cat > comment.md <<EOF
+          $MARKER
+
+          ## ❌ No \`Closes #NN\` line
+
+          GitHub reports no closing reference for this pull request, so it is
+          not linked to an Implementation Task.
+
+          $NOTE
+
+          **Edit the pull request body to include a line reading:**
+
+          \`\`\`text
+          $KEYWORD
+          \`\`\`
+
+          A bare mention such as \`as specified in #NN\` does not count.
+          GitHub requires a closing keyword such as \`Closes\`, \`Fixes\`, or
+          \`Resolves\` to create the task relationship.
+
+          Without the relationship, the automated reviewer has no authoritative
+          acceptance criteria, the Implementation Task stays open after merge,
+          and the parent Feature rollup cannot complete.
+          EOF
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file comment.md
+
+          exit 1
+
+      # ----------------------------------------------------------------------
+      # At this point tasks.txt contains either:
+      #
+      #   - the Issue GitHub says the PR closes;
+      #   - the Issue supplied by assignment/manual dispatch; or
+      #   - the Issue this workflow safely inferred and linked itself.
+      #
+      # Now check dependencies exactly as before.
+      # ----------------------------------------------------------------------
+      - name: Warn on Open Blockers
+        if: >-
+          steps.tasks.outputs.count != '0' ||
+          steps.repair.outputs.repaired == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MARKER="<!-- agent-execute-blocked -->"
+          ANY_BLOCKED=0
+
+          while read -r TASK; do
+            [ -n "$TASK" ] || continue
+
+            gh issue view "$TASK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json number,title,url,state,blockedBy \
+              > task.json
+
+            if [ "$(jq -r '.state' task.json)" != "OPEN" ]; then
+              echo "#$TASK is closed; skipping."
+              continue
+            fi
+
+            BLOCKERS=$(
+              jq -r '
+                [
+                  .blockedBy.nodes[]?
+                  | select(.state == "OPEN")
+                  | "#\(.number)"
+                ]
+                | join(", ")
+              ' task.json
+            )
+
+            if [ -z "$BLOCKERS" ]; then
+              echo "#$TASK is unblocked."
+              continue
+            fi
+
+            ANY_BLOCKED=1
+
+            echo "::warning::#$TASK was dispatched with open blockers: $BLOCKERS"
+
+            # The same task can reach this workflow more than once.
+            # Only post one warning per blocker set.
+            SIGNATURE="$MARKER $BLOCKERS"
+
+            if gh issue view "$TASK" \
+                 --repo "$GITHUB_REPOSITORY" \
+                 --json comments \
+                 --jq '.comments[].body' \
+               | grep -qF "$SIGNATURE"; then
+              echo "Already warned about $BLOCKERS on #$TASK."
+              continue
+            fi
+
+            cat > blocker-comment.md <<EOF
+          $SIGNATURE
+
+          ## ⚠️ Dispatched with open blockers
+
+          This task is blocked by: **$BLOCKERS**
+
+          A Copilot session has already started, so this is a warning rather
+          than a refusal. Stopping or unassigning a live agent may orphan its
+          branch rather than reliably cancel its work.
+
+          The implementation is being written before its dependency has merged,
+          so inspect the resulting pull request carefully.
+          EOF
+
+            gh issue comment "$TASK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body-file blocker-comment.md
+
+          done < tasks.txt
+
+          echo "any_blocked=$ANY_BLOCKED" >> "$GITHUB_ENV"
+
+      # ----------------------------------------------------------------------
+      # Human-readable Actions summary.
+      # ----------------------------------------------------------------------
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Execute Task"
+            echo
+
+            if [ "${{ steps.repair.outputs.repaired }}" = "true" ]; then
+              echo "🔗 **Repaired missing Issue linkage automatically.**"
+              echo
+              echo "Added:"
+              echo
+              echo "\`Closes #${{ steps.repair.outputs.task }}\`"
+              echo
+              echo "to PR #${PR_NUMBER}."
+              echo
+
+              if [ "${ANY_BLOCKED:-0}" = "1" ]; then
+                echo "⚠️ The Implementation Task also has an open blocker."
+              else
+                echo "✅ The Implementation Task is unblocked."
+              fi
+
+            elif [ "${{ steps.tasks.outputs.count }}" = "0" ]; then
+              echo "❌ This Copilot pull request closes no Issue."
+              echo
+              echo "Automatic repair was not safe because exactly one open"
+              echo "\`implementation\` Issue could not be identified."
+              echo
+              echo "A comment was posted asking for a closing reference."
+
+            elif [ "${ANY_BLOCKED:-0}" = "1" ]; then
+              echo "⚠️ At least one dispatched task has an open blocker."
+              echo
+              echo "A warning comment was posted."
+
+            else
+              echo "✅ Implementation Task bookkeeping is valid."
+              echo
+              echo "The task is linked and unblocked."
+            fi
+
+            echo
+
+            if [ -f tasks.txt ]; then
+              TASK_LIST=$(tr '\n' ' ' < tasks.txt)
+              echo "Tasks checked: \`$TASK_LIST\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
