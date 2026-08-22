@@ -662,6 +662,7 @@ jobs:
           EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.assistant-text-file }}
           EXECUTOR_MODEL: ${{ steps.exec-session.outputs.resolved-model }}
         run: |
+          import json
           import os
           import pathlib
           import subprocess
@@ -734,8 +735,49 @@ jobs:
               ["gh", "pr", "create", "--repo", repo, "--base", base,
                "--head", branch, "--title", pr_title,
                "--body-file", "pr-body.md"],
-              capture_output=True, text=True, check=True,
+              capture_output=True, text=True,
           )
+
+          # The branch is already pushed at this point, so a failure here
+          # must not surface as an opaque, uncaught CalledProcessError --
+          # that hides the one thing worth knowing (gh's actual stderr,
+          # e.g. "GitHub Actions is not permitted to create or approve
+          # pull requests" when the repo's Actions settings disallow it)
+          # behind a bare traceback, and leaves `executor-failure.json`
+          # unwritten so "Report Execution Failure" below falls back to
+          # "unknown". Print gh's own output and fail the same
+          # diagnosable way every other step in this job does.
+          if create.returncode != 0:
+              print(create.stdout)
+              print(create.stderr)
+
+              print(
+                  "::error::gh pr create failed after the branch was "
+                  "already pushed. See gh's output above for the reason "
+                  "(a common cause is the repository's Settings > Actions "
+                  "> General > Workflow permissions not allowing GitHub "
+                  "Actions to create pull requests)."
+              )
+
+              pathlib.Path("executor-failure.json").write_text(
+                  json.dumps({
+                      "reason": "pr_create_failed",
+                      "headline": "gh pr create failed after the branch was pushed",
+                      "guidance": (
+                          f"Branch `{branch}` was pushed successfully, but "
+                          "`gh pr create` failed -- see the run log for "
+                          "gh's exact error. A common cause is the "
+                          "repository's Settings > Actions > General > "
+                          "Workflow permissions not allowing GitHub "
+                          "Actions to create pull requests. The branch "
+                          "still exists, so a pull request can be opened "
+                          "manually from it, or `agent:execute` can be "
+                          "retried once the cause is fixed."
+                      ),
+                  })
+              )
+
+              raise SystemExit(1)
 
           pr_url = create.stdout.strip().splitlines()[-1]
 
