@@ -239,9 +239,14 @@ static func _test_haste_monotonicity() -> Array[String]:
 	for base in base_cooldowns:
 		var result = MobaFormulas.effective_cooldown(base, 0.0)
 		if not is_equal_approx(result, base):
-			violations.append(
-				"haste_monotonicity identity: effective_cooldown(%.1f, 0.0) expected %.1f, got %f"
-				% [base, base, result]
+			(
+				violations
+				. append(
+					(
+						"haste_monotonicity identity: effective_cooldown(%.1f, 0.0) expected %.1f, got %f"
+						% [base, base, result]
+					)
+				)
 			)
 
 	# Test monotonicity: for each base cooldown, sweep haste pairs
@@ -254,9 +259,14 @@ static func _test_haste_monotonicity() -> Array[String]:
 			var cooldown_b = MobaFormulas.effective_cooldown(base, haste_b)
 
 			if cooldown_b > cooldown_a:
-				violations.append(
-					"haste_monotonicity: base=%.1f, haste_a=%.1f yields %.4f, haste_b=%.1f yields %.4f (b > a)"
-					% [base, haste_a, cooldown_a, haste_b, cooldown_b]
+				(
+					violations
+					. append(
+						(
+							"haste_monotonicity: base=%.1f, haste_a=%.1f yields %.4f, haste_b=%.1f yields %.4f (b > a)"
+							% [base, haste_a, cooldown_a, haste_b, cooldown_b]
+						)
+					)
 				)
 
 	return violations
