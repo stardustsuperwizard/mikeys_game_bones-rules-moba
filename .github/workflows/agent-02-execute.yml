@@ -298,10 +298,19 @@ jobs:
               gh repo view "$GITHUB_REPOSITORY" \
                 --json defaultBranchRef --jq '.defaultBranchRef.name'
             )
-            git fetch origin "$DEFAULT_BRANCH"
-
-            echo "BASE_SHA=$(git merge-base "origin/$DEFAULT_BRANCH" HEAD)" \
-              >> "$GITHUB_ENV"
+            # actions/checkout runs with fetch-depth: 1, so the local clone
+            # only ever holds single-commit shallow slices of each ref --
+            # "origin/$DEFAULT_BRANCH" and this branch's tip share no
+            # history locally, so `git merge-base` between them finds
+            # nothing and fails silently (empty stdout, no "fatal:" line;
+            # merge-base just returns 1 when there's no common ancestor).
+            # GitHub's compare API computes the merge-base server-side, so
+            # it needs no local history at all -- ask it instead of git.
+            BASE_SHA=$(
+              gh api "repos/$GITHUB_REPOSITORY/compare/$DEFAULT_BRANCH...$BRANCH" \
+                --jq '.merge_base_commit.sha'
+            )
+            echo "BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
           else
             git checkout -B "$BRANCH"
 
