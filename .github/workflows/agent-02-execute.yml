@@ -1,10 +1,11 @@
 name: Agent - AW02 Execute Task
 
 # Implements a GitHub Implementation Task Issue end to end using the
-# Copilot CLI, applies gdformat to whatever GDScript it touched, reviews
-# its own diff before a pull request exists, applies one bounded fix pass
-# if that review says FIX, and opens the pull request that closes the
-# Issue.
+# Copilot CLI: opens the pull request that closes the Issue as soon as the
+# executor's commit exists, then applies gdformat to whatever GDScript it
+# touched, reviews its own diff, and applies one bounded fix pass if that
+# review says FIX -- all as best-effort follow-ups pushed onto the branch
+# behind the pull request that is already open by then.
 #
 # The gdformat pass is unconditional and needs no model: mechanical,
 # diff-scoped (see lint-gdscript/action.yml for why not whole-repo), and
@@ -53,13 +54,20 @@ name: Agent - AW02 Execute Task
 # just because an Issue exists or gets assigned. A human decides when to
 # spend it by adding `agent:execute` (works from GitHub Mobile).
 #
-# The pre-PR review-and-fix pass is best-effort, not a hard gate: if the
-# review session itself fails (budget, availability, malformed output), or
-# if a FIX verdict's correction doesn't land cleanly, this workflow still
-# opens the pull request rather than discarding a working implementation --
-# it just leaves the review for a human or `agent-04-review.yml` to do
-# afterward instead. See "Evaluate Pre-PR Review" and "Evaluate Pre-PR Fix"
-# below for exactly what "doesn't land cleanly" means.
+# The pull request opens as soon as the executor's commit exists --
+# immediately after "Check For Commit" below, before validation,
+# formatting, or the pre-PR review-and-fix pass ever run. Everything from
+# "Re-run Validation" onward is a best-effort follow-up against that
+# already-open pull request: a validation failure, a review session that
+# can't complete (budget, availability, malformed output), or a FIX
+# verdict's correction that doesn't land cleanly all leave the pull
+# request open and simply skip (or leave unfixed) whatever step didn't
+# finish, instead of withholding the pull request until every later step
+# succeeds. That way a failure partway through this pipeline still hands
+# back a working pull request instead of a dead-end Issue comment -- see
+# "Evaluate Pre-PR Review" and "Evaluate Pre-PR Fix" below for exactly what
+# "doesn't land cleanly" means, and "Report Validation Failure" for what
+# happens when validation itself is what fails.
 
 on:
   issues:
@@ -388,8 +396,10 @@ jobs:
           - Run `.github/scripts/validate-godot.sh` before finishing.
           - Only run `git commit` if the implementation is complete and
             validation passes. Do NOT run `git push` or `gh pr create` --
-            the workflow handles both after checking your commit exists,
-            re-running validation, and running an automated pre-PR review.
+            the workflow handles both itself, immediately after confirming
+            your commit exists, and only then re-runs validation, applies
+            formatting, and runs an automated review against the pull
+            request it just opened.
           - If you must stop on an unresolved requirement or ambiguity, do
             not commit anything at all.
 
@@ -460,263 +470,24 @@ jobs:
 
           echo "made=true" >> "$GITHUB_OUTPUT"
 
-      # Deliberately does not fail the step on a nonzero validation exit: a
-      # validation failure is an expected, well-handled outcome here (see
-      # "Report Validation Failure" below), not an infrastructure fault. If
-      # this step failed the job, the generic "Report Execution Failure"
-      # step would fire in addition to the specific one and double-comment.
-      - name: Re-run Validation
-        if: steps.context.outputs.ok == 'true' && steps.commit.outputs.made == 'true'
-        id: validate
-        shell: bash
-        run: |
-          set -uo pipefail
-
-          # GitHub Actions invokes `shell: bash` steps with `-e` already
-          # active (bash --noprofile --norc -e -o pipefail {0}), regardless
-          # of this script's own `set` line -- `set -uo pipefail` cannot
-          # unset a flag it never named. Without `|| status=$?` here, a
-          # nonzero exit from validate-godot.sh would abort this step
-          # immediately, before `status` is ever assigned, skipping the
-          # warning below and the "Report Validation Failure" step
-          # entirely (its condition needs a real status value to match).
-          status=0
-          .github/scripts/validate-godot.sh > validate-output.txt 2>&1 \
-            || status=$?
-
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-
-          if [ "$status" -ne 0 ]; then
-            echo "::warning::validate-godot.sh failed with exit $status." \
-                 "No pull request will be opened."
-            tail -c 4000 validate-output.txt
-          fi
-
-      # Best-effort, like the review-and-fix section below: a lint-tooling
-      # hiccup must degrade to "skip formatting" rather than fail the job.
-      # Runs before "Prepare Diff and Draft Title" so IMPL_SHA and
-      # execute-diff.txt both include any formatting commit -- the pre-PR
-      # review sees the final, formatted diff, and a later FIX-but-not-
-      # applied reset lands back on formatted code, not unformatted code.
-      - name: List Changed GDScript Files
-        if: steps.context.outputs.ok == 'true' && steps.commit.outputs.made == 'true' && steps.validate.outputs.status == '0'
-        id: gd-files
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          git diff --name-only "$BASE_SHA" HEAD -- '*.gd' > changed-gd-files.txt || true
-
-          echo "Changed GDScript files:"
-          cat changed-gd-files.txt || echo "(none)"
-
-      - name: Apply GDScript Formatting
-        if: steps.gd-files.outcome == 'success'
-        id: format
-        continue-on-error: true
-        uses: ./.github/actions/lint-gdscript
-        with:
-          mode: fix
-          files-list-file: changed-gd-files.txt
-
-      - name: Commit Formatting Fixes
-        if: steps.format.outcome == 'success' && steps.format.outputs.formatted == 'true'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          git add -u -- '*.gd'
-          git commit -m "style: apply gdformat"
-
-          # gdformat shouldn't change behavior, but this is a cheap safety
-          # net: if it somehow did, drop the formatting commit and continue
-          # unformatted rather than block the whole task on a formatter
-          # edge case.
-          if ! .github/scripts/validate-godot.sh > format-validate-output.txt 2>&1; then
-            echo "::warning::Validation failed after applying gdformat." \
-                 "Reverting the formatting commit and continuing unformatted."
-            tail -c 4000 format-validate-output.txt
-            git reset --hard HEAD~1
-          fi
-
-      # From here on, HAS_IMPLEMENTATION means "there is a valid commit
-      # worth opening a pull request for" -- true for every remaining case
-      # in this job, including a pre-PR review that fails outright. Keeping
-      # one shared condition string is what lets the review-and-fix section
-      # below fail softly without also skipping "Push Branch and Open Pull
-      # Request".
-      - name: Prepare Diff and Draft Title
-        if: >-
-          steps.context.outputs.ok == 'true' &&
-          steps.commit.outputs.made == 'true' &&
-          steps.validate.outputs.status == '0'
-        id: prep
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "IMPL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-
-          git diff "$BASE_SHA" HEAD > execute-diff.txt
-
-      # continue-on-error throughout this whole review-and-fix section:
-      # every step in it is best-effort. A hiccup anywhere here (not just a
-      # model failure -- a `gh` API blip counts too) must degrade to
-      # opening the pull request unreviewed, never to failing the job and
-      # discarding a working implementation. "Evaluate Pre-PR Review" and
-      # "Evaluate Pre-PR Fix" are what actually decide what happens next;
-      # every other step here just feeds them.
-      - name: Build Pre-PR Review Request
-        if: steps.prep.outcome == 'success'
-        id: review-build
-        continue-on-error: true
-        uses: ./.github/actions/build-review-request
-        with:
-          mode: diff
-          issue-number: ${{ env.ISSUE_NUMBER }}
-          diff-file: execute-diff.txt
-          pr-title: ${{ env.PR_TITLE }}
-          pr-branch: ${{ env.BRANCH }}
-          max-diff-chars: ${{ env.MAX_DIFF_CHARS }}
-          lint-report-file: >-
-            ${{ steps.format.outcome == 'success' && steps.format.outputs.report-file || '' }}
-
-      # continue-on-error: the pre-PR review is best-effort. A budget or
-      # availability failure here must not throw away a working
-      # implementation -- see "Evaluate Pre-PR Review" below, which is what
-      # actually decides what happens next.
-      - name: Run Pre-PR Review Session
-        if: steps.prep.outcome == 'success'
-        id: review-session
-        continue-on-error: true
-        uses: ./.github/actions/run-copilot-session
-        with:
-          prompt-file: ${{ steps.review-build.outputs.prompt-file }}
-          models: ${{ env.REVIEWER_MODELS }}
-          max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
-          excluded-tools: "bash,powershell,apply_patch,create,edit,task,write_agent"
-          step-label: "Reviewing (pre-PR)"
-
-      - name: Extract Pre-PR Review Verdict
-        if: steps.prep.outcome == 'success'
-        id: review-verdict
-        continue-on-error: true
-        uses: ./.github/actions/extract-review-verdict
-        with:
-          assistant-text-file: ${{ steps.review-session.outputs.assistant-text-file }}
-          outcome-file: ${{ steps.review-session.outputs.outcome-file }}
-
-      - name: Evaluate Pre-PR Review
-        if: steps.prep.outcome == 'success'
-        id: review-eval
-        continue-on-error: true
-        shell: bash
-        env:
-          SESSION_OUTCOME: ${{ steps.review-session.outcome }}
-          VERDICT_OUTCOME: ${{ steps.review-verdict.outcome }}
-          VERDICT: ${{ steps.review-verdict.outputs.verdict }}
-        run: |
-          set -euo pipefail
-
-          if [ "$SESSION_OUTCOME" = "success" ] && [ "$VERDICT_OUTCOME" = "success" ]; then
-            echo "review_ok=true" >> "$GITHUB_OUTPUT"
-            echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::The pre-PR review did not complete" \
-                 "(session outcome: $SESSION_OUTCOME, verdict outcome:" \
-                 "$VERDICT_OUTCOME). Opening the pull request unreviewed" \
-                 "instead of discarding the implementation."
-            echo "review_ok=false" >> "$GITHUB_OUTPUT"
-            echo "verdict=" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build Pre-PR Fix Request
-        if: >-
-          steps.review-eval.outputs.review_ok == 'true' &&
-          steps.review-eval.outputs.verdict == 'FIX'
-        id: fix-build
-        continue-on-error: true
-        uses: ./.github/actions/build-fix-request
-        with:
-          mode: diff
-          issue-number: ${{ env.ISSUE_NUMBER }}
-          diff-file: execute-diff.txt
-          verdict-file: ${{ steps.review-verdict.outputs.review-file }}
-          pr-title: ${{ env.PR_TITLE }}
-          pr-branch: ${{ env.BRANCH }}
-          max-diff-chars: ${{ env.MAX_DIFF_CHARS }}
-
-      # continue-on-error for the same reason as the review session: a
-      # failed fix attempt must fall back to opening the unfixed pull
-      # request labeled review:fix, not lose the implementation entirely.
-      - name: Run Pre-PR Fix Session
-        if: steps.fix-build.outcome == 'success'
-        id: fix-session
-        continue-on-error: true
-        uses: ./.github/actions/run-copilot-session
-        with:
-          prompt-file: ${{ steps.fix-build.outputs.prompt-file }}
-          models: ${{ env.FIXER_MODELS }}
-          max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
-          excluded-tools: "task,write_agent"
-          step-label: "Fixing (pre-PR)"
-
-      # A single bounded pass, exactly like agent-05-fix.yml: this either
-      # leaves a clean, validated fix commit on top of IMPL_SHA, or resets
-      # straight back to IMPL_SHA so "Push Branch and Open Pull Request"
-      # always starts from a known-good tree regardless of what happened
-      # here.
-      - name: Evaluate Pre-PR Fix
-        if: steps.fix-build.outcome == 'success'
-        id: fix-eval
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::warning::The pre-PR fix left uncommitted changes." \
-                 "Discarding them and opening the unfixed pull request."
-            git checkout -- .
-            git clean -fd
-            echo "fix_applied=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          NEW_SHA=$(git rev-parse HEAD)
-
-          if [ "$NEW_SHA" = "$IMPL_SHA" ]; then
-            echo "No fix commit was made."
-            echo "fix_applied=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if .github/scripts/validate-godot.sh > fix-validate-output.txt 2>&1; then
-            echo "fix_applied=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::The pre-PR fix commit failed validation." \
-                 "Resetting to the pre-fix implementation and opening the" \
-                 "unfixed pull request."
-            tail -c 4000 fix-validate-output.txt
-            git reset --hard "$IMPL_SHA"
-            echo "fix_applied=false" >> "$GITHUB_OUTPUT"
-          fi
-
+      # Runs immediately after the executor's commit is confirmed, before
+      # validation, formatting, or the pre-PR review-and-fix pass -- see the
+      # rationale block at the top of this file. That means "Rework cycles"
+      # below is always 0: no pre-PR fix can have landed yet at the point
+      # this pull request opens.
+      #
       # The pull request body only ever carries the executor's own
       # completion report -- the same shape a human-run or cloud-agent
       # session's body would have. The review verdict is NOT written here;
-      # it goes to a comment in "Publish Pre-PR Review" below, the same
-      # place `agent-04-review.yml` posts it. Keeping `## Review` blank
+      # it goes to a comment in "Publish Pre-PR Review" further down, the
+      # same place `agent-04-review.yml` posts it. Keeping `## Review` blank
       # here (never filled by this step) matches every other PR in this
       # repo: the verdict lives in the comment feed, not the body.
       - name: Push Branch and Open Pull Request
-        if: steps.prep.outcome == 'success'
+        if: steps.context.outputs.ok == 'true' && steps.commit.outputs.made == 'true'
         id: pr
         shell: python
         env:
-          FIX_APPLIED: ${{ steps.fix-eval.outputs.fix_applied }}
           EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.assistant-text-file }}
           EXECUTOR_MODEL: ${{ steps.exec-session.outputs.resolved-model }}
           BRANCH_RESUMED: ${{ steps.branch-check.outputs.exists }}
@@ -759,25 +530,6 @@ jobs:
               "unknown (resumed from a previous run)" if resumed else ""
           )
 
-          fix_applied = os.environ.get("FIX_APPLIED") == "true"
-
-          # Last-resort safety net: "Evaluate Pre-PR Fix" is supposed to
-          # leave HEAD at IMPL_SHA whenever fix_applied is false (it resets
-          # there itself). If that reset somehow didn't take (e.g. the
-          # `git reset --hard` call itself failed), force it here rather
-          # than push a commit the pull request's own report is about to
-          # describe as unfixed.
-          impl_sha = os.environ.get("IMPL_SHA")
-
-          if not fix_applied and impl_sha:
-              current_sha = subprocess.run(
-                  ["git", "rev-parse", "HEAD"],
-                  capture_output=True, text=True, check=True,
-              ).stdout.strip()
-
-              if current_sha != impl_sha:
-                  subprocess.run(["git", "reset", "--hard", impl_sha], check=True)
-
           lines = [
               f"Closes #{issue_number}",
               "",
@@ -794,7 +546,7 @@ jobs:
               f"- Implementation model: {executor_model}",
               "- Review model: ",
               "- Reasoning level: default",
-              "- Rework cycles: " + ("1" if fix_applied else "0"),
+              "- Rework cycles: 0",
               "- Steering messages: none",
               "- Session wall-clock: see workflow run duration",
           ]
@@ -879,9 +631,279 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write(f"### Execute Task\n\nOpened {pr_url}.\n")
 
-      # Best-effort: the pull request is already open by this point, so
-      # anything failing here must not turn into a job failure that tells
-      # the Issue "no pull request was opened" when one clearly was.
+      # Deliberately does not fail the step on a nonzero validation exit: a
+      # validation failure is an expected, well-handled outcome here (see
+      # "Report Validation Failure" below), not an infrastructure fault. If
+      # this step failed the job, the generic "Report Execution Failure"
+      # step would fire in addition to the specific one and double-comment.
+      - name: Re-run Validation
+        if: steps.context.outputs.ok == 'true' && steps.commit.outputs.made == 'true'
+        id: validate
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          # GitHub Actions invokes `shell: bash` steps with `-e` already
+          # active (bash --noprofile --norc -e -o pipefail {0}), regardless
+          # of this script's own `set` line -- `set -uo pipefail` cannot
+          # unset a flag it never named. Without `|| status=$?` here, a
+          # nonzero exit from validate-godot.sh would abort this step
+          # immediately, before `status` is ever assigned, skipping the
+          # warning below and the "Report Validation Failure" step
+          # entirely (its condition needs a real status value to match).
+          status=0
+          .github/scripts/validate-godot.sh > validate-output.txt 2>&1 \
+            || status=$?
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::validate-godot.sh failed with exit $status." \
+                 "Formatting, the pre-PR review, and the pre-PR fix pass" \
+                 "will all be skipped; the already-open pull request is" \
+                 "unaffected."
+            tail -c 4000 validate-output.txt
+          fi
+
+      # Best-effort, like the review-and-fix section below: a lint-tooling
+      # hiccup must degrade to "skip formatting" rather than fail the job.
+      # Runs before "Prepare Diff and Draft Title" so IMPL_SHA and
+      # execute-diff.txt both include any formatting commit -- the pre-PR
+      # review sees the final, formatted diff, and a later FIX-but-not-
+      # applied reset lands back on formatted code, not unformatted code.
+      - name: List Changed GDScript Files
+        if: steps.context.outputs.ok == 'true' && steps.commit.outputs.made == 'true' && steps.validate.outputs.status == '0'
+        id: gd-files
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --name-only "$BASE_SHA" HEAD -- '*.gd' > changed-gd-files.txt || true
+
+          echo "Changed GDScript files:"
+          cat changed-gd-files.txt || echo "(none)"
+
+      - name: Apply GDScript Formatting
+        if: steps.gd-files.outcome == 'success'
+        id: format
+        continue-on-error: true
+        uses: ./.github/actions/lint-gdscript
+        with:
+          mode: fix
+          files-list-file: changed-gd-files.txt
+
+      - name: Commit Formatting Fixes
+        if: steps.format.outcome == 'success' && steps.format.outputs.formatted == 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git add -u -- '*.gd'
+          git commit -m "style: apply gdformat"
+
+          # gdformat shouldn't change behavior, but this is a cheap safety
+          # net: if it somehow did, drop the formatting commit and continue
+          # unformatted rather than block the whole task on a formatter
+          # edge case.
+          if ! .github/scripts/validate-godot.sh > format-validate-output.txt 2>&1; then
+            echo "::warning::Validation failed after applying gdformat." \
+                 "Reverting the formatting commit and continuing unformatted."
+            tail -c 4000 format-validate-output.txt
+            git reset --hard HEAD~1
+          else
+            # The pull request already exists by this point (it opened
+            # right after the executor's commit, before this formatting
+            # pass ran) -- push the formatting commit so the branch behind
+            # it actually reflects it, instead of leaving it stranded on
+            # the runner's local clone.
+            git push origin "HEAD:$BRANCH"
+          fi
+
+      # From here on, the pull request is already open (it opened right
+      # after "Check For Commit", above) -- everything below is a
+      # best-effort follow-up against it. Keeping the review-and-fix
+      # section's steps `continue-on-error: true` throughout is what lets a
+      # failure anywhere in it fail softly, leaving the already-open pull
+      # request as-is, rather than failing the job.
+      - name: Prepare Diff and Draft Title
+        if: >-
+          steps.context.outputs.ok == 'true' &&
+          steps.commit.outputs.made == 'true' &&
+          steps.validate.outputs.status == '0'
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "IMPL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+          git diff "$BASE_SHA" HEAD > execute-diff.txt
+
+      # continue-on-error throughout this whole review-and-fix section:
+      # every step in it is best-effort. A hiccup anywhere here (not just a
+      # model failure -- a `gh` API blip counts too) must degrade to
+      # leaving the already-open pull request unreviewed, never to failing
+      # the job and discarding a working implementation. "Evaluate Pre-PR
+      # Review" and "Evaluate Pre-PR Fix" are what actually decide what
+      # happens next; every other step here just feeds them.
+      - name: Build Pre-PR Review Request
+        if: steps.prep.outcome == 'success'
+        id: review-build
+        continue-on-error: true
+        uses: ./.github/actions/build-review-request
+        with:
+          mode: diff
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          diff-file: execute-diff.txt
+          pr-title: ${{ env.PR_TITLE }}
+          pr-branch: ${{ env.BRANCH }}
+          max-diff-chars: ${{ env.MAX_DIFF_CHARS }}
+          lint-report-file: >-
+            ${{ steps.format.outcome == 'success' && steps.format.outputs.report-file || '' }}
+
+      # continue-on-error: the pre-PR review is best-effort. A budget or
+      # availability failure here must not throw away a working
+      # implementation -- see "Evaluate Pre-PR Review" below, which is what
+      # actually decides what happens next.
+      - name: Run Pre-PR Review Session
+        if: steps.prep.outcome == 'success'
+        id: review-session
+        continue-on-error: true
+        uses: ./.github/actions/run-copilot-session
+        with:
+          prompt-file: ${{ steps.review-build.outputs.prompt-file }}
+          models: ${{ env.REVIEWER_MODELS }}
+          max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
+          excluded-tools: "bash,powershell,apply_patch,create,edit,task,write_agent"
+          step-label: "Reviewing (pre-PR)"
+
+      - name: Extract Pre-PR Review Verdict
+        if: steps.prep.outcome == 'success'
+        id: review-verdict
+        continue-on-error: true
+        uses: ./.github/actions/extract-review-verdict
+        with:
+          assistant-text-file: ${{ steps.review-session.outputs.assistant-text-file }}
+          outcome-file: ${{ steps.review-session.outputs.outcome-file }}
+
+      - name: Evaluate Pre-PR Review
+        if: steps.prep.outcome == 'success'
+        id: review-eval
+        continue-on-error: true
+        shell: bash
+        env:
+          SESSION_OUTCOME: ${{ steps.review-session.outcome }}
+          VERDICT_OUTCOME: ${{ steps.review-verdict.outcome }}
+          VERDICT: ${{ steps.review-verdict.outputs.verdict }}
+        run: |
+          set -euo pipefail
+
+          if [ "$SESSION_OUTCOME" = "success" ] && [ "$VERDICT_OUTCOME" = "success" ]; then
+            echo "review_ok=true" >> "$GITHUB_OUTPUT"
+            echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::The pre-PR review did not complete" \
+                 "(session outcome: $SESSION_OUTCOME, verdict outcome:" \
+                 "$VERDICT_OUTCOME). Opening the pull request unreviewed" \
+                 "instead of discarding the implementation."
+            echo "review_ok=false" >> "$GITHUB_OUTPUT"
+            echo "verdict=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Pre-PR Fix Request
+        if: >-
+          steps.review-eval.outputs.review_ok == 'true' &&
+          steps.review-eval.outputs.verdict == 'FIX'
+        id: fix-build
+        continue-on-error: true
+        uses: ./.github/actions/build-fix-request
+        with:
+          mode: diff
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          diff-file: execute-diff.txt
+          verdict-file: ${{ steps.review-verdict.outputs.review-file }}
+          pr-title: ${{ env.PR_TITLE }}
+          pr-branch: ${{ env.BRANCH }}
+          max-diff-chars: ${{ env.MAX_DIFF_CHARS }}
+
+      # continue-on-error for the same reason as the review session: a
+      # failed fix attempt must fall back to leaving the already-open pull
+      # request unfixed and labeled review:fix, not lose the implementation
+      # entirely.
+      - name: Run Pre-PR Fix Session
+        if: steps.fix-build.outcome == 'success'
+        id: fix-session
+        continue-on-error: true
+        uses: ./.github/actions/run-copilot-session
+        with:
+          prompt-file: ${{ steps.fix-build.outputs.prompt-file }}
+          models: ${{ env.FIXER_MODELS }}
+          max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
+          excluded-tools: "task,write_agent"
+          step-label: "Fixing (pre-PR)"
+
+      # A single bounded pass, exactly like agent-05-fix.yml: this either
+      # leaves a clean, validated fix commit on top of IMPL_SHA and pushes
+      # it onto the already-open pull request's branch, or resets straight
+      # back to IMPL_SHA and leaves the remote as-is (it already matches
+      # IMPL_SHA, from the push in "Push Branch and Open Pull Request" or
+      # "Commit Formatting Fixes") -- either way the branch behind the pull
+      # request ends up matching whatever happened here.
+      - name: Evaluate Pre-PR Fix
+        if: steps.fix-build.outcome == 'success'
+        id: fix-eval
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::warning::The pre-PR fix left uncommitted changes." \
+                 "Discarding them; the already-open pull request stays" \
+                 "unfixed."
+            git checkout -- .
+            git clean -fd
+            echo "fix_applied=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NEW_SHA=$(git rev-parse HEAD)
+
+          if [ "$NEW_SHA" = "$IMPL_SHA" ]; then
+            echo "No fix commit was made."
+            echo "fix_applied=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if .github/scripts/validate-godot.sh > fix-validate-output.txt 2>&1; then
+            # The pull request is already open (it opened right after the
+            # executor's commit, long before this fix pass ran) -- push the
+            # fix commit so the branch behind it actually reflects the fix
+            # instead of leaving it stranded on the runner's local clone.
+            git push origin "HEAD:$BRANCH"
+            echo "fix_applied=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::The pre-PR fix commit failed validation." \
+                 "Resetting to the pre-fix implementation; the" \
+                 "already-open pull request stays unfixed."
+            tail -c 4000 fix-validate-output.txt
+            git reset --hard "$IMPL_SHA"
+            echo "fix_applied=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Best-effort: the pull request is already open by this point (it
+      # opened right after the executor's commit, well before this step),
+      # so anything failing here must never turn into a job failure -- the
+      # pull request itself is unaffected either way.
+      #
+      # Gated on validation having actually succeeded: when "Re-run
+      # Validation" fails, the whole review-and-fix pass below it never
+      # runs at all, and "Report Validation Failure" is what tells the
+      # pull request about that instead -- this step firing anyway would
+      # misreport a validation failure as "the review did not complete
+      # (budget, availability...)".
       #
       # This is deliberately the *only* place the pre-PR review's findings
       # ever reach GitHub as text. Whether that text is a real
@@ -904,7 +926,7 @@ jobs:
       #     second opinion on unchanged code -- the label already visible
       #     on the pull request is the signal that already happened.
       - name: Publish Pre-PR Review
-        if: steps.pr.outcome == 'success'
+        if: steps.pr.outcome == 'success' && steps.validate.outputs.status == '0'
         continue-on-error: true
         shell: python
         env:
@@ -941,11 +963,11 @@ jobs:
               body = (
                   "<!-- agent-execute-review-failed -->\n\n"
                   "## Pre-PR review did not complete\n\n"
-                  "The automated review run before this pull request opened"
-                  " did not finish (budget, availability, or a malformed"
-                  " response) -- see the workflow run log. This pull"
-                  " request has not been reviewed at all yet. Add"
-                  " `agent:review` for a first pass."
+                  "The automated review run for this pull request did not"
+                  " finish (budget, availability, or a malformed response)"
+                  " -- see the workflow run log. This pull request has not"
+                  " been reviewed at all yet. Add `agent:review` for a"
+                  " first pass."
               )
           elif verdict == "FIX" and fix_applied:
               fix_report = read(os.environ.get("FIX_TEXT_FILE")) or (
@@ -954,10 +976,10 @@ jobs:
 
               body = (
                   "<!-- agent-fix-applied -->\n\n"
-                  "## Automated Fix Applied (pre-PR)\n\n"
-                  f"Reviewed before opening (on `{reviewer_model}`) and"
-                  " found issues that were fixed automatically before this"
-                  f" pull request opened (on"
+                  "## Automated Fix Applied\n\n"
+                  f"Reviewed after this pull request opened (on"
+                  f" `{reviewer_model}`) and found issues that were fixed"
+                  f" automatically (on"
                   f" `{os.environ.get('FIXER_MODEL') or ''}`).\n\n"
                   "<details><summary>Original findings</summary>\n\n"
                   f"{read(os.environ['REVIEW_FILE'])}\n\n"
@@ -1061,6 +1083,14 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --remove-label "agent:execute" || true
 
+      # The pull request already exists by this point (opened right after
+      # the executor's commit, before validation ever ran), so this posts
+      # to the pull request itself rather than the Issue -- that's where
+      # someone picking this up will be working, and it's the same place
+      # "Publish Pre-PR Review" would have posted to had validation
+      # succeeded. `agent:execute` was already removed from the Issue by
+      # "Push Branch and Open Pull Request", so there's nothing left to
+      # clean up there.
       - name: Report Validation Failure
         if: >-
           steps.context.outputs.ok == 'true' &&
@@ -1068,18 +1098,21 @@ jobs:
           steps.validate.outputs.status != '0' &&
           steps.validate.outputs.status != ''
         shell: bash
+        env:
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
         run: |
           set -euo pipefail
 
           {
             echo "<!-- agent-execute-validation-failed -->"
             echo ""
-            echo "## Automated execution failed validation"
+            echo "## Automated validation failed after this pull request opened"
             echo ""
-            echo "The executor committed an implementation, but"
             echo "\`.github/scripts/validate-godot.sh\` failed when the"
-            echo "workflow re-ran it. No pull request was opened -- the"
-            echo "branch was never pushed."
+            echo "workflow re-ran it after opening this pull request."
+            echo "Formatting, the automated pre-PR review, and the"
+            echo "automated fix pass were all skipped as a result -- this"
+            echo "pull request has not been reviewed at all yet."
             echo ""
             echo '<details><summary>Validation output (tail)</summary>'
             echo ""
@@ -1092,19 +1125,26 @@ jobs:
             echo "Full run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > validation-failed-comment.md
 
-          gh issue comment "$ISSUE_NUMBER" \
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+
+          gh pr comment "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --body-file validation-failed-comment.md
-
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:execute" || true
 
       # Deliberately just `failure()`, not also gated on the guard check
       # having passed: a hard crash in "Resolve Implementation Task Issue"
       # itself (bad issue number, a `gh` API blip) exits nonzero before
       # `ok` is ever set, and that must still produce a comment rather than
       # a silent red run with no trace anywhere.
+      #
+      # A pull request can already exist by the time this fires: it opens
+      # right after the executor's commit, well before validation,
+      # formatting, or review ever run, and one of those steps (e.g.
+      # "Prepare Diff and Draft Title", which has no continue-on-error)
+      # failing outright still fails the job. PR_URL distinguishes that
+      # case -- a real, usable pull request left behind despite the
+      # failure -- from every earlier failure path, where PR_URL is empty
+      # because "Push Branch and Open Pull Request" never got there.
       - name: Report Execution Failure
         if: failure()
         shell: python
@@ -1112,15 +1152,18 @@ jobs:
           RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository
             }}/actions/runs/${{ github.run_id }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
         run: |
           import json
           import os
           import pathlib
+          import re
           import subprocess
 
           repo = os.environ["GITHUB_REPOSITORY"]
           issue_number = os.environ["ISSUE_NUMBER"]
           run_url = os.environ["RUN_URL"]
+          pr_url = os.environ.get("PR_URL") or ""
 
           failure = {}
 
@@ -1141,9 +1184,21 @@ jobs:
               "",
               "## Automated execution did not complete",
               "",
-              "**No pull request was opened.**",
-              "",
           ]
+
+          if pr_url:
+              lines += [
+                  f"A pull request was already open ({pr_url}) when this"
+                  " failure happened, so it still exists -- only whatever"
+                  " ran after it (validation, formatting, the automated"
+                  " review, or the fix pass) is what failed here.",
+                  "",
+              ]
+          else:
+              lines += [
+                  "**No pull request was opened.**",
+                  "",
+              ]
 
           if failure:
               lines += [
@@ -1157,18 +1212,30 @@ jobs:
 
               if guidance:
                   lines += [guidance, ""]
-          else:
+          elif not pr_url:
               lines += [
                   "The run failed outside the Copilot session -- resolving"
                   " the Issue, creating the branch, or pushing.",
                   "",
               ]
 
+          if pr_url:
+              retry_line = (
+                  "Since a pull request already exists for this Issue,"
+                  " re-adding `agent:execute` will just point back at it --"
+                  f" use `agent:fix` on {pr_url} instead, or push directly"
+                  " to address whatever failed."
+              )
+          else:
+              retry_line = (
+                  "`agent:execute` has been removed, so re-adding it is a"
+                  " clean retry."
+              )
+
           lines += [
               f"Full run log: {run_url}",
               "",
-              "`agent:execute` has been removed, so re-adding it is a clean"
-              " retry.",
+              retry_line,
           ]
 
           body = "\n".join(lines)
@@ -1188,6 +1255,14 @@ jobs:
               ],
               check=False,
           )
+
+          if pr_url:
+              pr_number = re.search(r"(\d+)$", pr_url).group(1)
+              subprocess.run(
+                  ["gh", "pr", "comment", pr_number, "--repo", repo,
+                   "--body", body],
+                  check=False,
+              )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("\n" + body + "\n")

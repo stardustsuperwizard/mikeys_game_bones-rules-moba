@@ -323,9 +323,9 @@ Implementation Task
 │ agent-02-execute.yml        │       │
 │ Copilot CLI, spends AI      │       ▼
 │ credits: implements,        │  draft PR
-│ validates, formats, pre-PR  │
-│ self-review, pre-PR self-   │
-│ fix, opens the PR           │
+│ opens the PR, then          │
+│ validates, formats, self-   │
+│ reviews, self-fixes         │
 └─────────────────────────────┘
         │                             │
         └──────────────┬──────────────┘
@@ -394,7 +394,7 @@ points, two different products* above.
 | `agent:plan` label | You | `agent-01-planner.yml` | This Issue is ready to be planned |
 | **a pasted agent session** | You | — | Run this task via the native cloud agent, on the model you picked |
 | **assigning Copilot** | You | — | Run this task via the native cloud agent, on the model you picked |
-| `agent:execute` label | You | `agent-02-execute.yml` | Implement this Task via the scripted CLI executor — no live picker; walks a preference list, self-reviews, self-fixes, opens the PR |
+| `agent:execute` label | You | `agent-02-execute.yml` | Implement this Task via the scripted CLI executor — no live picker; walks a preference list, opens the PR, then self-reviews and self-fixes against it |
 | `agent:review` label | You | `agent-04-review.yml` | Re-review this PR |
 | `agent:fix` label | You | `agent-05-fix.yml` | Apply the bounded correction the last `FIX` verdict asked for |
 | `planned` label | Planner | — | Feature has been decomposed |
@@ -561,21 +561,28 @@ no picker involved:
 2. Runs a Copilot CLI session (`EXECUTOR_MODELS`) against the Issue body plus
    `AGENTS.md` and `.github/copilot-instructions.md`.
 3. Requires an actual commit to exist afterward — not just a session that
-   talked as if it finished — then re-runs `validate-godot.sh` and applies
-   `gdformat` to any changed GDScript.
-4. Runs a pre-PR self-review of the diff (`REVIEWER_MODELS`, the same strong
-   tier `agent-04-review.yml` uses). If that verdict is `FIX`, runs one
-   bounded pre-PR self-fix pass (`FIXER_MODELS`) before a pull request ever
-   exists.
-5. Opens the pull request itself, on branch `agent-exec/<issue#>`, with
-   `Closes #n` already in the body.
+   talked as if it finished — then immediately opens the pull request
+   itself, on branch `agent-exec/<issue#>`, with `Closes #n` already in the
+   body.
+4. Re-runs `validate-godot.sh` and applies `gdformat` to any changed
+   GDScript, pushing any formatting fix onto that already-open pull
+   request.
+5. Runs a self-review of the diff (`REVIEWER_MODELS`, the same strong tier
+   `agent-04-review.yml` uses) against the already-open pull request. If
+   that verdict is `FIX`, runs one bounded self-fix pass (`FIXER_MODELS`)
+   and pushes it too.
 
-A pre-PR `PASS` (or an unfixed `FIX`) is posted to the new PR as the real
+A `PASS` (or an unfixed `FIX`) is posted to the pull request as the real
 verdict, `review:*` label included — so adding `agent:review` to it is a
-second opinion, not a first one. Every failure mode along the way — no
-commit, a failed validation, an uncommitted session — comments on the Issue
-and removes `agent:execute` rather than opening a broken PR, so re-adding the
-label is always a clean retry.
+second opinion, not a first one. The pull request opens right after step 3,
+before validation, formatting, or review ever run, so a failure in any of
+those (e.g. a validation failure) just leaves a comment on the already-open
+pull request explaining what got skipped — there is always something to
+work with instead of a dead-end Issue comment. Only a failure *before* the
+pull request exists — no commit, an uncommitted session, `gh pr create`
+itself failing — comments on the Issue and removes `agent:execute` rather
+than opening a broken PR, so re-adding the label is a clean retry in that
+case.
 
 Run it by hand against any Issue number to re-check:
 
@@ -1012,7 +1019,7 @@ example schema — do not expect clean per-model cost.
 | --- | --- |
 | `.github/workflows/agent-00-dashboard.yml` | Rewrites the pinned control plane Issue from derived state, on `dashboard:update` or dispatch |
 | `.github/workflows/agent-01-planner.yml` | Decomposes a Feature into `[impl]` sub-issues |
-| `.github/workflows/agent-02-execute.yml` | Scripted implementer: implements, validates, formats, self-reviews, self-fixes, and opens the PR, on `agent:execute` |
+| `.github/workflows/agent-02-execute.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:execute` |
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
 | `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix` |
