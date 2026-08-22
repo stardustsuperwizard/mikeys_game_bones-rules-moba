@@ -1191,8 +1191,8 @@ jobs:
           # view. Defining it here makes the vocabulary self-healing.
           ensure_label \
             "plan" \
-            "2C3199" \
-            "Intake Issue awaiting decomposition"
+            "0E8A16" \
+            "Intake ticket awaiting planning"
 
       - name: Create Implementation Task Sub-Issues
         if: steps.duplicate_check.outputs.already_planned != 'true'

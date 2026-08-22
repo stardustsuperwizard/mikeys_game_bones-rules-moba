@@ -414,6 +414,42 @@ Review is the one thing that fires without a tap, on `ready_for_review`. That
 is deliberate: it is a safety net on work you already chose to start, and
 gating it means an unreviewed PR can sit looking finished.
 
+### Label colors
+
+Colors are cosmetic — no workflow reads a label's color back, only its name
+(`github.event.label.name`, `.labels[].name` in `jq` queries). Safe to
+recolor any of these from the repository's Labels settings; nothing here
+depends on the color. Checked live against the repository on 2026-08-22:
+
+| Label | Color | Bootstrapped by |
+| --- | --- | --- |
+| `agent:plan` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:execute` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:review` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:fix` | `#1D76DB` | — not created by any workflow; must already exist |
+| `plan` | `#0E8A16` | `agent-01-planner.yml` |
+| `planned` | `#0E8A16` | `agent-01-planner.yml` |
+| `implementation` | `#1D76DB` | `agent-01-planner.yml` |
+| `machine` | `#70A8BD` | `agent-01-planner.yml` |
+| `review:pass` | `#0E8A16` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
+| `review:fix` | `#D93F0B` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
+| `review:planning-failure` | `#B60205` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
+| `review:design-ambiguity` | `#FBCA04` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
+| `dashboard` | `#5319E7` | `agent-00-dashboard.yml` |
+| `dashboard:update` | `#5319E7` | `agent-00-dashboard.yml` |
+
+"Bootstrapped by" only matters if the label is ever deleted: whichever
+workflow's `ensure_label` guard runs next recreates it, from that workflow's
+own hardcoded color, because the guard only checks whether the name exists —
+never whether the color or description still match. The four `agent:*`
+labels have no such guard anywhere in `.github/`: if one of them is ever
+deleted, nothing recreates it, and every trigger keyed on that name silently
+stops firing until it's added back by hand.
+
+`plan`'s color and description drifted from `agent-01-planner.yml`'s
+`ensure_label "plan"` call at some point after the label was created; both
+were brought back in sync with the live values on 2026-08-22.
+
 ### Why planning and review are CLI sessions, not cloud agents
 
 The Copilot cloud agent is built to produce a diff: it opens a branch and a
