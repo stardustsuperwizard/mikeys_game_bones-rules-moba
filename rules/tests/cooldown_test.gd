@@ -54,13 +54,14 @@ static func _test_insufficient_resource() -> Array[String]:
 
 	var result = combatant.can_activate(&"test_ability")
 	if result != MobaCombatant.ActivationFailure.INSUFFICIENT_RESOURCE:
-		violations.append(
-			"insufficient_resource: expected INSUFFICIENT_RESOURCE, got %d" % result
-		)
+		violations.append("insufficient_resource: expected INSUFFICIENT_RESOURCE, got %d" % result)
 
 	if not is_equal_approx(combatant._current_resource, 20.0):
 		violations.append(
-			"insufficient_resource: resource should still be 20.0, got %f" % combatant._current_resource
+			(
+				"insufficient_resource: resource should still be 20.0, got %f"
+				% combatant._current_resource
+			)
 		)
 
 	if combatant._cooldowns.remaining(&"test_ability") > 0.0:
@@ -90,13 +91,14 @@ static func _test_can_activate_side_effect_free() -> Array[String]:
 	for _i in range(5):
 		var result = combatant.can_activate(&"test_ability")
 		if result != MobaCombatant.ActivationFailure.OK:
-			violations.append(
-				"side_effect_free: can_activate should return OK, got %d" % result
-			)
+			violations.append("side_effect_free: can_activate should return OK, got %d" % result)
 
 	if not is_equal_approx(combatant._current_resource, initial_resource):
 		violations.append(
-			"side_effect_free: resource should be %f, got %f" % [initial_resource, combatant._current_resource]
+			(
+				"side_effect_free: resource should be %f, got %f"
+				% [initial_resource, combatant._current_resource]
+			)
 		)
 
 	if combatant._cooldowns.remaining(&"test_ability") > 0.0:
@@ -130,7 +132,10 @@ static func _test_cooldown_vs_no_charges() -> Array[String]:
 	var check_result = combatant.can_activate(&"test_ability")
 	if check_result != MobaCombatant.ActivationFailure.NO_CHARGES:
 		violations.append(
-			"cooldown_vs_no_charges: with no charges, should report NO_CHARGES, got %d" % check_result
+			(
+				"cooldown_vs_no_charges: with no charges, should report NO_CHARGES, got %d"
+				% check_result
+			)
 		)
 
 	return violations
@@ -164,9 +169,7 @@ static func _test_commit_activate() -> Array[String]:
 
 	var remaining = combatant._cooldowns.remaining(&"test_ability")
 	if not _approx_equal(remaining, 6.0, 0.0001):
-		violations.append(
-			"commit_activate: cooldown should be 6.0, got %f" % remaining
-		)
+		violations.append("commit_activate: cooldown should be 6.0, got %f" % remaining)
 
 	return violations
 
@@ -191,13 +194,14 @@ static func _test_refused_commit() -> Array[String]:
 
 	var result = combatant.commit_activate(&"test_ability")
 	if result != MobaCombatant.ActivationFailure.INSUFFICIENT_RESOURCE:
-		violations.append(
-			"refused_commit: expected INSUFFICIENT_RESOURCE, got %d" % result
-		)
+		violations.append("refused_commit: expected INSUFFICIENT_RESOURCE, got %d" % result)
 
 	if not is_equal_approx(combatant._current_resource, initial_resource):
 		violations.append(
-			"refused_commit: resource should be %f, got %f" % [initial_resource, combatant._current_resource]
+			(
+				"refused_commit: resource should be %f, got %f"
+				% [initial_resource, combatant._current_resource]
+			)
 		)
 
 	if combatant._cooldowns.remaining(&"test_ability") > 0.0:
@@ -226,9 +230,7 @@ static func _test_haste_scaling() -> Array[String]:
 
 	var cooldown0 = combatant0._cooldowns.remaining(&"test_ability")
 	if not _approx_equal(cooldown0, 10.0, 0.0001):
-		violations.append(
-			"haste_scaling: at 0 haste, cooldown should be 10.0, got %f" % cooldown0
-		)
+		violations.append("haste_scaling: at 0 haste, cooldown should be 10.0, got %f" % cooldown0)
 
 	var combatant50 = MobaCombatant.new()
 	combatant50._runtime_stat_block = combatant50.stat_block.duplicate()
@@ -297,7 +299,10 @@ static func _test_charge_refill_timing() -> Array[String]:
 	var charges_after_first = combatant._cooldowns.charges(&"test_ability")
 	if charges_after_first != 1:
 		violations.append(
-			"charge_refill_timing: after first use, charges should be 1, got %d" % charges_after_first
+			(
+				"charge_refill_timing: after first use, charges should be 1, got %d"
+				% charges_after_first
+			)
 		)
 
 	combatant.tick(1.1)
@@ -345,7 +350,10 @@ static func _test_no_timer_reset() -> Array[String]:
 
 	if remaining_after_second > remaining_at_05 + 0.01:
 		violations.append(
-			"no_timer_reset: timer was reset (expected ~%f, got %f)" % [remaining_at_05, remaining_after_second]
+			(
+				"no_timer_reset: timer was reset (expected ~%f, got %f)"
+				% [remaining_at_05, remaining_after_second]
+			)
 		)
 
 	return violations
@@ -378,12 +386,18 @@ static func _test_large_cost_refused() -> Array[String]:
 	var commit_result = combatant.commit_activate(&"test_ability")
 	if commit_result != MobaCombatant.ActivationFailure.INSUFFICIENT_RESOURCE:
 		violations.append(
-			"large_cost_refused: commit_activate should return INSUFFICIENT_RESOURCE, got %d" % commit_result
+			(
+				"large_cost_refused: commit_activate should return INSUFFICIENT_RESOURCE, got %d"
+				% commit_result
+			)
 		)
 
 	if not is_equal_approx(combatant._current_resource, initial_resource):
 		violations.append(
-			"large_cost_refused: resource should be %f, got %f" % [initial_resource, combatant._current_resource]
+			(
+				"large_cost_refused: resource should be %f, got %f"
+				% [initial_resource, combatant._current_resource]
+			)
 		)
 
 	if combatant._cooldowns.remaining(&"test_ability") > 0.0:
