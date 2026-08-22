@@ -723,7 +723,20 @@ jobs:
 
           pathlib.Path("pr-body.md").write_text("\n".join(lines) + "\n")
 
-          subprocess.run(["git", "push", "origin", f"HEAD:{branch}"], check=True)
+          # "Create Working Branch" always rebuilds this branch fresh with
+          # `git checkout -B` from the current base, so it never carries
+          # history from a prior run. If an earlier run for the same Issue
+          # pushed this branch and then failed before opening a pull
+          # request (e.g. the "gh pr create failed" case above), the
+          # branch still exists on the remote with unrelated history, and
+          # a plain push is rejected as non-fast-forward. Force push: this
+          # branch is single-purpose and disposable, and the guard step
+          # above already confirmed no pull request exists for it yet, so
+          # there is nothing on the remote worth preserving.
+          subprocess.run(
+              ["git", "push", "--force", "origin", f"HEAD:{branch}"],
+              check=True,
+          )
 
           base = subprocess.run(
               ["gh", "repo", "view", repo, "--json", "defaultBranchRef",
