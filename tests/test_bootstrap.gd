@@ -48,6 +48,12 @@ func _ready() -> void:
 		if state_machine_passed:
 			print("\nState Machine Test PASSED")
 
+		# Run the cooldown test
+		var cooldown_passed = CooldownTest.run()
+
+		if cooldown_passed:
+			print("\nCooldown Test PASSED")
+
 		# Exit after the tests complete to avoid loading the main scene
 		call_deferred("_quit_engine")
 
