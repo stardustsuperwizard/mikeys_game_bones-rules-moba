@@ -11,18 +11,22 @@ signal health_changed(current: float, maximum: float)
 ## Emitted when damage is resolved. Carries both raw (pre-crit, pre-mitigation)
 ## and final (post-mitigation) amounts, plus metadata about the damage event.
 signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: bool, source)
+## Emitted when current or maximum resource changes.
+signal resource_changed(current: float, maximum: float)
 
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
 
 var _runtime_stat_block: MobaStatBlock
 var _current_health: float = 0.0
 var _has_died: bool = false
+var _current_resource: float = 0.0
 
 
 func _ready() -> void:
 	# Duplicate the stat block before any mutation
 	_runtime_stat_block = stat_block.duplicate()
 	_current_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	_current_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
 	
 	# Defer seeding the parent Actor's character_sheet because children ready before parents,
 	# and the Actor's _ready() hasn't yet duplicated its character_sheet.
@@ -155,3 +159,63 @@ func _update_health() -> void:
 		if parent_actor != null:
 			parent_actor.die()
 
+
+## Get current resource value.
+func get_current_resource() -> float:
+	return _current_resource
+
+
+## Get maximum resource value from the stat block.
+func get_maximum_resource() -> float:
+	return get_stat(MobaStatBlock.RESOURCE)
+
+
+# Property accessors for current_resource and maximum_resource
+var current_resource: float:
+	get:
+		return _current_resource
+
+var maximum_resource: float:
+	get:
+		return get_stat(MobaStatBlock.RESOURCE)
+
+
+## Spend resource from the pool.
+## Returns false and mutates nothing if amount exceeds current_resource.
+## Otherwise deducts amount, emits resource_changed, and returns true.
+## spend_resource(0.0) returns true even at zero current resource.
+func spend_resource(amount: float) -> bool:
+	if amount > _current_resource:
+		return false
+	
+	_current_resource -= amount
+	resource_changed.emit(_current_resource, get_stat(MobaStatBlock.RESOURCE))
+	return true
+
+
+## Restore resource to the pool.
+## Clamps the result at maximum and emits resource_changed.
+func restore_resource(amount: float) -> void:
+	var max_resource = get_stat(MobaStatBlock.RESOURCE)
+	_current_resource = minf(_current_resource + amount, max_resource)
+	resource_changed.emit(_current_resource, max_resource)
+
+
+## Advance time by delta seconds.
+## Accumulates resource and health regeneration continuously (not gated by one-second intervals).
+## Health regeneration clamps at maximum and emits health_changed.
+## A dead combatant does not regenerate health.
+## Resource regeneration always occurs (dead or alive).
+func tick(delta: float) -> void:
+	# Accumulate resource regeneration
+	var resource_regen = get_stat(MobaStatBlock.RESOURCE_REGEN)
+	var max_resource = get_stat(MobaStatBlock.RESOURCE)
+	_current_resource = minf(_current_resource + resource_regen * delta, max_resource)
+	resource_changed.emit(_current_resource, max_resource)
+	
+	# Accumulate health regeneration (only if alive)
+	if is_alive():
+		var health_regen = get_stat(MobaStatBlock.HEALTH_REGEN)
+		var max_health = get_stat(MobaStatBlock.HEALTH)
+		_current_health = minf(_current_health + health_regen * delta, max_health)
+		_update_health()

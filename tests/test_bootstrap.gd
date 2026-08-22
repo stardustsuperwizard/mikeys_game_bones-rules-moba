@@ -29,6 +29,12 @@ func _ready() -> void:
 		if combatant_passed:
 			print("\nCombatant Test PASSED")
 		
+		# Run the resource test
+		var resource_passed = ResourceTest.run()
+		
+		if resource_passed:
+			print("\nResource Test PASSED")
+		
 		# Run the formulas test
 		var formulas_passed = FormulasTest.run()
 		
