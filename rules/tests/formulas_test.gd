@@ -49,6 +49,9 @@ static func run() -> bool:
 	# Test 11: is_critical
 	all_violations.append_array(_test_is_critical())
 
+	# Test 12: haste monotonicity property (mirrored from sim/tests/test_defense.py::test_increasing_haste_decreases_cooldown)
+	all_violations.append_array(_test_haste_monotonicity())
+
 	if all_violations.is_empty():
 		return true
 
@@ -215,5 +218,45 @@ static func _test_is_critical() -> Array[String]:
 	var is_crit_equal = MobaFormulas.is_critical(0.20, 0.20)
 	if is_crit_equal:
 		violations.append("is_critical(0.20, 0.20): expected false, got true")
+
+	return violations
+
+
+## Test haste monotonicity property: increasing haste never increases effective cooldown.
+##
+## Mirrored from sim/tests/test_defense.py::test_increasing_haste_decreases_cooldown (§65).
+## Property: For any base cooldown and haste values a, b where a <= b,
+## effective_cooldown(base, b) <= effective_cooldown(base, a).
+## Additionally, effective_cooldown(base, 0.0) == base exactly.
+static func _test_haste_monotonicity() -> Array[String]:
+	var violations: Array[String] = []
+
+	# Deterministic sweep of base cooldown and haste pairs
+	var base_cooldowns = [0.1, 1.0, 5.0, 10.0, 100.0, 1000.0]
+	var haste_values = [0.0, 10.0, 50.0, 100.0, 500.0, 1000.0, 5000.0, 10000.0]
+
+	# Test identity case: haste 0 returns exactly base cooldown
+	for base in base_cooldowns:
+		var result = MobaFormulas.effective_cooldown(base, 0.0)
+		if not is_equal_approx(result, base):
+			violations.append(
+				"haste_monotonicity identity: effective_cooldown(%.1f, 0.0) expected %.1f, got %f"
+				% [base, base, result]
+			)
+
+	# Test monotonicity: for each base cooldown, sweep haste pairs
+	for base in base_cooldowns:
+		for i in range(haste_values.size() - 1):
+			var haste_a = haste_values[i]
+			var haste_b = haste_values[i + 1]
+
+			var cooldown_a = MobaFormulas.effective_cooldown(base, haste_a)
+			var cooldown_b = MobaFormulas.effective_cooldown(base, haste_b)
+
+			if cooldown_b > cooldown_a:
+				violations.append(
+					"haste_monotonicity: base=%.1f, haste_a=%.1f yields %.4f, haste_b=%.1f yields %.4f (b > a)"
+					% [base, haste_a, cooldown_a, haste_b, cooldown_b]
+				)
 
 	return violations
