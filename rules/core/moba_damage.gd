@@ -7,34 +7,27 @@
 class_name MobaDamage
 extends RefCounted
 
-
 ## Damage type enum per §7.
 enum DamageType {
 	PHYSICAL,  # Mitigated by Armor
-	MAGICAL,   # Mitigated by Magic Resistance
-	TRUE,      # Bypasses all defenses
+	MAGICAL,  # Mitigated by Magic Resistance
+	TRUE,  # Bypasses all defenses
 }
-
 
 ## Raw damage before crit and mitigation.
 var amount: float
 
-
 ## Type of damage (PHYSICAL, MAGICAL, or TRUE).
 var damage_type: int = DamageType.PHYSICAL
-
 
 ## Source of the damage (typically the attacker Actor or ability).
 var source
 
-
 ## Whether this damage can trigger a critical strike.
 var can_crit: bool = true
 
-
 ## Flat armor/magic penetration from the attacker.
 var flat_pen: float = 0.0
-
 
 ## Percent armor/magic penetration from the attacker (as a fraction, e.g., 0.2 for 20%).
 var percent_pen: float = 0.0

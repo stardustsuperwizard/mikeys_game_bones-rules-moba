@@ -7,6 +7,7 @@ extends ActorBody3D
 @export var turn_speed: float = 2.0
 @export var jump_velocity: float = 5.0
 
+
 func _physics_process(delta: float) -> void:
 	var player_ctrl := actor.controller as PlayerController3D
 	if player_ctrl:

@@ -93,7 +93,9 @@ func _parse_state_table(data: Variant) -> bool:
 			return false
 
 		# Validate all required policy columns exist
-		var required_columns = ["move", "basic_attack", "ability", "jump", "interruptible_by_hard_cc"]
+		var required_columns = [
+			"move", "basic_attack", "ability", "jump", "interruptible_by_hard_cc"
+		]
 		for column_name in required_columns:
 			if column_name not in state_data:
 				push_error("State %s missing column '%s'" % [state_name_str, column_name])
@@ -102,12 +104,22 @@ func _parse_state_table(data: Variant) -> bool:
 
 			var value = state_data[column_name]
 			if value is not String:
-				push_error("State %s column %s value must be string, got %s" % [state_name_str, column_name, typeof(value)])
+				push_error(
+					(
+						"State %s column %s value must be string, got %s"
+						% [state_name_str, column_name, typeof(value)]
+					)
+				)
 				load_failed = true
 				return false
 
 			if value not in _COLUMN_VOCABULARIES[column_name]:
-				push_error("State %s column %s has unrecognized policy value: %s" % [state_name_str, column_name, value])
+				push_error(
+					(
+						"State %s column %s has unrecognized policy value: %s"
+						% [state_name_str, column_name, value]
+					)
+				)
 				load_failed = true
 				return false
 
@@ -147,10 +159,14 @@ func can(action: StringName) -> bool:
 	# Map action names to policy columns
 	var policy_key: String
 	match action_lower:
-		&"move": policy_key = "move"
-		&"basic_attack": policy_key = "basic_attack"
-		&"ability": policy_key = "ability"
-		&"jump": policy_key = "jump"
+		&"move":
+			policy_key = "move"
+		&"basic_attack":
+			policy_key = "basic_attack"
+		&"ability":
+			policy_key = "ability"
+		&"jump":
+			policy_key = "jump"
 		_:
 			push_error("Unknown action: %s" % action)
 			return false
@@ -166,7 +182,12 @@ func can(action: StringName) -> bool:
 		"no", "locked", "per_cc", "flagged", "breaks_channel", "displacement_only":
 			return false
 		_:
-			push_error("Unknown policy value in state %d column %s: %s" % [current_state, policy_key, policy_value])
+			push_error(
+				(
+					"Unknown policy value in state %d column %s: %s"
+					% [current_state, policy_key, policy_value]
+				)
+			)
 			return false
 
 
@@ -225,7 +246,9 @@ func movement_policy() -> StringName:
 ## Re-entering the same state returns true but does not emit state_changed.
 ## DEAD is terminal: returns false for any target state except revive().
 ## AIRBORNE states store the cause flag for later querying.
-func try_enter(state: int, duration: float = 0.0, cause: int = MobaState.AirborneCause.JUMP) -> bool:
+func try_enter(
+	state: int, duration: float = 0.0, cause: int = MobaState.AirborneCause.JUMP
+) -> bool:
 	# Validate state value
 	if state < MobaState.IDLE or state > MobaState.DEAD:
 		push_error("Invalid state value: %d" % state)
@@ -293,7 +316,7 @@ func tick(delta: float) -> void:
 func revive() -> bool:
 	if current_state != MobaState.DEAD:
 		return false
-	
+
 	var from_state = current_state
 	current_state = MobaState.IDLE
 	time_in_state = 0.0

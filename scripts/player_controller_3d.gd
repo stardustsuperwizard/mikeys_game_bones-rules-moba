@@ -68,8 +68,10 @@ var _interact_target: Node = null
 var _closest_distance := INF
 var _stall_timer := 0.0
 
+
 func _ready() -> void:
 	actor.add_to_group("players")
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("jump"):
@@ -80,6 +82,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# happens to be under the crosshair rather than what the player aimed at.
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			_issue_order_from_click(get_viewport().get_mouse_position())
+
 
 # Returns world-space movement direction. Keyboard input is relative to the
 # player's current facing so forward/back/strafe respect which way the body
@@ -96,6 +99,7 @@ func get_move_direction() -> Vector3:
 
 	return _order_move_direction(body)
 
+
 # Signed turn input: negative = turn left, positive = turn right. Falls back
 # to turning toward the current order when the player isn't steering.
 func get_turn_direction() -> float:
@@ -108,11 +112,13 @@ func get_turn_direction() -> float:
 		return turn
 	return _order_turn_direction()
 
+
 # Consumes and returns the buffered jump request.
 func consume_jump() -> bool:
 	var requested := _jump_requested
 	_jump_requested = false
 	return requested
+
 
 # Bones polls these once the body has moved for the frame, so an order that
 # arrived this frame resolves on the same frame it arrived.
@@ -123,12 +129,14 @@ func get_attack_target() -> Actor:
 	cancel_order()
 	return target
 
+
 func get_interact_target() -> Node:
 	if _interact_target == null or not _in_range_of(_interact_target, interact_range):
 		return null
 	var target := _interact_target
 	cancel_order()
 	return target
+
 
 # Drops the live order, whatever kind it is, and resets its stall tracking.
 func cancel_order() -> void:
@@ -138,6 +146,7 @@ func cancel_order() -> void:
 	_interact_target = null
 	_closest_distance = INF
 	_stall_timer = 0.0
+
 
 # Raycasts from the camera through the clicked pixel and turns whatever it
 # hits into an order. A click that hits nothing at all just clears the
@@ -175,6 +184,7 @@ func _issue_order_from_click(screen_position: Vector2) -> void:
 		_destination_is_wall = (hit["normal"] as Vector3).y < WALKABLE_NORMAL_Y
 		_has_destination = true
 
+
 func _keyboard_move_direction(body: Node3D) -> Vector3:
 	var forward := -body.global_basis.z
 	var right := body.global_basis.x
@@ -188,6 +198,7 @@ func _keyboard_move_direction(body: Node3D) -> Vector3:
 	if Input.is_action_pressed("strafe_right"):
 		dir += right
 	return dir.normalized()
+
 
 # Walks toward the live order until inside the distance at which it resolves.
 # Also where stall detection is metered, since Bones calls this exactly once
@@ -210,8 +221,11 @@ func _order_move_direction(body: CharacterBody3D) -> Vector3:
 	# player grinding into the wall until the stall guard eventually fired.
 	# Only walls the body is pushing *into* count, so brushing along one on
 	# the way somewhere else doesn't read as arrival.
-	if _destination_is_wall and body.is_on_wall() \
-			and body.get_wall_normal().dot(direction) < WALL_BLOCK_DOT:
+	if (
+		_destination_is_wall
+		and body.is_on_wall()
+		and body.get_wall_normal().dot(direction) < WALL_BLOCK_DOT
+	):
 		cancel_order()
 		return Vector3.ZERO
 
@@ -225,6 +239,7 @@ func _order_move_direction(body: CharacterBody3D) -> Vector3:
 			return Vector3.ZERO
 
 	return direction
+
 
 func _order_turn_direction() -> float:
 	var body := _body()
@@ -242,6 +257,7 @@ func _order_turn_direction() -> float:
 	var error := wrapf(desired_yaw - body.global_rotation.y, -PI, PI)
 	return -clampf(rad_to_deg(error) / turn_ease_degrees, -1.0, 1.0)
 
+
 # True while an order is live. Drops orders whose target has been freed --
 # a killed enemy, a despawned prop -- so the player stops walking at a ghost.
 func _refresh_order() -> bool:
@@ -251,12 +267,14 @@ func _refresh_order() -> bool:
 		cancel_order()
 	return _has_destination or _attack_target != null or _interact_target != null
 
+
 func _order_goal() -> Vector3:
 	if _attack_target:
 		return _attack_target.global_position
 	if _interact_target:
 		return (_interact_target as Node3D).global_position
 	return _destination
+
 
 func _order_stop_distance() -> float:
 	if _attack_target:
@@ -265,6 +283,7 @@ func _order_stop_distance() -> float:
 		return interact_range
 	return arrival_distance
 
+
 # Range is measured on the ground plane, matching how the approach in
 # _order_move_direction decides it has arrived. Measuring in 3D instead would
 # deadlock on a target whose origin sits above the floor -- a door's does --
@@ -272,17 +291,21 @@ func _order_stop_distance() -> float:
 func _in_range_of(target: Node, range_limit: float) -> bool:
 	if not is_instance_valid(target):
 		return false
-	var target_position := (target as Actor).global_position if target is Actor \
-		else (target as Node3D).global_position
+	var target_position := (
+		(target as Actor).global_position if target is Actor else (target as Node3D).global_position
+	)
 	return _ground_distance(target_position - actor.global_position) <= range_limit
+
 
 func _ground_distance(offset: Vector3) -> float:
 	return Vector2(offset.x, offset.z).length()
+
 
 func _actor_of(collider: Node) -> Actor:
 	if collider == null:
 		return null
 	return collider.get_parent() as Actor
+
 
 func _body() -> CharacterBody3D:
 	return actor.get_node_or_null("Body") as CharacterBody3D

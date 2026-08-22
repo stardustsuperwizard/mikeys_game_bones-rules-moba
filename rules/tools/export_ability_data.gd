@@ -26,11 +26,13 @@ const PASSIVES_OUT := "res://rules/data/generated/passives.json"
 var exit_code := 0
 var has_run := false
 
+
 func _process(delta: float) -> bool:
 	if not has_run:
 		has_run = true
 		_run_export()
 	return false
+
 
 func _run_export() -> void:
 	if not DisplayServer.get_name() == "headless":
@@ -38,7 +40,7 @@ func _run_export() -> void:
 		exit_code = 1
 		_quit()
 		return
-	
+
 	# Ensure output directory exists
 	var abs_generated_dir = ProjectSettings.globalize_path(GENERATED_DIR)
 	if not DirAccess.dir_exists_absolute(abs_generated_dir):
@@ -48,58 +50,64 @@ func _run_export() -> void:
 			exit_code = 1
 			_quit()
 			return
-	
+
 	# Export abilities
 	var abilities = _load_resources(ABILITIES_DIR, "MobaAbility")
 	var ability_data: Array = []
 	for ability in abilities:
 		ability_data.append(_serialize_ability(ability))
-	
+
 	if exit_code != 0:
 		_quit()
 		return
-	
+
 	# Export passives
 	var passives = _load_resources(PASSIVES_DIR, "MobaPassive")
 	var passive_data: Array = []
 	for passive in passives:
 		passive_data.append(_serialize_passive(passive))
-	
+
 	if exit_code != 0:
 		_quit()
 		return
-	
+
 	# Sort by id for deterministic output
 	ability_data.sort_custom(func(a: Variant, b: Variant) -> bool: return a["id"] < b["id"])
 	passive_data.sort_custom(func(a: Variant, b: Variant) -> bool: return a["id"] < b["id"])
-	
+
 	# Write abilities JSON
 	var ability_json = JSON.stringify(ability_data)
 	if not _write_canonical_json(ABILITIES_OUT, ability_data):
 		exit_code = 1
 		_quit()
 		return
-	
+
 	# Write passives JSON
 	if not _write_canonical_json(PASSIVES_OUT, passive_data):
 		exit_code = 1
 		_quit()
 		return
-	
-	print("Successfully exported %d abilities and %d passives" % [ability_data.size(), passive_data.size()])
+
+	print(
+		(
+			"Successfully exported %d abilities and %d passives"
+			% [ability_data.size(), passive_data.size()]
+		)
+	)
 	_quit()
+
 
 func _load_resources(dir_path: String, resource_type_name: String) -> Array:
 	var resources: Array = []
 	var dir = DirAccess.open(dir_path)
-	
+
 	if dir == null:
 		# Directory doesn't exist yet, return empty array
 		return resources
-	
+
 	dir.list_dir_begin()
 	var file_name = dir.get_next()
-	
+
 	while file_name != "":
 		if not file_name.begins_with(".") and file_name.ends_with(".tres"):
 			var full_path = dir_path.path_join(file_name)
@@ -110,12 +118,18 @@ func _load_resources(dir_path: String, resource_type_name: String) -> Array:
 				printerr("ERROR: Failed to load resource from %s" % [full_path])
 				exit_code = 1
 			elif resource.get_class() != resource_type_name:
-				printerr("ERROR: %s is not a %s resource (got %s)" % [full_path, resource_type_name, resource.get_class()])
+				printerr(
+					(
+						"ERROR: %s is not a %s resource (got %s)"
+						% [full_path, resource_type_name, resource.get_class()]
+					)
+				)
 				exit_code = 1
-		
+
 		file_name = dir.get_next()
-	
+
 	return resources
+
 
 func _serialize_ability(ability: MobaAbility) -> Dictionary:
 	var data := {
@@ -142,7 +156,8 @@ func _serialize_ability(ability: MobaAbility) -> Dictionary:
 		"charges": ability.charges,
 		"usable_in_air": ability.usable_in_air,
 		"touch_viable": ability.touch_viable,
-		"crowd_control": null if ability.crowd_control == null else _serialize_crowd_control(ability.crowd_control),
+		"crowd_control":
+		null if ability.crowd_control == null else _serialize_crowd_control(ability.crowd_control),
 		"buffs": [],
 		"debuffs": [],
 		"max_stacks": ability.max_stacks,
@@ -150,18 +165,20 @@ func _serialize_ability(ability: MobaAbility) -> Dictionary:
 		"cancellable_by_hard_cc": ability.cancellable_by_hard_cc,
 		"refund_resource_on_cancel": ability.refund_resource_on_cancel,
 		"on_cancel": _enum_to_string(MobaAbility.OnCancel.keys(), ability.on_cancel),
-		"on_channel_break": _enum_to_string(MobaAbility.OnChannelBreak.keys(), ability.on_channel_break),
+		"on_channel_break":
+		_enum_to_string(MobaAbility.OnChannelBreak.keys(), ability.on_channel_break),
 	}
-	
+
 	# Serialize buffs
 	for buff in ability.buffs:
 		data["buffs"].append(_serialize_stat_modifier(buff))
-	
+
 	# Serialize debuffs
 	for debuff in ability.debuffs:
 		data["debuffs"].append(_serialize_stat_modifier(debuff))
-	
+
 	return data
+
 
 func _serialize_passive(passive: MobaPassive) -> Dictionary:
 	var data := {
@@ -171,8 +188,9 @@ func _serialize_passive(passive: MobaPassive) -> Dictionary:
 		"trigger": passive.trigger,
 		"effect": null if passive.effect == null else _serialize_stat_modifier(passive.effect),
 	}
-	
+
 	return data
+
 
 func _serialize_stat_modifier(modifier: MobaStatModifier) -> Dictionary:
 	var data := {
@@ -183,8 +201,9 @@ func _serialize_stat_modifier(modifier: MobaStatModifier) -> Dictionary:
 		"stacking": _enum_to_string(MobaStatModifier.Stacking.keys(), modifier.stacking),
 		"max_stacks": modifier.max_stacks,
 	}
-	
+
 	return data
+
 
 func _serialize_crowd_control(cc: MobaCrowdControlSpec) -> Dictionary:
 	var data := {
@@ -193,33 +212,41 @@ func _serialize_crowd_control(cc: MobaCrowdControlSpec) -> Dictionary:
 		"duration": cc.duration,
 		"affected_by_tenacity": cc.affected_by_tenacity,
 	}
-	
+
 	return data
+
 
 func _enum_to_string(enum_keys: PackedStringArray, enum_value: int) -> String:
 	if enum_value < 0 or enum_value >= enum_keys.size():
 		printerr("ERROR: Enum value %d out of range for keys: %s" % [enum_value, enum_keys])
 		exit_code = 1
 		return ""
-	
+
 	return enum_keys[enum_value].to_lower()
+
 
 func _write_canonical_json(file_path: String, data: Variant) -> bool:
 	# Create a canonical JSON representation with sorted keys
 	var json_str = _to_canonical_json(data)
-	
+
 	var file = FileAccess.open(file_path, FileAccess.WRITE)
 	if file == null:
-		printerr("ERROR: Failed to open %s for writing: %s" % [file_path, error_string(FileAccess.get_open_error())])
+		printerr(
+			(
+				"ERROR: Failed to open %s for writing: %s"
+				% [file_path, error_string(FileAccess.get_open_error())]
+			)
+		)
 		return false
-	
+
 	file.store_string(json_str)
 	return true
+
 
 func _to_canonical_json(data: Variant, indent_level: int = 0) -> String:
 	var indent = "\t".repeat(indent_level)
 	var next_indent = "\t".repeat(indent_level + 1)
-	
+
 	if data == null:
 		return "null"
 	elif data is bool:
@@ -255,6 +282,7 @@ func _to_canonical_json(data: Variant, indent_level: int = 0) -> String:
 	else:
 		# Fallback to JSON.stringify for unknown types
 		return JSON.stringify(data)
+
 
 func _quit() -> void:
 	quit(exit_code)

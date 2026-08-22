@@ -132,18 +132,24 @@ static func _test_all_states_legality() -> bool:
 
 		if [can_move, can_basic, can_ability, can_jump] != expected:
 			var state_name = MobaState.state_to_string(state)
-			printerr("FAIL: State %s legality mismatch. Expected %s, got [%s, %s, %s, %s]" % [
-				state_name, expected, can_move, can_basic, can_ability, can_jump
-			])
+			printerr(
+				(
+					"FAIL: State %s legality mismatch. Expected %s, got [%s, %s, %s, %s]"
+					% [state_name, expected, can_move, can_basic, can_ability, can_jump]
+				)
+			)
 			ok = false
 
 		var expected_hard_cc = hard_cc_expectations[state]
 		var actual_hard_cc = machine.hard_cc_policy()
 		if actual_hard_cc != expected_hard_cc:
 			var state_name = MobaState.state_to_string(state)
-			printerr("FAIL: State %s hard-CC policy mismatch. Expected %s, got %s" % [
-				state_name, expected_hard_cc, actual_hard_cc
-			])
+			printerr(
+				(
+					"FAIL: State %s hard-CC policy mismatch. Expected %s, got %s"
+					% [state_name, expected_hard_cc, actual_hard_cc]
+				)
+			)
 			ok = false
 
 	machine.free()
@@ -176,9 +182,12 @@ static func _test_movement_policies() -> bool:
 
 		if actual != expected:
 			var state_name = MobaState.state_to_string(state)
-			printerr("FAIL: State %s movement policy mismatch. Expected %s, got %s" % [
-				state_name, expected, actual
-			])
+			printerr(
+				(
+					"FAIL: State %s movement policy mismatch. Expected %s, got %s"
+					% [state_name, expected, actual]
+				)
+			)
 			ok = false
 
 	machine.free()
@@ -191,10 +200,11 @@ static func _test_state_transitions() -> bool:
 	var ok = true
 
 	var signal_log = {"count": 0, "from": -1, "to": -1}
-	machine.state_changed.connect(func(from, to):
-		signal_log["count"] += 1
-		signal_log["from"] = from
-		signal_log["to"] = to
+	machine.state_changed.connect(
+		func(from, to):
+			signal_log["count"] += 1
+			signal_log["from"] = from
+			signal_log["to"] = to
 	)
 
 	# Test basic transition
@@ -203,10 +213,17 @@ static func _test_state_transitions() -> bool:
 		printerr("FAIL: try_enter to MOVING failed")
 		ok = false
 
-	if signal_log["count"] != 1 or signal_log["from"] != MobaState.IDLE or signal_log["to"] != MobaState.MOVING:
-		printerr("FAIL: state_changed should emit once for IDLE -> MOVING, got count=%d from=%d to=%d" % [
-			signal_log["count"], signal_log["from"], signal_log["to"]
-		])
+	if (
+		signal_log["count"] != 1
+		or signal_log["from"] != MobaState.IDLE
+		or signal_log["to"] != MobaState.MOVING
+	):
+		printerr(
+			(
+				"FAIL: state_changed should emit once for IDLE -> MOVING, got count=%d from=%d to=%d"
+				% [signal_log["count"], signal_log["from"], signal_log["to"]]
+			)
+		)
 		ok = false
 
 	# Test re-entering same state (should succeed, no emission)
@@ -229,10 +246,17 @@ static func _test_state_transitions() -> bool:
 		printerr("FAIL: transition to ABILITY_CAST failed")
 		ok = false
 
-	if signal_log["count"] != 2 or signal_log["from"] != MobaState.MOVING or signal_log["to"] != MobaState.ABILITY_CAST:
-		printerr("FAIL: state_changed should emit for MOVING -> ABILITY_CAST, got count=%d from=%d to=%d" % [
-			signal_log["count"], signal_log["from"], signal_log["to"]
-		])
+	if (
+		signal_log["count"] != 2
+		or signal_log["from"] != MobaState.MOVING
+		or signal_log["to"] != MobaState.ABILITY_CAST
+	):
+		printerr(
+			(
+				"FAIL: state_changed should emit for MOVING -> ABILITY_CAST, got count=%d from=%d to=%d"
+				% [signal_log["count"], signal_log["from"], signal_log["to"]]
+			)
+		)
 		ok = false
 
 	machine.free()
@@ -245,10 +269,11 @@ static func _test_duration_tracking() -> bool:
 	var ok = true
 
 	var signal_log = {"count": 0, "from": -1, "to": -1}
-	machine.state_changed.connect(func(from, to):
-		signal_log["count"] += 1
-		signal_log["from"] = from
-		signal_log["to"] = to
+	machine.state_changed.connect(
+		func(from, to):
+			signal_log["count"] += 1
+			signal_log["from"] = from
+			signal_log["to"] = to
 	)
 
 	# Enter a state with 1.0 second duration
@@ -266,7 +291,9 @@ static func _test_duration_tracking() -> bool:
 	machine.tick(0.4)
 
 	if machine.time_in_state != 0.4:
-		printerr("FAIL: time_in_state should be 0.4 after tick(0.4), got %f" % machine.time_in_state)
+		printerr(
+			"FAIL: time_in_state should be 0.4 after tick(0.4), got %f" % machine.time_in_state
+		)
 		ok = false
 
 	if machine.remaining != 0.6:
@@ -281,7 +308,12 @@ static func _test_duration_tracking() -> bool:
 	machine.tick(0.7)
 
 	if machine.current_state != MobaState.IDLE:
-		printerr("FAIL: state should return to IDLE after duration expires, got %d" % machine.current_state)
+		printerr(
+			(
+				"FAIL: state should return to IDLE after duration expires, got %d"
+				% machine.current_state
+			)
+		)
 		ok = false
 
 	if machine.remaining != 0.0:
@@ -289,10 +321,17 @@ static func _test_duration_tracking() -> bool:
 		ok = false
 
 	# One emission for entering ABILITY_CAST, one for the expiry back to IDLE.
-	if signal_log["count"] != 2 or signal_log["from"] != MobaState.ABILITY_CAST or signal_log["to"] != MobaState.IDLE:
-		printerr("FAIL: state_changed should emit on duration expiry (ABILITY_CAST -> IDLE), got count=%d from=%d to=%d" % [
-			signal_log["count"], signal_log["from"], signal_log["to"]
-		])
+	if (
+		signal_log["count"] != 2
+		or signal_log["from"] != MobaState.ABILITY_CAST
+		or signal_log["to"] != MobaState.IDLE
+	):
+		printerr(
+			(
+				"FAIL: state_changed should emit on duration expiry (ABILITY_CAST -> IDLE), got count=%d from=%d to=%d"
+				% [signal_log["count"], signal_log["from"], signal_log["to"]]
+			)
+		)
 		ok = false
 
 	machine.free()
@@ -312,8 +351,12 @@ static func _test_dead_terminal() -> bool:
 		ok = false
 
 	# All can() queries should return false
-	if machine.can(&"move") or machine.can(&"basic_attack") or \
-		machine.can(&"ability") or machine.can(&"jump"):
+	if (
+		machine.can(&"move")
+		or machine.can(&"basic_attack")
+		or machine.can(&"ability")
+		or machine.can(&"jump")
+	):
 		printerr("FAIL: can() should always return false from DEAD")
 		ok = false
 
@@ -361,7 +404,9 @@ static func _test_zero_duration_not_entered() -> bool:
 	# duration to be meaningful, so this must be rejected.
 	var success = machine.try_enter(MobaState.ABILITY_CAST, 0.0)
 	if success:
-		printerr("FAIL: try_enter with 0 duration should return false for a duration-requiring state")
+		printerr(
+			"FAIL: try_enter with 0 duration should return false for a duration-requiring state"
+		)
 		ok = false
 
 	if machine.current_state != MobaState.IDLE:
@@ -379,7 +424,12 @@ static func _test_zero_duration_not_entered() -> bool:
 		ok = false
 
 	if signal_log["count"] != 0:
-		printerr("FAIL: state_changed should not emit for a rejected zero/negative-duration try_enter, count=%d" % signal_log["count"])
+		printerr(
+			(
+				"FAIL: state_changed should not emit for a rejected zero/negative-duration try_enter, count=%d"
+				% signal_log["count"]
+			)
+		)
 		ok = false
 
 	# Durationless states (IDLE, MOVING, DEAD, CROWD_CONTROLLED) are entered
@@ -391,11 +441,18 @@ static func _test_zero_duration_not_entered() -> bool:
 
 	success = machine.try_enter(MobaState.CROWD_CONTROLLED, 0.0)
 	if not success or machine.current_state != MobaState.CROWD_CONTROLLED:
-		printerr("FAIL: try_enter(CROWD_CONTROLLED, 0.0) should succeed - CROWD_CONTROLLED may be entered durationless")
+		printerr(
+			"FAIL: try_enter(CROWD_CONTROLLED, 0.0) should succeed - CROWD_CONTROLLED may be entered durationless"
+		)
 		ok = false
 
 	if machine.remaining != 0.0:
-		printerr("FAIL: durationless state should have no expiry (remaining == 0.0), got %f" % machine.remaining)
+		printerr(
+			(
+				"FAIL: durationless state should have no expiry (remaining == 0.0), got %f"
+				% machine.remaining
+			)
+		)
 		ok = false
 
 	machine.free()
@@ -459,7 +516,12 @@ static func _test_airborne_cause() -> bool:
 	# Enter AIRBORNE again with KNOCK_UP
 	machine.try_enter(MobaState.AIRBORNE, 1.0, MobaState.AirborneCause.KNOCK_UP)
 	if machine.get_airborne_cause() != MobaState.AirborneCause.KNOCK_UP:
-		printerr("FAIL: airborne cause should be KNOCK_UP after new entry, got %d" % machine.get_airborne_cause())
+		printerr(
+			(
+				"FAIL: airborne cause should be KNOCK_UP after new entry, got %d"
+				% machine.get_airborne_cause()
+			)
+		)
 		ok = false
 
 	machine.free()
@@ -493,8 +555,12 @@ static func _test_malformed_table_detection() -> bool:
 	var machine_a = MobaStateMachine.new()
 	machine_a._ready()
 	var bad_state_name_table = {
-		"NOT_A_REAL_STATE": {
-			"move": "yes", "basic_attack": "yes", "ability": "yes", "jump": "yes",
+		"NOT_A_REAL_STATE":
+		{
+			"move": "yes",
+			"basic_attack": "yes",
+			"ability": "yes",
+			"jump": "yes",
 			"interruptible_by_hard_cc": "yes",
 		},
 	}
@@ -555,10 +621,11 @@ static func _test_dead_does_not_expire() -> bool:
 	var ok = true
 
 	var signal_log = {"count": 0, "from": -1, "to": -1}
-	machine.state_changed.connect(func(from, to):
-		signal_log["count"] += 1
-		signal_log["from"] = from
-		signal_log["to"] = to
+	machine.state_changed.connect(
+		func(from, to):
+			signal_log["count"] += 1
+			signal_log["from"] = from
+			signal_log["to"] = to
 	)
 
 	var success = machine.try_enter(MobaState.DEAD, 2.0)
@@ -572,15 +639,23 @@ static func _test_dead_does_not_expire() -> bool:
 
 	machine.tick(2.0)
 	if machine.current_state != MobaState.DEAD:
-		printerr("FAIL: DEAD must not expire via tick(), got %s" % MobaState.state_to_string(machine.current_state))
+		printerr(
+			(
+				"FAIL: DEAD must not expire via tick(), got %s"
+				% MobaState.state_to_string(machine.current_state)
+			)
+		)
 		ok = false
 
 	# Only the entry into DEAD should have emitted; tick() must not emit
 	# a spurious expiry transition out of DEAD.
 	if signal_log["count"] != 1 or signal_log["to"] != MobaState.DEAD:
-		printerr("FAIL: tick() must not emit state_changed after DEAD entry, count=%d to=%d" % [
-			signal_log["count"], signal_log["to"]
-		])
+		printerr(
+			(
+				"FAIL: tick() must not emit state_changed after DEAD entry, count=%d to=%d"
+				% [signal_log["count"], signal_log["to"]]
+			)
+		)
 		ok = false
 
 	machine.free()

@@ -46,12 +46,12 @@ func start(ability_id: StringName, base_cooldown: float, haste: float, max_charg
 		state.timer_duration = 0.0
 		state.timer_remaining = 0.0
 		_ability_states[ability_id] = state
-	
+
 	var state: _AbilityState = _ability_states[ability_id]
-	
+
 	# Decrement a charge
 	state.available_charges = maxi(0, state.available_charges - 1)
-	
+
 	# Start the timer only if none is currently running
 	if state.timer_remaining <= 0.0:
 		state.timer_duration = MobaFormulas.effective_cooldown(base_cooldown, haste)
@@ -71,7 +71,7 @@ func start(ability_id: StringName, base_cooldown: float, haste: float, max_charg
 func remaining(ability_id: StringName) -> float:
 	if not ability_id in _ability_states:
 		return 0.0
-	
+
 	var state: _AbilityState = _ability_states[ability_id]
 	return maxf(0.0, state.timer_remaining)
 
@@ -89,7 +89,7 @@ func remaining(ability_id: StringName) -> float:
 func charges(ability_id: StringName) -> int:
 	if not ability_id in _ability_states:
 		return 0
-	
+
 	var state: _AbilityState = _ability_states[ability_id]
 	return state.available_charges
 
@@ -107,7 +107,7 @@ func charges(ability_id: StringName) -> int:
 func is_ready(ability_id: StringName) -> bool:
 	if not ability_id in _ability_states:
 		return true
-	
+
 	var state: _AbilityState = _ability_states[ability_id]
 	return state.available_charges > 0 and state.timer_remaining <= 0.0
 
@@ -125,12 +125,12 @@ func tick(delta: float) -> void:
 	for state: _AbilityState in _ability_states.values():
 		if state.timer_remaining > 0.0:
 			state.timer_remaining -= delta
-			
+
 			# Handle timer expiry and charge regeneration with overshoot
 			while state.timer_remaining <= 0.0 and state.available_charges < state.max_charges:
 				state.available_charges += 1
 				state.timer_remaining += state.timer_duration
-			
+
 			# Stop the timer when max charges is reached
 			if state.available_charges >= state.max_charges:
 				state.timer_remaining = 0.0

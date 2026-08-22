@@ -29,8 +29,10 @@ enum Stacking {
 ## Unique snake_case identifier. Validated against ^[a-z][a-z0-9_]*$.
 @export var id: String = "":
 	set(value):
-		assert(value == "" or _is_valid_id(value),
-				"MobaPassive.id must match ^[a-z][a-z0-9_]*$: " + value)
+		assert(
+			value == "" or _is_valid_id(value),
+			"MobaPassive.id must match ^[a-z][a-z0-9_]*$: " + value
+		)
 		id = value
 
 @export var name: String = ""
@@ -52,6 +54,7 @@ enum Stacking {
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 static func _is_valid_id(value: String) -> bool:
 	if value.is_empty():
