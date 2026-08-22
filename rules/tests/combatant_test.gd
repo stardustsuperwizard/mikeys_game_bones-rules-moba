@@ -8,6 +8,7 @@ class_name CombatantTest
 
 const MobaStatBlock = preload("res://rules/core/moba_stat_block.gd")
 const MobaDamage = preload("res://rules/core/moba_damage.gd")
+const _BASELINE_STAT_BLOCK = preload("res://rules/data/stat_blocks/baseline.tres")
 
 
 ## Helper function to compare floats with tolerance
@@ -76,7 +77,7 @@ static func _test_stat_defaults() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant = MobaCombatant.new()
-	combatant.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant.stat_block = _BASELINE_STAT_BLOCK
 
 	# Manually initialize without parent (no _ready call)
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
@@ -112,7 +113,7 @@ static func _test_damage_reduces_health() -> Array[String]:
 	MobaRules.seed_crit_rng(42)  # Seed for deterministic results
 
 	var combatant = MobaCombatant.new()
-	combatant.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._runtime_stat_block.crit_chance = 0.0  # Disable crit for predictable test
@@ -142,7 +143,7 @@ static func _test_healing_capped_at_maximum() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant = MobaCombatant.new()
-	combatant.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 
@@ -171,7 +172,7 @@ static func _test_death_fires_once() -> Array[String]:
 	MobaRules.seed_crit_rng(42)  # Seed for deterministic results
 
 	var combatant = MobaCombatant.new()
-	combatant.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._runtime_stat_block.crit_chance = 0.0  # Disable crit for predictable test
@@ -207,15 +208,13 @@ static func _test_stat_block_duplicated() -> Array[String]:
 	var violations: Array[String] = []
 
 	# Create two combatants with the same stat block resource
-	var baseline = preload("res://rules/data/stat_blocks/baseline.tres")
-
 	var combatant1 = MobaCombatant.new()
-	combatant1.stat_block = baseline
+	combatant1.stat_block = _BASELINE_STAT_BLOCK
 	combatant1._runtime_stat_block = combatant1.stat_block.duplicate()
 	combatant1._current_health = combatant1._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 
 	var combatant2 = MobaCombatant.new()
-	combatant2.stat_block = baseline
+	combatant2.stat_block = _BASELINE_STAT_BLOCK
 	combatant2._runtime_stat_block = combatant2.stat_block.duplicate()
 	combatant2._current_health = combatant2._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 
@@ -223,7 +222,7 @@ static func _test_stat_block_duplicated() -> Array[String]:
 	combatant1._runtime_stat_block.armor = 999
 
 	# Check that the other combatant and the baseline resource are unaffected
-	var baseline_armor = baseline.get_stat_value(MobaStatBlock.ARMOR)
+	var baseline_armor = _BASELINE_STAT_BLOCK.get_stat_value(MobaStatBlock.ARMOR)
 	var combatant2_armor = combatant2._runtime_stat_block.get_stat_value(MobaStatBlock.ARMOR)
 
 	if combatant2_armor == 999:
@@ -242,7 +241,7 @@ static func _test_physical_armor_mitigation() -> Array[String]:
 	MobaRules.seed_crit_rng(42)  # Seed for deterministic results
 
 	var combatant = MobaCombatant.new()
-	combatant.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._runtime_stat_block.armor = 50  # Override armor
@@ -274,7 +273,7 @@ static func _test_damage_type_routing() -> Array[String]:
 	MobaRules.seed_crit_rng(42)  # Seed for deterministic results
 
 	var combatant1 = MobaCombatant.new()
-	combatant1.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant1.stat_block = _BASELINE_STAT_BLOCK
 	combatant1._runtime_stat_block = combatant1.stat_block.duplicate()
 	combatant1._current_health = combatant1._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant1._runtime_stat_block.armor = 50
@@ -282,7 +281,7 @@ static func _test_damage_type_routing() -> Array[String]:
 	combatant1._runtime_stat_block.crit_chance = 0.0
 
 	var combatant2 = MobaCombatant.new()
-	combatant2.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant2.stat_block = _BASELINE_STAT_BLOCK
 	combatant2._runtime_stat_block = combatant2.stat_block.duplicate()
 	combatant2._current_health = combatant2._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant2._runtime_stat_block.armor = 0
@@ -332,7 +331,7 @@ static func _test_true_damage_ignores_defenses() -> Array[String]:
 	MobaRules.seed_crit_rng(42)  # Seed for deterministic results
 
 	var combatant = MobaCombatant.new()
-	combatant.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._runtime_stat_block.armor = 100
@@ -365,7 +364,7 @@ static func _test_crit_before_mitigation() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant = MobaCombatant.new()
-	combatant.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._runtime_stat_block.armor = 30
@@ -401,7 +400,7 @@ static func _test_seeded_rng() -> Array[String]:
 	# First run with seed 123
 	MobaRules.seed_crit_rng(123)
 	var combatant1 = MobaCombatant.new()
-	combatant1.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant1.stat_block = _BASELINE_STAT_BLOCK
 	combatant1._runtime_stat_block = combatant1.stat_block.duplicate()
 	combatant1._current_health = combatant1._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant1._runtime_stat_block.crit_chance = 0.5
@@ -414,7 +413,7 @@ static func _test_seeded_rng() -> Array[String]:
 	# Second run with same seed
 	MobaRules.seed_crit_rng(123)
 	var combatant2 = MobaCombatant.new()
-	combatant2.stat_block = preload("res://rules/data/stat_blocks/baseline.tres")
+	combatant2.stat_block = _BASELINE_STAT_BLOCK
 	combatant2._runtime_stat_block = combatant2.stat_block.duplicate()
 	combatant2._current_health = combatant2._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant2._runtime_stat_block.crit_chance = 0.5

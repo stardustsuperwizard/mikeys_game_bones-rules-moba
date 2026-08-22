@@ -35,6 +35,6 @@ static func attack(attacker: Actor, target: Actor) -> ActionResult:
 	return ActionResult.new(true)
 
 
-static func open(actor: Actor, door: Door) -> ActionResult:
+static func open(_actor: Actor, door: Door) -> ActionResult:
 	door.set_open(true)
 	return ActionResult.new(true)

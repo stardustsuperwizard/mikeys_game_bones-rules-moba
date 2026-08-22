@@ -16,6 +16,17 @@
 class_name PlayerController3D
 extends Controller
 
+# A surface at least this upright counts as ground the player can stand on;
+# anything steeper is a wall, which is walked up to rather than onto.
+const WALKABLE_NORMAL_Y := 0.7
+
+# How head-on a wall contact must be to count as "blocked" rather than
+# "brushing past": the dot of the wall normal with the direction of travel,
+# so this is roughly 60 degrees either side of straight into the surface.
+# A glancing contact keeps walking and slides along instead, which is what
+# lets a click far along a wall you are already leaning on still get there.
+const WALL_BLOCK_DOT := -0.5
+
 ## How close the player must get to a clicked ground point to have arrived.
 @export var arrival_distance: float = 0.4
 
@@ -43,17 +54,6 @@ extends Controller
 
 ## Distance, in meters, that counts as real progress toward an order.
 @export var stall_progress: float = 0.05
-
-# A surface at least this upright counts as ground the player can stand on;
-# anything steeper is a wall, which is walked up to rather than onto.
-const WALKABLE_NORMAL_Y := 0.7
-
-# How head-on a wall contact must be to count as "blocked" rather than
-# "brushing past": the dot of the wall normal with the direction of travel,
-# so this is roughly 60 degrees either side of straight into the surface.
-# A glancing contact keeps walking and slides along instead, which is what
-# lets a click far along a wall you are already leaning on still get there.
-const WALL_BLOCK_DOT := -0.5
 
 var _jump_requested := false
 

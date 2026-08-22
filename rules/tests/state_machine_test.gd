@@ -328,7 +328,10 @@ static func _test_duration_tracking() -> bool:
 	):
 		printerr(
 			(
-				"FAIL: state_changed should emit on duration expiry (ABILITY_CAST -> IDLE), got count=%d from=%d to=%d"
+				(
+					"FAIL: state_changed should emit on duration expiry (ABILITY_CAST -> IDLE),"
+					+ " got count=%d from=%d to=%d"
+				)
 				% [signal_log["count"], signal_log["from"], signal_log["to"]]
 			)
 		)
@@ -442,7 +445,10 @@ static func _test_zero_duration_not_entered() -> bool:
 	success = machine.try_enter(MobaState.CROWD_CONTROLLED, 0.0)
 	if not success or machine.current_state != MobaState.CROWD_CONTROLLED:
 		printerr(
-			"FAIL: try_enter(CROWD_CONTROLLED, 0.0) should succeed - CROWD_CONTROLLED may be entered durationless"
+			(
+				"FAIL: try_enter(CROWD_CONTROLLED, 0.0) should succeed -"
+				+ " CROWD_CONTROLLED may be entered durationless"
+			)
 		)
 		ok = false
 

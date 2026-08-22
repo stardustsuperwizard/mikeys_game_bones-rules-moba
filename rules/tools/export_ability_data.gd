@@ -27,7 +27,7 @@ var exit_code := 0
 var has_run := false
 
 
-func _process(delta: float) -> bool:
+func _process(_delta: float) -> bool:
 	if not has_run:
 		has_run = true
 		_run_export()
@@ -244,44 +244,63 @@ func _write_canonical_json(file_path: String, data: Variant) -> bool:
 
 
 func _to_canonical_json(data: Variant, indent_level: int = 0) -> String:
+	var result: String
+
+	match typeof(data):
+		TYPE_NIL:
+			result = "null"
+		TYPE_BOOL:
+			result = "true" if data else "false"
+		TYPE_INT:
+			result = str(data)
+		TYPE_FLOAT:
+			# Format floats consistently: avoid scientific notation for small numbers
+			# Round to reasonable precision to avoid floating point artifacts
+			result = "%.17g" % data
+		TYPE_STRING:
+			result = JSON.stringify(data)
+		TYPE_ARRAY:
+			result = _array_to_canonical_json(data, indent_level)
+		TYPE_DICTIONARY:
+			result = _dict_to_canonical_json(data, indent_level)
+		_:
+			# Fallback to JSON.stringify for unknown types
+			result = JSON.stringify(data)
+
+	return result
+
+
+func _array_to_canonical_json(data: Array, indent_level: int) -> String:
+	if data.is_empty():
+		return "[]"
+
 	var indent = "\t".repeat(indent_level)
 	var next_indent = "\t".repeat(indent_level + 1)
+	var items: Array[String] = []
 
-	if data == null:
-		return "null"
-	elif data is bool:
-		return "true" if data else "false"
-	elif data is int:
-		return str(data)
-	elif data is float:
-		# Format floats consistently: avoid scientific notation for small numbers
-		# Round to reasonable precision to avoid floating point artifacts
-		var formatted = "%.17g" % data
-		return formatted
-	elif data is String:
-		return JSON.stringify(data)
-	elif data is Array:
-		if data.is_empty():
-			return "[]"
-		var items: Array[String] = []
-		for item in data:
-			items.append(next_indent + _to_canonical_json(item, indent_level + 1))
-		return "[\n" + "\n,".join(items) + "\n" + indent + "]"
-	elif data is Dictionary:
-		if data.is_empty():
-			return "{}"
-		# Sort keys for deterministic output
-		var keys = data.keys()
-		keys.sort()
-		var items: Array[String] = []
-		for key in keys:
-			var value = data[key]
-			var value_json = _to_canonical_json(value, indent_level + 1)
-			items.append(next_indent + JSON.stringify(key) + ": " + value_json)
-		return "{\n" + ",\n".join(items) + "\n" + indent + "}"
-	else:
-		# Fallback to JSON.stringify for unknown types
-		return JSON.stringify(data)
+	for item in data:
+		items.append(next_indent + _to_canonical_json(item, indent_level + 1))
+
+	return "[\n" + "\n,".join(items) + "\n" + indent + "]"
+
+
+func _dict_to_canonical_json(data: Dictionary, indent_level: int) -> String:
+	if data.is_empty():
+		return "{}"
+
+	var indent = "\t".repeat(indent_level)
+	var next_indent = "\t".repeat(indent_level + 1)
+	# Sort keys for deterministic output
+	var keys = data.keys()
+	keys.sort()
+	var items: Array[String] = []
+
+	for key in keys:
+		var value = data[key]
+		var value_json = _to_canonical_json(value, indent_level + 1)
+		items.append(next_indent + JSON.stringify(key) + ": " + value_json)
+
+	return "{\n" + ",\n".join(items) + "\n" + indent + "}"
 
 
 func _quit() -> void:

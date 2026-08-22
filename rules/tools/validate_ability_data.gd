@@ -4,9 +4,8 @@
 ## structural @export type/range system. Accumulates and reports ALL
 ## violations found rather than stopping at the first.
 
-extends RefCounted
-
 class_name ValidateAbilityData
+extends RefCounted
 
 # Preload resource classes
 const MobaAbility = preload("res://rules/abilities/moba_ability.gd")

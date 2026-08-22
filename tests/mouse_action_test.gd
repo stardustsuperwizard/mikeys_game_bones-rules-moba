@@ -118,7 +118,10 @@ func _run() -> void:
 	elif frames_to_stop > 5:
 		_fail(
 			(
-				"wall click: order held for %d frames after contact -- stopped by the stall guard, not by the wall"
+				(
+					"wall click: order held for %d frames after contact --"
+					+ " stopped by the stall guard, not by the wall"
+				)
 				% frames_to_stop
 			)
 		)

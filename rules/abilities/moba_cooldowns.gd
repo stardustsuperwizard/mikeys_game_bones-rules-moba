@@ -1,6 +1,7 @@
 ## Per-ability cooldown and charge ledger.
 ##
-## Tracks per-ability cooldown remaining and available charges, advancing on an explicit tick(delta).
+## Tracks per-ability cooldown remaining and available charges, advancing on an
+## explicit tick(delta).
 ## Each ability maintains one timer that counts down the remaining cooldown. When the timer
 ## expires and charges are below max_charges, one charge is granted and the timer restarts.
 ##
