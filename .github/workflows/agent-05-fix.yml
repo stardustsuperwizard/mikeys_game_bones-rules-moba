@@ -1,4 +1,4 @@
-name: Fix Task
+name: Agent - PR Fix
 
 # Applies a bounded correction to a pull request in response to its most
 # recent `VERDICT: FIX` review comment, on the same branch.
@@ -13,7 +13,13 @@ name: Fix Task
 # request: checking out its branch, pushing the correction, and posting the
 # result as a comment on it.
 #
-# Unlike `agent-03-review.yml`, this workflow writes to the repository: it
+# No AWNN number, unlike Plan/Execute/Rollup: those three are the flow a
+# human walks through step by step (01 -> 02 -> 03), coupled by that
+# numbering on purpose. Fix (like Review) is a reactive support agent
+# instead -- it runs on demand (the `agent:fix` label) or as part of
+# Execute's own pre-PR pass, not as a sequential step in that flow.
+#
+# Unlike `agent-04-review.yml`, this workflow writes to the repository: it
 # edits files, runs validation, and pushes a commit. That is a bigger blast
 # radius than posting a comment, so — deliberately, unlike the reviewer's
 # automatic trigger on `ready_for_review` — it never fires on its own just
@@ -51,7 +57,7 @@ concurrency:
 
 jobs:
   fix:
-    name: Fix Task
+    name: Agent - PR Fix
     runs-on: ubuntu-latest
 
     if: >
@@ -69,7 +75,7 @@ jobs:
       # with nobody checking it before it goes back through review, so a
       # cheap model that "fixes" a finding without preserving the invariant
       # behind it is worse than no automated fixer -- the same reasoning
-      # `agent-03-review.yml` applies to the reviewer. Unlike that job this
+      # `agent-04-review.yml` applies to the reviewer. Unlike that job this
       # one is not blind analysis, it works from a bounded worklist, so it
       # does not need the top tier by default; it must still never fall back
       # to a cheap tier automatically. Preference list, per-identity
@@ -144,7 +150,7 @@ jobs:
 
           case "$VERDICT" in
             none)
-              MSG="No \`<!-- agent-review-verdict -->\` comment was found on this pull request. Run the reviewer first (the \`agent:review\` label, or \`agent-03-review.yml\`) before requesting a fix."
+              MSG="No \`<!-- agent-review-verdict -->\` comment was found on this pull request. Run the reviewer first (the \`agent:review\` label, or \`agent-04-review.yml\`) before requesting a fix."
               ;;
             unrecognized)
               MSG="The most recent review comment did not contain a recognisable \`VERDICT:\` line. Nothing was fixed."

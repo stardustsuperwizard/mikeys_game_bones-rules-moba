@@ -4,7 +4,7 @@ name: GDScript Lint
 # files a pull request actually changes. Deliberately diff-scoped, not
 # whole-repo -- see lint-gdscript/action.yml for why.
 #
-# This is the catch-all: agent-03-review.yml folds the same check into its
+# This is the catch-all: agent-04-review.yml folds the same check into its
 # review comment for PRs it reviews, and agent-02-execute.yml auto-fixes
 # formatting before it ever opens a pull request -- but a human-authored
 # PR, or a cloud-agent PR nobody ran `agent:review` on, would otherwise get

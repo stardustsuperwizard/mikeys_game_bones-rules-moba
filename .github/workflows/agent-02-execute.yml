@@ -1,4 +1,4 @@
-name: Execute Task
+name: Agent - AW02 Execute Task
 
 # Implements a GitHub Implementation Task Issue end to end using the
 # Copilot CLI, applies gdformat to whatever GDScript it touched, reviews
@@ -21,18 +21,18 @@ name: Execute Task
 #     model or watch the session live.
 #
 #   - The Copilot CLI run here is fully scriptable, the same way
-#     `agent-01-planner.yml`, `agent-03-review.yml`, and `agent-05-fix.yml`
+#     `agent-01-planner.yml`, `agent-04-review.yml`, and `agent-05-fix.yml`
 #     already script it. Claude Haiku 4.5 is a supported CLI model (see
 #     https://docs.github.com/en/copilot/reference/ai-models/supported-models)
 #     even though it is not offered to the cloud agent, which is why this
 #     workflow can default to it for implementation: a bounded,
 #     contract-driven task is a reasonable fit for the cheaper tier, in a
 #     way blind review or planning is not. The pre-PR review below still
-#     gets the strong tier, same as `agent-03-review.yml` -- the fact that
+#     gets the strong tier, same as `agent-04-review.yml` -- the fact that
 #     it happens before the pull request exists doesn't make it a cheaper
 #     judgment call.
 #
-# The self-review step and `agent-03-review.yml` share three composite
+# The self-review step and `agent-04-review.yml` share three composite
 # actions (`build-review-request`, `run-copilot-session`,
 # `extract-review-verdict`) so both apply the exact same completeness
 # rule and the exact same reviewer contract -- the only difference is
@@ -57,7 +57,7 @@ name: Execute Task
 # review session itself fails (budget, availability, malformed output), or
 # if a FIX verdict's correction doesn't land cleanly, this workflow still
 # opens the pull request rather than discarding a working implementation --
-# it just leaves the review for a human or `agent-03-review.yml` to do
+# it just leaves the review for a human or `agent-04-review.yml` to do
 # afterward instead. See "Evaluate Pre-PR Review" and "Evaluate Pre-PR Fix"
 # below for exactly what "doesn't land cleanly" means.
 
@@ -85,7 +85,7 @@ concurrency:
 
 jobs:
   execute:
-    name: Execute Task
+    name: Agent - AW02 Execute Task
     runs-on: ubuntu-latest
 
     if: >
@@ -111,7 +111,7 @@ jobs:
         || 'claude-haiku-4.5,claude-sonnet-5' }}
       EXECUTOR_MAX_AI_CREDITS: "150"
 
-      # Same variables and defaults as agent-03-review.yml / agent-05-fix.yml
+      # Same variables and defaults as agent-04-review.yml / agent-05-fix.yml
       # -- deliberately, so tuning one repository variable affects the
       # standalone workflow and this pre-PR pass identically.
       REVIEWER_MODELS: >-
@@ -627,7 +627,7 @@ jobs:
       # completion report -- the same shape a human-run or cloud-agent
       # session's body would have. The review verdict is NOT written here;
       # it goes to a comment in "Publish Pre-PR Review" below, the same
-      # place `agent-03-review.yml` posts it. Keeping `## Review` blank
+      # place `agent-04-review.yml` posts it. Keeping `## Review` blank
       # here (never filled by this step) matches every other PR in this
       # repo: the verdict lives in the comment feed, not the body.
       - name: Push Branch and Open Pull Request
@@ -743,7 +743,7 @@ jobs:
       # This is deliberately the *only* place the pre-PR review's findings
       # ever reach GitHub as text. Whether that text is a real
       # `<!-- agent-review-verdict -->` comment (the exact format and
-      # marker `agent-03-review.yml` posts, so `agent-05-fix.yml` and a
+      # marker `agent-04-review.yml` posts, so `agent-05-fix.yml` and a
       # human both recognise it identically) depends on whether it's still
       # accurate for the code as pushed:
       #
@@ -756,7 +756,7 @@ jobs:
       #     wasted repeat of one that already happened.
       #   - PASS / unfixed-FIX / PLANNING FAILURE / DESIGN AMBIGUITY: this
       #     verdict is still exactly what the current code would get from
-      #     `agent-03-review.yml`, so it's posted as the real thing, label
+      #     `agent-04-review.yml`, so it's posted as the real thing, label
       #     included. Re-adding `agent:review` here would be paying for a
       #     second opinion on unchanged code -- the label already visible
       #     on the pull request is the signal that already happened.

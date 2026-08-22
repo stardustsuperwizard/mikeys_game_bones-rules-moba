@@ -1,4 +1,4 @@
-name: Roll Up Parent Status
+name: Agent - AW03 Roll Up Parent Status
 
 # Closing an Implementation Task does two things:
 #
@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   rollup:
-    name: Roll Up Parent Status
+    name: Agent - AW03 Roll Up Parent Status
     runs-on: ubuntu-latest
 
     env:

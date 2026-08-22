@@ -168,7 +168,7 @@ runs:
 
         # Same file the local `fixer` subagent's contract mirrors -- kept
         # in sync by hand, the same way 03-reviewer.agent.md is shared
-        # between agent-03-review.yml and the interactive VS Code path.
+        # between agent-04-review.yml and the interactive VS Code path.
         role = root / ".github/agents/05-fixer.agent.md"
 
         if role.exists():

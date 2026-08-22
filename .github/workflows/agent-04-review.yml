@@ -1,7 +1,13 @@
-name: Review Task
+name: Agent - PR Review
 
 # Reviews a Copilot implementation pull request against the Implementation
 # Task Issue that authorizes it, and emits a machine-readable verdict.
+#
+# No AWNN number, unlike Plan/Execute/Rollup: those three are the flow a
+# human walks through step by step (01 -> 02 -> 03), coupled by that
+# numbering on purpose. Review (like Fix) is a reactive support agent
+# instead -- it runs on demand (the `agent:review` label) or as part of
+# Execute's own pre-PR pass, not as a sequential step in that flow.
 #
 # The actual work happens in three composite actions shared with
 # agent-02-execute.yml's pre-PR review gate and agent-05-fix.yml:
@@ -50,7 +56,7 @@ concurrency:
 
 jobs:
   review:
-    name: Review Task
+    name: Agent - PR Review
     runs-on: ubuntu-latest
 
     # Automatic on a Copilot branch becoming ready; manual anywhere else via
@@ -161,7 +167,7 @@ jobs:
             echo "---"
             echo ""
             echo "Reviewed by \`.github/agents/03-reviewer.agent.md\` via" \
-                 "\`agent-03-review.yml\` on \`${{ steps.session.outputs.resolved-model }}\`."
+                 "\`agent-04-review.yml\` on \`${{ steps.session.outputs.resolved-model }}\`."
             echo "Re-run by adding the \`agent:review\` label."
           } > review-comment.md
 
@@ -263,7 +269,7 @@ jobs:
           NEXT_STEPS = {
               "budget_exhausted": (
                   "Raise `REVIEWER_MAX_AI_CREDITS` in"
-                  " `.github/workflows/agent-03-review.yml` (currently"
+                  " `.github/workflows/agent-04-review.yml` (currently"
                   " `{credit_limit}`; 30 is the CLI's floor, not a ceiling),"
                   " or split this pull request into smaller ones. Then remove"
                   " and re-add `agent:review`. Re-running unchanged will stop"
@@ -271,7 +277,7 @@ jobs:
               ),
               "truncated_review": (
                   "Raise `REVIEWER_MAX_AI_CREDITS` in"
-                  " `.github/workflows/agent-03-review.yml` (currently"
+                  " `.github/workflows/agent-04-review.yml` (currently"
                   " `{credit_limit}`), or split this pull request, then"
                   " re-add `agent:review`. **Do not read the verdict above as"
                   " a result** -- the reviewer never finished the analysis"

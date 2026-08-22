@@ -24,7 +24,7 @@ gh pr checkout <pr-number> --repo stardustsuperwizard/sword-and-planet
 ```
 
 The most recent comment containing `<!-- agent-review-verdict -->` (posted
-by either `agent-03-review.yml` or the local `reviewer` subagent) is the
+by either `agent-04-review.yml` or the local `reviewer` subagent) is the
 correction contract. If several exist, the latest one wins.
 
 Also fetch the Implementation Task Issue this PR closes

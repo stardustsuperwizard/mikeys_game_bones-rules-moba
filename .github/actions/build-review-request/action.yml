@@ -4,7 +4,7 @@ description: >-
   file. This is the "pull all the PR information" half of the review --
   purely deterministic (gh/jq/python, no model call) -- kept separate from
   actually running the review so the same gathering logic works whether a
-  pull request already exists (agent-03-review.yml) or the diff is still
+  pull request already exists (agent-04-review.yml) or the diff is still
   local and uncommitted to GitHub (agent-02-execute.yml, reviewing its own
   work before opening a pull request).
 

@@ -17,7 +17,7 @@ nothing more.
 
 > This file is loaded as text into the prompt built by
 > `agent-05-fix.yml`'s "Build Fixer Request" step, the same way
-> `03-reviewer.agent.md` is loaded by `agent-03-review.yml`. It is also
+> `03-reviewer.agent.md` is loaded by `agent-04-review.yml`. It is also
 > usable as a local VS Code agent profile. Either way, the contract below is
 > what matters — keep it in sync with `.claude/agents/fixer.md`, which
 > carries the same contract adapted for a session that runs its own `gh`
