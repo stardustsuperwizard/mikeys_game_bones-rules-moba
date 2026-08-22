@@ -8,6 +8,9 @@ class_name MobaCombatant
 extends Node
 
 signal health_changed(current: float, maximum: float)
+## Emitted when damage is resolved. Carries both raw (pre-crit, pre-mitigation)
+## and final (post-mitigation) amounts, plus metadata about the damage event.
+signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: bool, source)
 
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
 
@@ -55,11 +58,71 @@ func _get_modified_stat(stat: StringName) -> float:
 	return _runtime_stat_block.get_stat_value(stat)
 
 
-## Apply damage to the combatant.
-## Reduces current health and triggers death handling if health reaches zero.
-func apply_damage(amount: float) -> void:
-	_current_health -= amount
+## Apply damage to the combatant via a MobaDamage packet.
+##
+## Resolution order (pinned per Architecture Constraints):
+## 1. Raw amount
+## 2. Crit roll and multiplier (if can_crit)
+## 3. Damage-type routing (PHYSICAL/MAGICAL/TRUE)
+## 4. Penetration against target's defense
+## 5. Mitigation multiplier
+## 6. Final amount
+## 7. Shield seam (documented empty hook)
+##
+## Emits damage_resolved once per packet.
+func apply_damage(damage: MobaDamage) -> void:
+	var raw: float = damage.amount
+	var final: float = raw
+	var was_crit: bool = false
+	
+	# Step 2: Crit roll and multiplier
+	if damage.can_crit:
+		var crit_chance: float = get_stat(MobaStatBlock.CRIT_CHANCE)
+		var crit_damage: float = get_stat(MobaStatBlock.CRIT_DAMAGE)
+		var crit_roll: float = MobaRules.roll_crit()
+		
+		if MobaFormulas.is_critical(crit_roll, crit_chance):
+			was_crit = true
+			final = MobaFormulas.apply_crit(raw, crit_damage)
+		else:
+			final = raw
+	else:
+		final = raw
+	
+	# Step 3-6: Damage-type routing and mitigation
+	match damage.damage_type:
+		MobaDamage.DamageType.PHYSICAL:
+			var armor: float = get_stat(MobaStatBlock.ARMOR)
+			final = MobaFormulas.physical_damage(final, armor, damage.flat_pen, damage.percent_pen)
+		
+		MobaDamage.DamageType.MAGICAL:
+			var resistance: float = get_stat(MobaStatBlock.MAGIC_RESISTANCE)
+			final = MobaFormulas.magical_damage(final, resistance, damage.flat_pen, damage.percent_pen)
+		
+		MobaDamage.DamageType.TRUE:
+			# TRUE damage ignores all defenses and penetration
+			final = MobaFormulas.true_damage(final)
+	
+	# Step 7: Shield seam (documented empty hook per §16, Batch 2 sustain issue)
+	# This private hook receives the final amount and returns it unchanged.
+	# It exists as a placeholder for future shield implementations.
+	final = _apply_shield_seam(final)
+	
+	# Reduce health
+	_current_health -= final
 	_update_health()
+	
+	# Emit damage_resolved
+	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source)
+
+
+## Private shield seam: documented empty hook per §16.
+## This exists as a placeholder for Batch 2 sustain systems (shields, lifesteal).
+## Returns the input unchanged.
+func _apply_shield_seam(amount: float) -> float:
+	# TODO §16: Shield mitigation hook for Batch 2
+	# return amount adjusted by any active shields
+	return amount
 
 
 ## Apply healing to the combatant.
@@ -91,3 +154,4 @@ func _update_health() -> void:
 		_has_died = true
 		if parent_actor != null:
 			parent_actor.die()
+

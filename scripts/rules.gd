@@ -14,8 +14,19 @@ static func attack(attacker: Actor, target: Actor) -> ActionResult:
 	
 	# If both actors have a Combatant child, delegate to the rules module
 	if attacker_combatant != null and target_combatant != null:
-		var damage := attacker_combatant.get_stat(MobaStatBlock.ATTACK_DAMAGE)
-		target_combatant.apply_damage(damage)
+		var attack_damage = attacker_combatant.get_stat(MobaStatBlock.ATTACK_DAMAGE)
+		var armor_pen_flat = attacker_combatant.get_stat(MobaStatBlock.ARMOR_PEN_FLAT)
+		var armor_pen_percent = attacker_combatant.get_stat(MobaStatBlock.ARMOR_PEN_PERCENT)
+		
+		var damage_packet := MobaDamage.new(
+			attack_damage,
+			MobaDamage.DamageType.PHYSICAL,
+			attacker,
+			true,
+			armor_pen_flat,
+			armor_pen_percent
+		)
+		target_combatant.apply_damage(damage_packet)
 	else:
 		# Fallback to the existing behavior
 		target.take_damage(BASE_ATTACK_DAMAGE)

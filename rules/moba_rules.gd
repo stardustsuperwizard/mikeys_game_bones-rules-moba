@@ -14,3 +14,19 @@ const DATA_ROOT := "res://rules/data/"
 
 ## Root path for Python-generated JSON exports (gitignored at runtime).
 const GENERATED_ROOT := "res://rules/data/generated/"
+
+## Static instance of a seedable RandomNumberGenerator used for all crit rolls.
+## Deterministic replay (§34) and conformance suite testing require that crit rolls
+## go through this seeded instance, never the global randf().
+static var _crit_rng := RandomNumberGenerator.new()
+
+
+## Seed the crit RNG for deterministic replay.
+static func seed_crit_rng(seed: int) -> void:
+	_crit_rng.seed = seed
+
+
+## Draw a random roll from the crit RNG.
+## Returns a value in [0.0, 1.0).
+static func roll_crit() -> float:
+	return _crit_rng.randf()
