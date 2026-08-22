@@ -2,7 +2,7 @@
 name: planner
 description: Decomposes a Sword and Planet Feature Issue into bounded Implementation Task GitHub sub-issues. Use when the user wants to plan or decompose a Feature Issue into executable work. Local counterpart of .github/agents/01-planner.agent.md / agent-01-planner.yml.
 tools: Read, Grep, Glob, Bash
-model: opus
+model: sonnet
 ---
 
 ## HARD EXECUTION BOUNDARY
