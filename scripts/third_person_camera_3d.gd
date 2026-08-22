@@ -60,7 +60,8 @@ var _target: Node3D = null
 var _yaw_degrees: float = 0.0
 var _pitch_degrees: float  # seeded from default_pitch_degrees by recenter() in _ready
 var _target_distance: float  # both seeded from default_distance by
-var _spring_length: float    # recenter() in _ready
+var _spring_length: float  # recenter() in _ready
+
 
 func _ready() -> void:
 	if target_path != NodePath(""):
@@ -68,13 +69,16 @@ func _ready() -> void:
 	recenter()
 	_update_transform(0.0)
 
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("camera_recenter"):
 		recenter()
 		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_RIGHT:
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if event.pressed else Input.MOUSE_MODE_VISIBLE
+			Input.mouse_mode = (
+				Input.MOUSE_MODE_CAPTURED if event.pressed else Input.MOUSE_MODE_VISIBLE
+			)
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_target_distance = max(min_distance, _target_distance - zoom_step)
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
@@ -86,6 +90,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			min_pitch_degrees,
 			max_pitch_degrees
 		)
+
 
 # Snaps the whole view back to its default framing: behind the target, at
 # the default pitch and zoom. Also doubles as the camera's initial setup in
@@ -101,8 +106,10 @@ func recenter() -> void:
 	_target_distance = clamp(default_distance, min_distance, max_distance)
 	_spring_length = _target_distance
 
+
 func _process(delta: float) -> void:
 	_update_transform(delta)
+
 
 func _update_transform(delta: float) -> void:
 	if _target == null:
@@ -113,7 +120,9 @@ func _update_transform(delta: float) -> void:
 	if auto_realign and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		var target_yaw := rad_to_deg(_target.global_rotation.y)
 		var yaw_diff := wrapf(target_yaw - _yaw_degrees, -180.0, 180.0)
-		_yaw_degrees += clamp(yaw_diff, -realign_speed_degrees * delta, realign_speed_degrees * delta)
+		_yaw_degrees += clamp(
+			yaw_diff, -realign_speed_degrees * delta, realign_speed_degrees * delta
+		)
 
 	var yaw_rad := deg_to_rad(_yaw_degrees)
 	var pitch_rad := deg_to_rad(_pitch_degrees)
@@ -122,9 +131,7 @@ func _update_transform(delta: float) -> void:
 	# target once yaw/pitch are applied (yaw = 0 matches the target's own
 	# un-rotated facing, since the target's forward is -Z).
 	var direction := Vector3(
-		sin(yaw_rad) * cos(pitch_rad),
-		sin(pitch_rad),
-		cos(yaw_rad) * cos(pitch_rad)
+		sin(yaw_rad) * cos(pitch_rad), sin(pitch_rad), cos(yaw_rad) * cos(pitch_rad)
 	)
 
 	_spring_length = move_toward(_spring_length, _target_distance, zoom_speed * delta)
@@ -133,7 +140,10 @@ func _update_transform(delta: float) -> void:
 	global_position = pivot + direction * distance
 	look_at(pivot, Vector3.UP)
 
-func _resolve_collision_distance(pivot: Vector3, direction: Vector3, desired_distance: float) -> float:
+
+func _resolve_collision_distance(
+	pivot: Vector3, direction: Vector3, desired_distance: float
+) -> float:
 	var space_state := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(pivot, pivot + direction * desired_distance)
 	query.collision_mask = collision_mask

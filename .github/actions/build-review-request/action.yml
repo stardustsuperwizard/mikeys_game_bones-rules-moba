@@ -1,0 +1,307 @@
+name: Build Review Request
+description: >-
+  Gathers everything a review needs and writes one ready-to-run prompt
+  file. This is the "pull all the PR information" half of the review --
+  purely deterministic (gh/jq/python, no model call) -- kept separate from
+  actually running the review so the same gathering logic works whether a
+  pull request already exists (agent-04-review.yml) or the diff is still
+  local and uncommitted to GitHub (agent-02-execute.yml, reviewing its own
+  work before opening a pull request).
+
+inputs:
+  mode:
+    description: '"pr" to fetch an existing pull request by number, or "diff" to review a local diff that has no pull request yet'
+    required: true
+  pr-number:
+    description: Pull request number. Required when mode is "pr".
+    required: false
+  issue-number:
+    description: >-
+      Implementation Task Issue number. Required when mode is "diff". In
+      "pr" mode this is resolved automatically from the pull request's
+      closing reference and this input is ignored.
+    required: false
+  diff-file:
+    description: Path to a pre-computed diff file. Required when mode is "diff".
+    required: false
+  pr-title:
+    description: Draft pull request title. Required when mode is "diff".
+    required: false
+  pr-branch:
+    description: Draft pull request branch name. Required when mode is "diff".
+    required: false
+  max-diff-chars:
+    description: Diff is truncated past this many characters
+    required: false
+    default: "150000"
+  lint-report-file:
+    description: >-
+      Path to a gdformat/gdlint report (lint-gdscript's report-file
+      output) to fold into the prompt as a "STATIC ANALYSIS" section, so
+      lint findings surface in the same review report instead of a
+      separate check the human has to cross-reference. Optional -- omit
+      to review without one.
+    required: false
+
+outputs:
+  prompt-file:
+    description: Path to the built reviewer prompt
+    value: reviewer-prompt.txt
+  task-number:
+    description: The resolved Implementation Task Issue number, if any
+    value: ${{ steps.resolve-pr.outputs.task_number || inputs.issue-number }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Pull Request Context
+      id: resolve-pr
+      if: inputs.mode == 'pr'
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+
+        gh pr view "$PR_NUMBER" \
+          --repo "$GITHUB_REPOSITORY" \
+          --json number,title,body,url,headRefName,isDraft,files \
+          > pr.json
+
+        gh pr diff "$PR_NUMBER" \
+          --repo "$GITHUB_REPOSITORY" \
+          > review-diff.txt
+
+        OWNER="${GITHUB_REPOSITORY%%/*}"
+        NAME="${GITHUB_REPOSITORY##*/}"
+
+        gh api graphql \
+          -f owner="$OWNER" \
+          -f name="$NAME" \
+          -F number="$PR_NUMBER" \
+          -f query='
+            query($owner: String!, $name: String!, $number: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $number) {
+                  closingIssuesReferences(first: 10) {
+                    nodes { number title url }
+                  }
+                }
+              }
+            }
+          ' \
+          --jq '.data.repository.pullRequest.closingIssuesReferences.nodes' \
+          > closing-issues.json
+
+        TASK_NUMBER=$(jq -r '.[0].number // empty' closing-issues.json)
+
+        if [ -z "$TASK_NUMBER" ]; then
+          echo "::warning::PR #$PR_NUMBER does not close any Issue. There is" \
+               "no acceptance-criteria contract to review against."
+          echo '{}' > task.json
+        else
+          echo "task_number=$TASK_NUMBER" >> "$GITHUB_OUTPUT"
+
+          gh issue view "$TASK_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json number,title,body,url,parent \
+            > task.json
+        fi
+
+    - name: Resolve Diff Context
+      if: inputs.mode == 'diff'
+      shell: bash
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
+        DIFF_FILE: ${{ inputs.diff-file }}
+        PR_TITLE: ${{ inputs.pr-title }}
+        PR_BRANCH: ${{ inputs.pr-branch }}
+      run: |
+        set -euo pipefail
+
+        cp "$DIFF_FILE" review-diff.txt
+
+        gh issue view "$ISSUE_NUMBER" \
+          --repo "$GITHUB_REPOSITORY" \
+          --json number,title,body,url \
+          > task.json
+
+        jq -n \
+          --arg title "$PR_TITLE" \
+          --arg branch "$PR_BRANCH" \
+          '{number: null, title: $title, headRefName: $branch,
+            body: "(not yet opened -- reviewed before the pull request exists)"}' \
+          > pr.json
+
+    - name: Build Prompt
+      shell: python
+      env:
+        MAX_DIFF_CHARS: ${{ inputs.max-diff-chars }}
+        LINT_REPORT_FILE: ${{ inputs.lint-report-file }}
+      run: |
+        import json
+        import os
+        import pathlib
+
+        root = pathlib.Path(".")
+        max_diff = int(os.environ["MAX_DIFF_CHARS"])
+
+        pr = json.loads(pathlib.Path("pr.json").read_text())
+        task = json.loads(pathlib.Path("task.json").read_text())
+
+        sections = []
+
+        # The reviewer role definition is the same file used interactively
+        # in VS Code, so the two paths cannot drift apart.
+        role = root / ".github/agents/03-reviewer.agent.md"
+
+        if role.exists():
+            sections.append(
+                "# REVIEWER ROLE DEFINITION\n\n" + role.read_text(errors="replace")
+            )
+        else:
+            raise RuntimeError("Missing .github/agents/03-reviewer.agent.md")
+
+        for filename in ("AGENTS.md", ".github/copilot-instructions.md"):
+            path = root / filename
+
+            if path.exists():
+                sections.append(
+                    f"# REPOSITORY FILE: {filename}\n\n"
+                    + path.read_text(errors="replace")[:20000]
+                )
+
+        if task:
+            sections.append(
+                "# IMPLEMENTATION TASK (AUTHORITATIVE WORK CONTRACT)\n\n"
+                f"Number: #{task['number']}\n"
+                f"Title: {task['title']}\n\n"
+                f"{task.get('body') or ''}"
+            )
+
+            parent = task.get("parent")
+
+            if parent:
+                sections.append(
+                    "# PARENT FEATURE (CONTEXT ONLY)\n\n"
+                    f"#{parent['number']} {parent['title']}\n\n"
+                    "This does not expand the task's scope."
+                )
+        else:
+            sections.append(
+                "# IMPLEMENTATION TASK\n\n"
+                "No acceptance-criteria contract is available. Review"
+                " against repository conventions only and return DESIGN"
+                " AMBIGUITY if intent cannot be determined."
+            )
+
+        sections.append(
+            "# PULL REQUEST\n\n"
+            f"Number: {('#' + str(pr['number'])) if pr.get('number') else '(not yet opened)'}\n"
+            f"Title: {pr['title']}\n"
+            f"Branch: {pr['headRefName']}\n\n"
+            f"{pr.get('body') or ''}"
+        )
+
+        changed = "\n".join(
+            f"- {entry['path']} (+{entry['additions']}/-{entry['deletions']})"
+            for entry in pr.get("files", [])
+        )
+
+        if changed:
+            sections.append(f"# FILES CHANGED\n\n{changed}")
+
+        lint_report_path = os.environ.get("LINT_REPORT_FILE", "")
+
+        if lint_report_path and pathlib.Path(lint_report_path).exists():
+            sections.append(
+                "# STATIC ANALYSIS (gdformat / gdlint)\n\n"
+                + pathlib.Path(lint_report_path).read_text(errors="replace")
+            )
+
+        diff = pathlib.Path("review-diff.txt").read_text(errors="replace")
+        truncated = len(diff) > max_diff
+
+        if truncated:
+            diff = diff[:max_diff]
+
+        sections.append(
+            "# FINAL INTEGRATED DIFF\n\n"
+            + ("**The diff was truncated. Say so in your reasoning and do"
+               " not return PASS on unreviewed content.**\n\n"
+               if truncated else "")
+            + "```diff\n"
+            + diff
+            + "\n```"
+        )
+
+        context = "\n\n---\n\n".join(sections)
+
+        lint_instruction = (
+            "\n        - A STATIC ANALYSIS section, if present, is gdformat/gdlint"
+            " output already computed for you -- don't re-derive it. Weigh it"
+            " like any other finding: a real formatting/lint violation is"
+            " worth a line in Findings, but don't let style nits alone drive"
+            " the verdict to FIX when the substance of the change is sound."
+            if lint_report_path and pathlib.Path(lint_report_path).exists()
+            else ""
+        )
+
+        prompt = f"""
+        You are the review agent for Sword and Planet.
+
+        You are NOT an implementation agent.
+
+        Review the supplied pull request against the Implementation Task
+        contract and report a verdict.
+
+        HARD RULES:
+
+        - Do not edit repository files.{lint_instruction}
+        - Do not execute shell commands.
+        - Do not create or modify GitHub Issues or comments yourself.
+        - Do not implement fixes.
+        - Do not review work the task explicitly places out of scope.
+        - Do not invent requirements absent from the contract.
+        - Judge completeness against the Acceptance Criteria, one by one.
+
+        Your first line MUST be exactly one of:
+
+        VERDICT: PASS
+        VERDICT: FIX
+        VERDICT: PLANNING FAILURE
+        VERDICT: DESIGN AMBIGUITY
+
+        After that line, output Markdown with these sections:
+
+        ## Acceptance Criteria
+
+        A table with columns: Criterion | Met | Evidence.
+        Cite the file and change that satisfies each criterion, or state
+        plainly that nothing in the diff satisfies it.
+
+        ## Scope Adherence
+
+        Note any change outside the task's stated scope or expected files,
+        and any acceptance criterion left unimplemented.
+
+        ## Findings
+
+        Numbered, most serious first. Each finding gives the file, what is
+        wrong, and why it matters. Write "None" if there are none.
+
+        ## Required Before Merge
+
+        Bullet list of what must change for this to become PASS.
+        Write "Nothing" when the verdict is PASS.
+
+        Be concise. Do not restate the diff.
+
+        CONTEXT FOLLOWS.
+
+        {context}
+        """
+
+        pathlib.Path("reviewer-prompt.txt").write_text(prompt)
+
+        print(f"Prompt built: {len(prompt)} chars, truncated={truncated}")

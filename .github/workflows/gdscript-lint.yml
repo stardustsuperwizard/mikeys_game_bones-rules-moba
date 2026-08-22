@@ -1,0 +1,71 @@
+name: GDScript Lint
+
+# A normal status-check gate: gdformat/gdlint against whatever GDScript
+# files a pull request actually changes. Deliberately diff-scoped, not
+# whole-repo -- see lint-gdscript/action.yml for why.
+#
+# This is the catch-all: agent-04-review.yml folds the same check into its
+# review comment for PRs it reviews, and agent-02-execute.yml auto-fixes
+# formatting before it ever opens a pull request -- but a human-authored
+# PR, or a cloud-agent PR nobody ran `agent:review` on, would otherwise get
+# no lint signal at all. This workflow is what covers that gap.
+
+on:
+  pull_request:
+    paths:
+      - '**.gd'
+      - '.github/actions/lint-gdscript/**'
+      - '.github/workflows/gdscript-lint.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint:
+    name: GDScript Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: List Changed GDScript Files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json files \
+            --jq '.files[].path' \
+            | grep -E '\.gd$' \
+            > changed-gd-files.txt || true
+
+          echo "Changed GDScript files:"
+          cat changed-gd-files.txt || echo "(none)"
+
+      - name: Lint Changed Files
+        id: lint
+        uses: ./.github/actions/lint-gdscript
+        with:
+          mode: check
+          files-list-file: changed-gd-files.txt
+
+      - name: Show Report
+        shell: bash
+        run: |
+          cat "${{ steps.lint.outputs.report-file }}" >> "$GITHUB_STEP_SUMMARY"
+          cat "${{ steps.lint.outputs.report-file }}"
+
+      - name: Fail on Findings
+        if: steps.lint.outputs.clean != 'true'
+        shell: bash
+        run: |
+          echo "::error::gdformat/gdlint found issues in changed files." \
+               "See the step summary for the report. Run \`gdformat\` and" \
+               "fix \`gdlint\` findings locally, or let the executor's" \
+               "pre-PR pass apply them automatically for scripted tasks."
+          exit 1

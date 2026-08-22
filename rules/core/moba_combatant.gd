@@ -23,7 +23,7 @@ func _ready() -> void:
 	# Duplicate the stat block before any mutation
 	_runtime_stat_block = stat_block.duplicate()
 	_current_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	
+
 	# Defer seeding the parent Actor's character_sheet because children ready before parents,
 	# and the Actor's _ready() hasn't yet duplicated its character_sheet.
 	# Writing it directly here would corrupt the shared resource.
@@ -34,9 +34,11 @@ func _seed_actor_character_sheet() -> void:
 	var parent_actor := get_parent() as Actor
 	if parent_actor == null:
 		return
-	
+
 	# Seed max_hp and current_hp from the stat block
-	parent_actor.character_sheet.max_hp = int(_runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH))
+	parent_actor.character_sheet.max_hp = int(
+		_runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	)
 	parent_actor.character_sheet.current_hp = int(_current_health)
 
 
@@ -74,13 +76,13 @@ func apply_damage(damage: MobaDamage) -> void:
 	var raw: float = damage.amount
 	var final: float = raw
 	var was_crit: bool = false
-	
+
 	# Step 2: Crit roll and multiplier
 	if damage.can_crit:
 		var crit_chance: float = get_stat(MobaStatBlock.CRIT_CHANCE)
 		var crit_damage: float = get_stat(MobaStatBlock.CRIT_DAMAGE)
 		var crit_roll: float = MobaRules.roll_crit()
-		
+
 		if MobaFormulas.is_critical(crit_roll, crit_chance):
 			was_crit = true
 			final = MobaFormulas.apply_crit(raw, crit_damage)
@@ -88,30 +90,32 @@ func apply_damage(damage: MobaDamage) -> void:
 			final = raw
 	else:
 		final = raw
-	
+
 	# Step 3-6: Damage-type routing and mitigation
 	match damage.damage_type:
 		MobaDamage.DamageType.PHYSICAL:
 			var armor: float = get_stat(MobaStatBlock.ARMOR)
 			final = MobaFormulas.physical_damage(final, armor, damage.flat_pen, damage.percent_pen)
-		
+
 		MobaDamage.DamageType.MAGICAL:
 			var resistance: float = get_stat(MobaStatBlock.MAGIC_RESISTANCE)
-			final = MobaFormulas.magical_damage(final, resistance, damage.flat_pen, damage.percent_pen)
-		
+			final = MobaFormulas.magical_damage(
+				final, resistance, damage.flat_pen, damage.percent_pen
+			)
+
 		MobaDamage.DamageType.TRUE:
 			# TRUE damage ignores all defenses and penetration
 			final = MobaFormulas.true_damage(final)
-	
+
 	# Step 7: Shield seam (documented empty hook per §16, Batch 2 sustain issue)
 	# This private hook receives the final amount and returns it unchanged.
 	# It exists as a placeholder for future shield implementations.
 	final = _apply_shield_seam(final)
-	
+
 	# Reduce health
 	_current_health -= final
 	_update_health()
-	
+
 	# Emit damage_resolved
 	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source)
 
@@ -144,14 +148,13 @@ func _update_health() -> void:
 	var parent_actor := get_parent() as Actor
 	if parent_actor != null:
 		parent_actor.character_sheet.current_hp = int(_current_health)
-	
+
 	# Emit the health changed signal
 	var max_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	health_changed.emit(_current_health, max_health)
-	
+
 	# Handle death: call Actor.die() exactly once
 	if _current_health <= 0.0 and not _has_died:
 		_has_died = true
 		if parent_actor != null:
 			parent_actor.die()
-

@@ -8,17 +8,6 @@ extends Node
 
 signal state_changed(from: int, to: int)
 
-var current_state: int = MobaState.IDLE
-var time_in_state: float = 0.0
-var remaining: float = 0.0
-
-var _airborne_cause: int = MobaState.AirborneCause.JUMP
-var _state_table: Dictionary = {}
-
-## Set when the state table failed to load or validate. Detectable by callers
-## and tests rather than only observable through push_error side effects.
-var load_failed: bool = false
-
 ## States that may be entered without a duration (no expiry). All other
 ## states require a positive duration to be entered through try_enter().
 const _DURATIONLESS_STATES = [
@@ -39,6 +28,17 @@ const _COLUMN_VOCABULARIES = {
 	"jump": ["yes", "no", "per_cc"],
 	"interruptible_by_hard_cc": ["yes", "no", "per_cc", "breaks_channel", "displacement_only"],
 }
+
+var current_state: int = MobaState.IDLE
+var time_in_state: float = 0.0
+var remaining: float = 0.0
+
+## Set when the state table failed to load or validate. Detectable by callers
+## and tests rather than only observable through push_error side effects.
+var load_failed: bool = false
+
+var _airborne_cause: int = MobaState.AirborneCause.JUMP
+var _state_table: Dictionary = {}
 
 
 func _ready() -> void:
@@ -73,53 +73,69 @@ func _parse_state_table(data: Variant) -> bool:
 	_state_table = {}
 	load_failed = false
 
+	var error_message := _first_state_table_error(data)
+
+	if error_message == "":
+		return true
+
+	push_error(error_message)
+	load_failed = true
+	return false
+
+
+## Returns the first validation problem found in `data`, or "" if the whole
+## table is valid. Stops at the first problem, same as the early-return
+## checks this replaces, so the reported error is always the earliest one.
+func _first_state_table_error(data: Variant) -> String:
 	if data is not Dictionary:
-		push_error("state_transitions.json root must be a dictionary")
-		load_failed = true
-		return false
+		return "state_transitions.json root must be a dictionary"
 
 	# Validate and process the state table
 	for state_name_str: String in data.keys():
 		var state_idx = MobaState.string_to_state(state_name_str)
 		if state_idx == -1:
-			push_error("Unknown state name in state_transitions.json: %s" % state_name_str)
-			load_failed = true
-			return false
+			return "Unknown state name in state_transitions.json: %s" % state_name_str
 
 		var state_data = data[state_name_str]
 		if state_data is not Dictionary:
-			push_error("State entry for %s must be a dictionary" % state_name_str)
-			load_failed = true
-			return false
+			return "State entry for %s must be a dictionary" % state_name_str
 
-		# Validate all required policy columns exist
-		var required_columns = ["move", "basic_attack", "ability", "jump", "interruptible_by_hard_cc"]
-		for column_name in required_columns:
-			if column_name not in state_data:
-				push_error("State %s missing column '%s'" % [state_name_str, column_name])
-				load_failed = true
-				return false
-
-			var value = state_data[column_name]
-			if value is not String:
-				push_error("State %s column %s value must be string, got %s" % [state_name_str, column_name, typeof(value)])
-				load_failed = true
-				return false
-
-			if value not in _COLUMN_VOCABULARIES[column_name]:
-				push_error("State %s column %s has unrecognized policy value: %s" % [state_name_str, column_name, value])
-				load_failed = true
-				return false
+		var entry_error = _first_state_entry_error(state_name_str, state_data)
+		if entry_error != "":
+			return entry_error
 
 		_state_table[state_idx] = state_data
 
 	# Verify all 10 states are present
 	if _state_table.size() != 10:
-		push_error("State table incomplete: expected 10 states, found %d" % _state_table.size())
-		load_failed = true
-		return false
+		return "State table incomplete: expected 10 states, found %d" % _state_table.size()
 
-	return true
+	return ""
+
+
+## Returns the first validation problem found in one state's column values,
+## or "" if the entry is valid.
+func _first_state_entry_error(state_name_str: String, state_data: Dictionary) -> String:
+	# Validate all required policy columns exist
+	var required_columns = ["move", "basic_attack", "ability", "jump", "interruptible_by_hard_cc"]
+	for column_name in required_columns:
+		if column_name not in state_data:
+			return "State %s missing column '%s'" % [state_name_str, column_name]
+
+		var value = state_data[column_name]
+		if value is not String:
+			return (
+				"State %s column %s value must be string, got %s"
+				% [state_name_str, column_name, typeof(value)]
+			)
+
+		if value not in _COLUMN_VOCABULARIES[column_name]:
+			return (
+				"State %s column %s has unrecognized policy value: %s"
+				% [state_name_str, column_name, value]
+			)
+
+	return ""
 
 
 ## For testing only: feed a hand-built table through the same validation path
@@ -147,10 +163,14 @@ func can(action: StringName) -> bool:
 	# Map action names to policy columns
 	var policy_key: String
 	match action_lower:
-		&"move": policy_key = "move"
-		&"basic_attack": policy_key = "basic_attack"
-		&"ability": policy_key = "ability"
-		&"jump": policy_key = "jump"
+		&"move":
+			policy_key = "move"
+		&"basic_attack":
+			policy_key = "basic_attack"
+		&"ability":
+			policy_key = "ability"
+		&"jump":
+			policy_key = "jump"
 		_:
 			push_error("Unknown action: %s" % action)
 			return false
@@ -166,7 +186,12 @@ func can(action: StringName) -> bool:
 		"no", "locked", "per_cc", "flagged", "breaks_channel", "displacement_only":
 			return false
 		_:
-			push_error("Unknown policy value in state %d column %s: %s" % [current_state, policy_key, policy_value])
+			push_error(
+				(
+					"Unknown policy value in state %d column %s: %s"
+					% [current_state, policy_key, policy_value]
+				)
+			)
 			return false
 
 
@@ -225,7 +250,9 @@ func movement_policy() -> StringName:
 ## Re-entering the same state returns true but does not emit state_changed.
 ## DEAD is terminal: returns false for any target state except revive().
 ## AIRBORNE states store the cause flag for later querying.
-func try_enter(state: int, duration: float = 0.0, cause: int = MobaState.AirborneCause.JUMP) -> bool:
+func try_enter(
+	state: int, duration: float = 0.0, cause: int = MobaState.AirborneCause.JUMP
+) -> bool:
 	# Validate state value
 	if state < MobaState.IDLE or state > MobaState.DEAD:
 		push_error("Invalid state value: %d" % state)
@@ -293,7 +320,7 @@ func tick(delta: float) -> void:
 func revive() -> bool:
 	if current_state != MobaState.DEAD:
 		return false
-	
+
 	var from_state = current_state
 	current_state = MobaState.IDLE
 	time_in_state = 0.0

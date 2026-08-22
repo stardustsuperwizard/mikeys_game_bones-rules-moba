@@ -1,0 +1,277 @@
+name: Build Fix Request
+description: >-
+  Gathers the correction contract and writes one ready-to-run prompt file
+  for a bounded fix. Purely deterministic (gh/jq/python, no model call).
+  Works either against an existing pull request's most recent
+  `<!-- agent-review-verdict -->` comment (agent-05-fix.yml) or against a
+  verdict just produced in the same job, before any pull request exists
+  (agent-02-execute.yml's pre-PR review-and-fix gate).
+
+inputs:
+  mode:
+    description: '"pr" to read the verdict from an existing pull request''s comments, or "diff" to use a verdict file produced earlier in this job'
+    required: true
+  pr-number:
+    description: Pull request number. Required when mode is "pr".
+    required: false
+  issue-number:
+    description: >-
+      Implementation Task Issue number. Required when mode is "diff". In
+      "pr" mode this is resolved automatically from the pull request's
+      closing reference.
+    required: false
+  diff-file:
+    description: Path to a pre-computed diff file. Required when mode is "diff".
+    required: false
+  verdict-file:
+    description: Path to the verdict Markdown to fix against. Required when mode is "diff".
+    required: false
+  pr-title:
+    description: Draft pull request title. Required when mode is "diff".
+    required: false
+  pr-branch:
+    description: Draft pull request branch name. Required when mode is "diff".
+    required: false
+  max-diff-chars:
+    description: Diff is truncated past this many characters
+    required: false
+    default: "150000"
+
+outputs:
+  prompt-file:
+    description: Path to the built fixer prompt
+    value: fixer-prompt.txt
+  verdict:
+    description: >-
+      The VERDICT line found on the pull request in "pr" mode (empty in
+      "diff" mode, where the caller already knows it -- it just produced
+      it).
+    value: ${{ steps.resolve-pr.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Pull Request Context
+      id: resolve-pr
+      if: inputs.mode == 'pr'
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+
+        gh pr view "$PR_NUMBER" \
+          --repo "$GITHUB_REPOSITORY" \
+          --json number,title,body,url,headRefName,files,comments \
+          > pr.json
+
+        gh pr diff "$PR_NUMBER" \
+          --repo "$GITHUB_REPOSITORY" \
+          > fix-diff.txt
+
+        OWNER="${GITHUB_REPOSITORY%%/*}"
+        NAME="${GITHUB_REPOSITORY##*/}"
+
+        gh api graphql \
+          -f owner="$OWNER" \
+          -f name="$NAME" \
+          -F number="$PR_NUMBER" \
+          -f query='
+            query($owner: String!, $name: String!, $number: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $number) {
+                  closingIssuesReferences(first: 10) {
+                    nodes { number title url }
+                  }
+                }
+              }
+            }
+          ' \
+          --jq '.data.repository.pullRequest.closingIssuesReferences.nodes' \
+          > closing-issues.json
+
+        TASK_NUMBER=$(jq -r '.[0].number // empty' closing-issues.json)
+
+        if [ -z "$TASK_NUMBER" ]; then
+          echo '{}' > task.json
+        else
+          gh issue view "$TASK_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json number,title,body,url \
+            > task.json
+        fi
+
+        # The correction contract is the most recent
+        # `<!-- agent-review-verdict -->` comment, whoever posted it.
+        jq -r '
+          [.comments[] | select(.body | contains("<!-- agent-review-verdict -->"))]
+          | last
+          | .body // empty
+        ' pr.json > fix-verdict.md
+
+        if [ ! -s fix-verdict.md ]; then
+          echo "verdict=none" >> "$GITHUB_OUTPUT"
+        else
+          VERDICT=$(
+            grep -oE '^VERDICT:\s*(PASS|FIX|PLANNING FAILURE|DESIGN AMBIGUITY)' \
+              fix-verdict.md \
+              | head -n1 \
+              | sed -E 's/^VERDICT:\s*//'
+          )
+          echo "verdict=${VERDICT:-unrecognized}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Resolve Diff Context
+      if: inputs.mode == 'diff'
+      shell: bash
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
+        DIFF_FILE: ${{ inputs.diff-file }}
+        VERDICT_FILE: ${{ inputs.verdict-file }}
+        PR_TITLE: ${{ inputs.pr-title }}
+        PR_BRANCH: ${{ inputs.pr-branch }}
+      run: |
+        set -euo pipefail
+
+        cp "$DIFF_FILE" fix-diff.txt
+        cp "$VERDICT_FILE" fix-verdict.md
+
+        gh issue view "$ISSUE_NUMBER" \
+          --repo "$GITHUB_REPOSITORY" \
+          --json number,title,body,url \
+          > task.json
+
+        jq -n \
+          --arg title "$PR_TITLE" \
+          --arg branch "$PR_BRANCH" \
+          '{number: null, title: $title, headRefName: $branch,
+            body: "(not yet opened -- being fixed before the pull request exists)"}' \
+          > pr.json
+
+    - name: Build Prompt
+      shell: python
+      env:
+        MAX_DIFF_CHARS: ${{ inputs.max-diff-chars }}
+      run: |
+        import json
+        import os
+        import pathlib
+
+        root = pathlib.Path(".")
+        max_diff = int(os.environ["MAX_DIFF_CHARS"])
+
+        pr = json.loads(pathlib.Path("pr.json").read_text())
+        task = json.loads(pathlib.Path("task.json").read_text())
+        verdict_comment = pathlib.Path("fix-verdict.md").read_text(errors="replace")
+
+        sections = []
+
+        # Same file the local `fixer` subagent's contract mirrors -- kept
+        # in sync by hand, the same way 03-reviewer.agent.md is shared
+        # between agent-04-review.yml and the interactive VS Code path.
+        role = root / ".github/agents/05-fixer.agent.md"
+
+        if role.exists():
+            sections.append(
+                "# FIXER ROLE DEFINITION\n\n" + role.read_text(errors="replace")
+            )
+        else:
+            raise RuntimeError("Missing .github/agents/05-fixer.agent.md")
+
+        for filename in ("AGENTS.md", ".github/copilot-instructions.md"):
+            path = root / filename
+
+            if path.exists():
+                sections.append(
+                    f"# REPOSITORY FILE: {filename}\n\n"
+                    + path.read_text(errors="replace")[:20000]
+                )
+
+        if task:
+            sections.append(
+                "# IMPLEMENTATION TASK (OUTER SCOPE BOUNDARY)\n\n"
+                f"Number: #{task['number']}\n"
+                f"Title: {task['title']}\n\n"
+                f"{task.get('body') or ''}"
+            )
+
+        sections.append(
+            "# PULL REQUEST\n\n"
+            f"Number: {('#' + str(pr['number'])) if pr.get('number') else '(not yet opened)'}\n"
+            f"Title: {pr['title']}\n"
+            f"Branch: {pr['headRefName']}\n\n"
+            f"{pr.get('body') or ''}"
+        )
+
+        sections.append(
+            "# LATEST REVIEW VERDICT (YOUR WORKLIST)\n\n" + verdict_comment
+        )
+
+        diff = pathlib.Path("fix-diff.txt").read_text(errors="replace")
+        truncated = len(diff) > max_diff
+
+        if truncated:
+            diff = diff[:max_diff]
+
+        sections.append(
+            "# DIFF FOR ORIENTATION ONLY\n\n"
+            + ("**Truncated. The checked-out repository, not this diff, is "
+               "the source of truth for editing.**\n\n"
+               if truncated else "")
+            + "```diff\n"
+            + diff
+            + "\n```"
+        )
+
+        context = "\n\n---\n\n".join(sections)
+
+        prompt = f"""
+        You are the fix-cycle agent for Sword and Planet.
+
+        You are NOT a reviewer and NOT starting new implementation work. A
+        prior automated review already found specific, bounded defects in
+        this pull request. Correct exactly what it found.
+
+        HARD RULES:
+
+        - Fix only what "Required Before Merge" in the review lists, using
+          the "Findings" it refers back to as your starting evidence -- not
+          the whole picture. Read the surrounding code before editing.
+        - Do not refactor, redesign, or touch any file the review and the
+          Implementation Task's expected files don't implicate.
+        - Do not broaden scope beyond the Implementation Task's Acceptance
+          Criteria.
+        - If a finding is observational or a judgment call rather than a
+          concrete defect, do not silently resolve it -- report it back as
+          a decision for a human instead of guessing.
+        - Re-run `.github/scripts/validate-godot.sh` before finishing. Do
+          not report success if it fails.
+        - Commit your changes on this branch with `git commit`. Do NOT run
+          `git push` yourself -- the workflow pushes after verifying the
+          commit exists. Do not open a new pull request.
+
+        Your final message MUST end with, in this order:
+
+        ## Findings Addressed
+
+        Each "Required Before Merge" item and what changed, with file/line.
+
+        ## Findings Deliberately Not Addressed
+
+        Anything left for a human to decide, and why. Write "None" if
+        there were none.
+
+        ## Validation
+
+        The exact command run and its result.
+
+        Be concise. Do not restate the diff.
+
+        CONTEXT FOLLOWS.
+
+        {context}
+        """
+
+        pathlib.Path("fixer-prompt.txt").write_text(prompt)
+
+        print(f"Prompt built: {len(prompt)} chars, truncated={truncated}")

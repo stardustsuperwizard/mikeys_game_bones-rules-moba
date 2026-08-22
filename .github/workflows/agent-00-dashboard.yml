@@ -1,4 +1,4 @@
-name: Agent Control Plane
+name: Agent - Control Plane
 
 # Regenerates the derived control plane into a pinned Issue.
 #
@@ -35,7 +35,7 @@ on:
   #
   # This is the expensive trigger: it fires on every PR event including
   # `opened`, so it stacks a render onto the moment a PR is created --
-  # alongside `agent-03-review.yml` and `godot-ci-validation.yml`, which is
+  # alongside `agent-04-review.yml` and `godot-ci-validation.yml`, which is
   # exactly the pile-up worth avoiding. Re-enable it only if the control
   # plane going stale between manual refreshes turns out to cost more than
   # the noise.
@@ -75,7 +75,7 @@ concurrency:
 
 jobs:
   dashboard:
-    name: Render Control Plane
+    name: Agent - Control Plane
     runs-on: ubuntu-latest
 
     # `issues.labeled` fires for every label on every Issue; only one label

@@ -1,0 +1,211 @@
+name: Extract Review Verdict
+description: >-
+  Parses a review session's assistant text into a VERDICT line plus
+  Markdown report, refusing to publish a verdict whose reasoning was cut
+  short. Shared by agent-04-review.yml (reviewing an existing pull
+  request) and agent-02-execute.yml (reviewing a diff before one is
+  opened) so both apply the exact same completeness rule.
+
+inputs:
+  assistant-text-file:
+    description: Path to the joined assistant text (run-copilot-session's assistant-text-file output)
+    required: true
+  outcome-file:
+    description: Path to the classify-copilot-outcome.py verdict (run-copilot-session's outcome-file output)
+    required: true
+
+outputs:
+  verdict:
+    description: One of PASS, FIX, PLANNING FAILURE, DESIGN AMBIGUITY
+    value: ${{ steps.extract.outputs.verdict }}
+  slug:
+    description: Lowercase, hyphenated verdict, e.g. "planning-failure" -- matches this repo's review:<slug> label names
+    value: ${{ steps.extract.outputs.slug }}
+  review-file:
+    description: Path to the verdict line plus full Markdown report, ready to embed in a comment or pull request body
+    value: review.md
+  failure-file:
+    description: >-
+      Path to a failure summary, written only when no publishable verdict
+      could be extracted (truncated session, malformed output, etc).
+      Callers should check for its existence before reading it.
+    value: review-verdict-failure.json
+
+runs:
+  using: composite
+  steps:
+    # The reviewer's contract puts VERDICT on the first line, which makes a
+    # truncated review the dangerous case rather than the obvious one: the
+    # verdict survives and the reasoning behind it does not. A review cut
+    # off halfway through its acceptance-criteria table still says
+    # "VERDICT: PASS" at the top. A session that did not finish does not
+    # get to publish a verdict, however well-formed its first line looks.
+    - name: Extract Verdict
+      id: extract
+      shell: python
+      env:
+        ASSISTANT_TEXT_FILE: ${{ inputs.assistant-text-file }}
+        OUTCOME_FILE: ${{ inputs.outcome-file }}
+      run: |
+        import json
+        import os
+        import pathlib
+        import re
+        import sys
+
+        EVIDENCE_CHARS = 1500
+
+        REQUIRED_SECTIONS = [
+            "## Acceptance Criteria",
+            "## Scope Adherence",
+            "## Findings",
+            "## Required Before Merge",
+        ]
+
+        outcome_path = pathlib.Path(os.environ["OUTCOME_FILE"])
+        outcome = json.loads(outcome_path.read_text()) if outcome_path.exists() else {}
+
+        text_path = pathlib.Path(os.environ["ASSISTANT_TEXT_FILE"])
+        text = text_path.read_text(errors="replace").strip() if text_path.exists() else ""
+
+
+        def fail(kind, headline, guidance, evidence=""):
+            """Record a classified failure and stop the job."""
+
+            pathlib.Path("review-verdict-failure.json").write_text(
+                json.dumps(
+                    {
+                        "reason": kind,
+                        "headline": headline,
+                        "guidance": guidance,
+                        "evidence": evidence[:EVIDENCE_CHARS],
+                        "session_reason": outcome.get("reason"),
+                        "assistant_text_chars": outcome.get("assistant_text_chars"),
+                        "unfinished_turn": outcome.get("unfinished_turn"),
+                        "credit_limit": outcome.get("credit_limit"),
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
+
+            print(f"::error::{headline}")
+            print(guidance)
+
+            if evidence:
+                print("--- session output ---")
+                print(evidence[:EVIDENCE_CHARS])
+
+            sys.exit(1)
+
+
+        cut_off = bool(
+            outcome.get("unfinished_turn") or outcome.get("reason") == "session_error"
+        )
+
+        budget_hit = outcome.get("reason") == "budget_exhausted"
+
+        if not text:
+            if cut_off or budget_hit:
+                fail(
+                    "budget_exhausted",
+                    outcome.get("headline", "The session stopped before writing any review"),
+                    outcome.get("guidance", ""),
+                )
+
+            fail(
+                "no_assistant_output",
+                "The session returned no assistant message",
+                "The session ended without saying anything. Check the event"
+                " counts in the run-copilot-session job log.",
+            )
+
+        if text.startswith("```"):
+            lines = text.splitlines()[1:]
+
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+
+            text = "\n".join(lines).strip()
+
+        missing = [heading for heading in REQUIRED_SECTIONS if heading not in text]
+
+        match = re.search(
+            r"^\s*VERDICT:\s*"
+            r"(PASS|FIX|PLANNING FAILURE|DESIGN AMBIGUITY)\s*$",
+            text,
+            re.MULTILINE,
+        )
+
+        if not match:
+            if cut_off or budget_hit:
+                fail(
+                    "budget_exhausted",
+                    "The session stopped mid-review, most likely on its AI"
+                    f" credit limit ({outcome.get('credit_limit', '?')} credits)",
+                    "The reviewer was cut off before it emitted a VERDICT"
+                    " line. Nothing here is a formatting problem -- there"
+                    " was simply not enough budget to finish. Raise the"
+                    " credit cap, or narrow the diff, then retry. Do not"
+                    " change the prompt.",
+                    text,
+                )
+
+            fail(
+                "malformed_verdict",
+                "The session emitted no recognisable VERDICT line",
+                "The session ran to completion within budget and still did"
+                " not open with a VERDICT line, so this is a"
+                " prompt-following failure rather than a truncated or"
+                " budget-stopped one.",
+                text,
+            )
+
+        verdict = match.group(1)
+
+        # A verdict without the reasoning that earned it must not reach the
+        # caller. Publishing a truncated PASS is worse than publishing
+        # nothing, because the label it applies looks exactly like a real
+        # one.
+        if cut_off or (budget_hit and missing):
+            fail(
+                "truncated_review",
+                f"The session returned VERDICT: {verdict} but was cut short"
+                " before the review was finished",
+                "The verdict line comes first, so it survives a truncation"
+                " that removes the analysis behind it"
+                + (
+                    f" -- {len(missing)} of the {len(REQUIRED_SECTIONS)}"
+                    f" required sections are missing ({', '.join(missing)})."
+                    if missing
+                    else "."
+                )
+                + " This verdict has NOT been published. Raise the credit"
+                " cap, or narrow the diff, then retry.",
+                text,
+            )
+
+        if missing:
+            print(
+                "::warning::The review is missing "
+                + ", ".join(missing)
+                + ". The session ran to completion, so the verdict stands,"
+                " but the report is not in the requested shape."
+            )
+
+        pathlib.Path("review.md").write_text(text + "\n")
+
+        slug = verdict.lower().replace(" ", "-")
+
+        with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+            handle.write(f"verdict={verdict}\n")
+            handle.write(f"slug={slug}\n")
+
+        print(f"VERDICT: {verdict}")
+
+        if outcome.get("budget_signals"):
+            print(
+                "::warning::This review is complete, but the session"
+                " reached its AI credit limit"
+                f" ({outcome.get('credit_limit')} credits) on the way."
+            )

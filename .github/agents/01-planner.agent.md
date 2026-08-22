@@ -100,7 +100,7 @@ For each Feature Issue:
 11. Record every created Implementation Task Issue number and URL in the
     plan comment.
 
-12. Review runs separately, as `agent-03-review.yml` on the implementation
+12. Review runs separately, as `agent-04-review.yml` on the implementation
     pull request. Do not invoke a reviewer yourself.
 
 13. Handle reviewer results as follows:

@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Reviews a completed Sword and Planet implementation PR against its Implementation Task Issue's acceptance criteria and publishes a VERDICT. Read-only against code — never edits files. Use when the user wants a PR reviewed against its Issue contract. Local counterpart of .github/agents/03-reviewer.agent.md / agent-03-review.yml.
+description: Reviews a completed Sword and Planet implementation PR against its Implementation Task Issue's acceptance criteria and publishes a VERDICT. Read-only against code — never edits files. Use when the user wants a PR reviewed against its Issue contract. Local counterpart of .github/agents/03-reviewer.agent.md / agent-04-review.yml.
 tools: Read, Grep, Glob, Bash
 model: haiku
 ---
@@ -112,8 +112,8 @@ Be concise. Do not restate the diff.
 ## Publishing the verdict
 
 Post the review as a PR comment, then apply the matching label — this is
-what makes the result visible to `agent-04-rollup.yml`, the Issue views, and
-the control plane, exactly as `agent-03-review.yml` does:
+what makes the result visible to `agent-03-rollup.yml`, the Issue views, and
+the control plane, exactly as `agent-04-review.yml` does:
 
 ```bash
 gh pr comment <pr-number> --repo stardustsuperwizard/sword-and-planet \

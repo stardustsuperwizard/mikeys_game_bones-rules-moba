@@ -45,8 +45,21 @@ on:
       - '.github/agents/**'
       - '.github/instructions/**'
       - '.github/workflows/agent-*.yml'
+      - '.github/workflows/gdscript-lint.yml'
+      - '.github/workflows/issue-linking.yml'
       - '.github/scripts/agent-metrics.py'
       - '.github/scripts/render-dashboard.py'
+      - '.github/scripts/classify-copilot-outcome.py'
+      # The agent workflows' own composite actions -- prompt-building and
+      # Copilot CLI plumbing, none of it touches the Godot project.
+      # `setup-godot/` is deliberately NOT here: it controls how the engine
+      # gets installed for this very check, so a change to it should still
+      # run validation.
+      - '.github/actions/build-review-request/**'
+      - '.github/actions/build-fix-request/**'
+      - '.github/actions/run-copilot-session/**'
+      - '.github/actions/extract-review-verdict/**'
+      - '.github/actions/lint-gdscript/**'
 
   # The escape hatch: run validation by hand against any branch, whatever the
   # filter above decided.
