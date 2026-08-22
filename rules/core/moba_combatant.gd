@@ -14,6 +14,15 @@ signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: boo
 ## Emitted when current or maximum resource changes.
 signal resource_changed(current: float, maximum: float)
 
+## Typed failure reason for activation checks.
+enum ActivationFailure {
+	OK = 0,
+	ON_COOLDOWN = 1,
+	NO_CHARGES = 2,
+	INSUFFICIENT_RESOURCE = 3,
+	UNKNOWN_ABILITY = 4,
+}
+
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
 
 # Property accessors for current_resource and maximum_resource
@@ -29,6 +38,8 @@ var _runtime_stat_block: MobaStatBlock
 var _current_health: float = 0.0
 var _has_died: bool = false
 var _current_resource: float = 0.0
+var _cooldowns: MobaCooldowns = MobaCooldowns.new()
+var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
 
 
 func _ready() -> void:
@@ -204,12 +215,65 @@ func restore_resource(amount: float) -> void:
 	resource_changed.emit(_current_resource, max_resource)
 
 
+## Register an ability for cooldown and activation tracking.
+func register_ability(ability: MobaAbility) -> void:
+	_abilities[StringName(ability.id)] = ability
+
+
+## Check if an ability can be activated without side effects.
+## Returns an ActivationFailure enum value indicating readiness or failure reason.
+## This is a pure query: it mutates nothing, spends no resource, and starts no cooldown.
+func can_activate(ability_id: StringName) -> int:
+	if ability_id not in _abilities:
+		return ActivationFailure.UNKNOWN_ABILITY
+
+	var ability: MobaAbility = _abilities[ability_id]
+
+	# Check resource
+	if ability.resource_cost > _current_resource:
+		return ActivationFailure.INSUFFICIENT_RESOURCE
+
+	# Check cooldown and charges
+	if not _cooldowns.is_ready(ability_id):
+		var available_charges = _cooldowns.charges(ability_id)
+		if available_charges <= 0:
+			return ActivationFailure.NO_CHARGES
+		else:
+			return ActivationFailure.ON_COOLDOWN
+
+	return ActivationFailure.OK
+
+
+## Commit an ability activation: spend resource and start cooldown atomically.
+## Returns the failure reason if activation cannot proceed; spends nothing and starts no cooldown if not OK.
+## If can_activate() returns OK, this call will succeed and spend resource + start cooldown.
+func commit_activate(ability_id: StringName) -> int:
+	var check = can_activate(ability_id)
+	if check != ActivationFailure.OK:
+		return check
+
+	var ability: MobaAbility = _abilities[ability_id]
+
+	# Spend resource
+	spend_resource(ability.resource_cost)
+
+	# Start cooldown with current haste
+	var haste = get_stat(MobaStatBlock.ABILITY_HASTE)
+	_cooldowns.start(ability_id, ability.cooldown, haste, ability.charges)
+
+	return ActivationFailure.OK
+
+
 ## Advance time by delta seconds.
 ## Accumulates resource and health regeneration continuously (not gated by one-second intervals).
 ## Health regeneration clamps at maximum and emits health_changed.
 ## A dead combatant does not regenerate health.
 ## Resource regeneration always occurs (dead or alive).
+## Also advances all active cooldowns.
 func tick(delta: float) -> void:
+	# Advance cooldowns
+	_cooldowns.tick(delta)
+
 	# Accumulate resource regeneration
 	var resource_regen = get_stat(MobaStatBlock.RESOURCE_REGEN)
 	var max_resource = get_stat(MobaStatBlock.RESOURCE)
