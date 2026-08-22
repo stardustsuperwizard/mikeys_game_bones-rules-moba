@@ -1298,6 +1298,10 @@ jobs:
                   body_file.write(body)
                   body_path = body_file.name
 
+              # The "[{parent}]" tag duplicates the native --parent
+              # relationship set below, in a form that is actually visible
+              # in the Issues list -- GitHub does not surface sub-issue
+              # relationships there.
               command = [
                   "gh",
                   "issue",
@@ -1305,7 +1309,7 @@ jobs:
                   "--repo",
                   repo,
                   "--title",
-                  f"[impl] {task['title']}",
+                  f"[impl] [{parent}] {task['title']}",
                   "--body-file",
                   body_path,
                   "--label",
@@ -1430,7 +1434,9 @@ jobs:
                   "Run .github/scripts/validate-godot.sh and report the\n"
                   "command and its result.\n"
                   "\n"
-                  f"Your pull request must include: Closes #{number}\n"
+                  f"Title the pull request starting with [{number}], for\n"
+                  f"example \"[{number}] <what it does>\", and include in its\n"
+                  f"description: Closes #{number}\n"
                   "````\n\n"
                   "**Pick the model, not the agent.** The `executor` profile "
                   "adds nothing a cloud session can use: its `tools:` and "
@@ -1462,7 +1468,8 @@ jobs:
                   "`Discovered out-of-scope work` rather than implementing "
                   "it.\n\n"
                   "Run `.github/scripts/validate-godot.sh` before reporting "
-                  "completion. The implementation pull request must close "
+                  "completion. The implementation pull request must be "
+                  f"titled starting with `[{number}]` and must close "
                   f"this Issue -- `Closes #{number}` -- and must not close "
                   "the parent Feature.\n\n"
                   "---\n\n"
