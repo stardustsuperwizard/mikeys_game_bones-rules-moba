@@ -27,6 +27,9 @@ addons/*
 !.claude/commands/
 !.claude/commands/**
 .DS_Store
+private/
+private/**
+
 
 # Python bytecode from repository tooling
 __pycache__/
