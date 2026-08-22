@@ -147,6 +147,15 @@ jobs:
           echo "issue_url=$(jq -r '.url' issue.json)" >> "$GITHUB_OUTPUT"
           echo "title=$(jq -r '.title' issue.json)" >> "$GITHUB_OUTPUT"
 
+          # Computed here, not down in "Prepare Diff and Draft Title", so it
+          # exists before the branch-existence check below and doesn't
+          # require a fresh executor run to produce. Implementation Task
+          # Issues are titled "[impl] <description>"; the pull request tag
+          # is "[<n>] <description>" instead.
+          TITLE_RAW=$(jq -r '.title' issue.json)
+          TITLE_STRIPPED=$(echo "$TITLE_RAW" | sed -E 's/^\[impl\]\s*//i')
+          echo "PR_TITLE=[$ISSUE_NUMBER] $TITLE_STRIPPED" >> "$GITHUB_ENV"
+
           if [ "$(jq -r '.state' issue.json)" != "OPEN" ]; then
             echo "ok=false" >> "$GITHUB_OUTPUT"
             echo "reason=not_open" >> "$GITHUB_OUTPUT"
@@ -237,6 +246,28 @@ jobs:
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
+      # Catches the one case "Resolve Implementation Task Issue"'s pr_exists
+      # guard doesn't: a prior run that pushed $BRANCH but never got a pull
+      # request onto it (e.g. `gh pr create` itself failed after the push --
+      # see the comment on that failure in "Push Branch and Open Pull
+      # Request" below). Re-adding `agent:execute` today would blow that
+      # branch away with `git checkout -B` and pay for a whole new executor
+      # session to reproduce a commit that already exists. Checking here,
+      # before Godot setup or any Copilot session, means a hit skips the
+      # entire expensive part of this job.
+      - name: Check For Existing Branch
+        if: steps.context.outputs.ok == 'true'
+        id: branch-check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Configure Git Identity
         if: steps.context.outputs.ok == 'true'
         shell: bash
@@ -247,15 +278,35 @@ jobs:
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # BASE_SHA is the point every later diff/verdict is measured against.
+      # On a fresh branch that's simply the checkout point. On a resumed
+      # branch it must be the merge-base with the default branch -- not the
+      # branch tip -- so "Check For Commit" still sees the existing
+      # implementation commit as new work, and the reviewer still gets the
+      # full Issue diff instead of an empty one.
       - name: Create Working Branch
         if: steps.context.outputs.ok == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          git checkout -B "$BRANCH"
+          if [ "${{ steps.branch-check.outputs.exists }}" = "true" ]; then
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
 
-          echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+            DEFAULT_BRANCH=$(
+              gh repo view "$GITHUB_REPOSITORY" \
+                --json defaultBranchRef --jq '.defaultBranchRef.name'
+            )
+            git fetch origin "$DEFAULT_BRANCH"
+
+            echo "BASE_SHA=$(git merge-base "origin/$DEFAULT_BRANCH" HEAD)" \
+              >> "$GITHUB_ENV"
+          else
+            git checkout -B "$BRANCH"
+
+            echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          fi
 
       # Needed before the executor session even starts: the executor's own
       # hard rules (below) tell it to run `validate-godot.sh` itself, and
@@ -272,7 +323,9 @@ jobs:
           godot-version: 4.7.1-stable
 
       - name: Build Executor Request
-        if: steps.context.outputs.ok == 'true'
+        if: >-
+          steps.context.outputs.ok == 'true' &&
+          steps.branch-check.outputs.exists != 'true'
         shell: python
         run: |
           import json
@@ -345,7 +398,9 @@ jobs:
           print(f"Prompt built: {len(prompt)} chars")
 
       - name: Run Executor Session
-        if: steps.context.outputs.ok == 'true'
+        if: >-
+          steps.context.outputs.ok == 'true' &&
+          steps.branch-check.outputs.exists != 'true'
         id: exec-session
         uses: ./.github/actions/run-copilot-session
         with:
@@ -496,12 +551,6 @@ jobs:
           echo "IMPL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
           git diff "$BASE_SHA" HEAD > execute-diff.txt
-
-          TITLE_RAW=$(jq -r '.title' issue.json)
-          # Implementation Task Issues are titled "[impl] <description>";
-          # the pull request tag is "[<n>] <description>" instead.
-          TITLE_STRIPPED=$(echo "$TITLE_RAW" | sed -E 's/^\[impl\]\s*//i')
-          echo "PR_TITLE=[$ISSUE_NUMBER] $TITLE_STRIPPED" >> "$GITHUB_ENV"
 
       # continue-on-error throughout this whole review-and-fix section:
       # every step in it is best-effort. A hiccup anywhere here (not just a
@@ -661,6 +710,7 @@ jobs:
           FIX_APPLIED: ${{ steps.fix-eval.outputs.fix_applied }}
           EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.assistant-text-file }}
           EXECUTOR_MODEL: ${{ steps.exec-session.outputs.resolved-model }}
+          BRANCH_RESUMED: ${{ steps.branch-check.outputs.exists }}
         run: |
           import json
           import os
@@ -671,14 +721,33 @@ jobs:
           branch = os.environ["BRANCH"]
           pr_title = os.environ["PR_TITLE"]
           repo = os.environ["GITHUB_REPOSITORY"]
+          resumed = os.environ.get("BRANCH_RESUMED") == "true"
 
           def read(path):
               p = pathlib.Path(path) if path else None
               return p.read_text(errors="replace").strip() if p and p.exists() else ""
 
-          exec_report = read(os.environ.get("EXEC_TEXT_FILE")) or (
-              "The executor pushed a commit but produced no final report."
-              " Inspect the diff directly."
+          # When resumed, "Run Executor Session" never ran this pass -- the
+          # implementation commit and its report belong to whichever earlier
+          # run pushed $BRANCH. Say that plainly instead of falling back to
+          # the generic "no final report" wording, which would read as if
+          # something went wrong this run.
+          if resumed:
+              exec_report = (
+                  "Resumed from a branch already pushed by a previous run of"
+                  " this workflow -- the executor session was skipped this"
+                  " time. The implementation commit and its completion"
+                  " report belong to that earlier run; see its log for"
+                  " details."
+              )
+          else:
+              exec_report = read(os.environ.get("EXEC_TEXT_FILE")) or (
+                  "The executor pushed a commit but produced no final report."
+                  " Inspect the diff directly."
+              )
+
+          executor_model = os.environ.get("EXECUTOR_MODEL") or (
+              "unknown (resumed from a previous run)" if resumed else ""
           )
 
           fix_applied = os.environ.get("FIX_APPLIED") == "true"
@@ -713,7 +782,7 @@ jobs:
               "",
               "## Agent Session Metadata",
               "",
-              f"- Implementation model: {os.environ['EXECUTOR_MODEL']}",
+              f"- Implementation model: {executor_model}",
               "- Review model: ",
               "- Reasoning level: default",
               "- Rework cycles: " + ("1" if fix_applied else "0"),
@@ -788,7 +857,7 @@ jobs:
               ["gh", "issue", "comment", issue_number, "--repo", repo,
                "--body",
                f"Opened {pr_url} via `.github/agents/02-executor.agent.md`"
-               f" on `{os.environ['EXECUTOR_MODEL']}`."],
+               f" on `{executor_model}`."],
               check=True,
           )
 
