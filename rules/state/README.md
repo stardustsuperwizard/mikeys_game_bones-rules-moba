@@ -78,20 +78,22 @@ Manages character availability, action restrictions, and crowd control state.
 
 ### Methods
 
-- **can(action: StringName) → bool** — Answers whether an action is legal. Actions: `"move"`, `"basic_attack"`, `"ability"`, `"jump"`.
+- **can(action: StringName) → bool** — Answers whether an action is legal. Actions: `"move"`, `"basic_attack"`, `"ability"`, `"jump"`. Movement's `locked` policy (DASHING) resolves to `false`: input is ignored while position is driven by the action, so it is not a legal move input.
 - **movement_policy() → StringName** — Returns the movement policy as a StringName (never reduced to boolean).
-- **try_enter(state: int, duration: float = 0.0, cause: int = JUMP) → bool** — Attempt to enter a state. Returns false if duration ≤ 0, if DEAD, or if invalid state. Re-entering the current state returns true without emitting.
+- **hard_cc_policy() → StringName** — Returns the `interruptible_by_hard_cc` policy for the current state as a StringName (`"yes"`, `"no"`, `"per_cc"`, `"breaks_channel"`, `"displacement_only"`), by dictionary lookup only.
+- **try_enter(state: int, duration: float = 0.0, cause: int = JUMP) → bool** — Attempt to enter a state. Durationless states (IDLE, MOVING, DEAD, and CROWD_CONTROLLED entered without a duration) are entered normally regardless of `duration`; every other state requires `duration > 0` and is rejected otherwise. Also returns false if current state is DEAD, or if `state` is invalid. Re-entering the current state returns true without emitting.
 - **tick(delta: float) → void** — Advance time. Decrements remaining if tracking a duration; transitions to IDLE when duration expires.
 - **revive() → bool** — Exit DEAD state and return to IDLE. Returns false if not currently DEAD.
 - **get_airborne_cause() → int** — Retrieve the AirborneCause if AIRBORNE, or -1 if not.
 - **get_state_table_for_testing() → Dictionary** — Expose the loaded table for testing mutation.
+- **load_state_table_for_testing(data: Variant) → bool** — Feed a hand-built table through the same validation path used on `_ready()`, for testing malformed-table handling.
 
 ### Design Notes
 
 - No `_process` or `_physics_process`. Time advances only through explicit `tick(delta)` calls from the owner.
-- Action legality is determined by dictionary lookup against the loaded table, never by code branches over state values.
-- Unrecognized state names, column names, or policy values cause `push_error()` and a detectable failure state.
-- Zero-or-negative duration states are never entered; `try_enter(state, 0.0)` returns false.
-- `DEAD` is terminal: every `can()` query returns false, and `try_enter()` always returns false. Only `revive()` exits.
+- Action legality is determined by dictionary lookup against the loaded table, never by code branches over state values. This includes DEAD: its table row already answers `no`/`false` for every action and every policy, so `can()` and `hard_cc_policy()` need no special-case branch for it.
+- Unrecognized state names, column names, or policy values cause `push_error()` and set the detectable `load_failed` flag; `can()`, `movement_policy()`, and `hard_cc_policy()` all check it and fail safe (return `false` / `"no"`) rather than silently reporting stale or partial data.
+- Zero-or-negative duration is rejected only for states that require a duration to be meaningful (BASIC_ATTACK_WINDUP, BASIC_ATTACK_RECOVERY, ABILITY_CAST, ABILITY_CHANNEL, DASHING, AIRBORNE). IDLE, MOVING, DEAD, and CROWD_CONTROLLED may be entered with `duration <= 0` and simply have no expiry.
+- `DEAD` is terminal and reachable through `try_enter()` like any other durationless state: once entered, every `can()` query returns false, and further `try_enter()` calls always return false. Only `revive()` exits.
 - `AIRBORNE` states store the cause flag through transitions and expose it for later use.
 
