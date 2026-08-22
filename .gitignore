@@ -45,3 +45,61 @@ env/
 
 # Generated rules data (Python harness only)
 rules/data/generated/
+
+# Scratch files written at repo root by the planner/executor/reviewer/fixer
+# GitHub Actions pipeline (.github/workflows/agent-*.yml, .github/actions/).
+# These are ephemeral CI-run artifacts, never meant to be committed -- but
+# an agent session running with repo-root as its cwd can see them and sweep
+# them into its own `git add -A` if they aren't ignored, which trips the
+# "Check For Commit" clean-tree gate. See run-copilot-session/action.yml.
+copilot-output.jsonl
+copilot-error.txt
+copilot-outcome.json
+copilot-assistant-text.txt
+copilot-session-failure.json
+model-help.txt
+executor-prompt.txt
+planner-prompt.txt
+reviewer-prompt.txt
+fixer-prompt.txt
+issue.json
+task.json
+parent.json
+plan.json
+pr.json
+pr-meta.json
+comments.json
+created-issues.json
+closing-issues.json
+args.json
+args.jsonl
+update-pr.json
+executor-failure.json
+planner-failure.json
+fixer-failure.json
+review-verdict-failure.json
+execute-diff.txt
+fix-diff.txt
+review-diff.txt
+validate-output.txt
+format-validate-output.txt
+fix-validate-output.txt
+gdformat-output.txt
+gdlint-output.txt
+changed-gd-files.txt
+comment.md
+blocker-comment.md
+fix-comment.md
+review-comment.md
+skip-comment.md
+no-commit-comment.md
+validation-failed-comment.md
+pr-body.md
+fix-verdict.md
+review.md
+dashboard.md
+gdscript-lint-report.md
+candidates.txt
+suggest.txt
+tasks.txt
+valid-tasks.txt
