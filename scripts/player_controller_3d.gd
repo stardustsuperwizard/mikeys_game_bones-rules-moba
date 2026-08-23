@@ -63,6 +63,12 @@ var _jump_requested := false
 # leaves range / is freed.
 var _basic_attack_pending := false
 
+# The target of the pending basic attack. get_attack_target() cancels the
+# movement order (which clears _attack_target) so the player stops walking,
+# so this keeps a separate reference alive across frames for the attack cycle
+# to actually run against.
+var _pending_attack_target: Actor = null
+
 # The current click order -- at most one of these three is ever live.
 var _destination := Vector3.ZERO
 var _has_destination := false
@@ -89,27 +95,32 @@ func _ready() -> void:
 # rather than on button press means a single left click issues an order and the
 # attack fires automatically once the player closes the distance, instead of
 # one press both ordering and immediately attacking.
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	var combatant := _combatant()
 	if combatant:
-		combatant.tick(_delta)
+		combatant.tick(delta)
 
 		# Fire the basic attack as soon as the player reaches the order target.
 		# _basic_attack_pending is set by get_attack_target() when the player
-		# enters range; cleared here after the combatant accepts the call.
-		if _basic_attack_pending and _attack_target != null and is_instance_valid(_attack_target):
+		# enters range; _pending_attack_target survives the cancel_order() call
+		# that clears _attack_target, so the attack cycle has something to run
+		# against. Cleared here after the combatant accepts the call.
+		if _basic_attack_pending and is_instance_valid(_pending_attack_target):
 			var target_combatant := (
-				_attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
+				_pending_attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
 			)
 			if target_combatant:
 				if combatant.basic_attack(target_combatant):
 					_basic_attack_pending = false
+					_pending_attack_target = null
 			else:
 				# Target has no MobaCombatant; clear pending so it doesn't
 				# remain set indefinitely.
 				_basic_attack_pending = false
+				_pending_attack_target = null
 		elif _basic_attack_pending:
 			_basic_attack_pending = false
+			_pending_attack_target = null
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -191,6 +202,7 @@ func get_attack_target() -> Actor:
 	# that standing still in range does not repeatedly call cancel_order().
 	if _combatant() != null:
 		if not _basic_attack_pending:
+			_pending_attack_target = _attack_target
 			cancel_order()
 			_basic_attack_pending = true
 		return null
