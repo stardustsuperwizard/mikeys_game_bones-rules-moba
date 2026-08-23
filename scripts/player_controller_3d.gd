@@ -98,7 +98,9 @@ func _physics_process(_delta: float) -> void:
 		# _basic_attack_pending is set by get_attack_target() when the player
 		# enters range; cleared here after the combatant accepts the call.
 		if _basic_attack_pending and _attack_target != null and is_instance_valid(_attack_target):
-			var target_combatant := _attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
+			var target_combatant := (
+				_attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
+			)
 			if target_combatant:
 				if combatant.basic_attack(target_combatant):
 					_basic_attack_pending = false
