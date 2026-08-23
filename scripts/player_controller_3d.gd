@@ -57,6 +57,12 @@ const WALL_BLOCK_DOT := -0.5
 
 var _jump_requested := false
 
+# Whether a basic-attack cycle is pending toward the current attack target.
+# Set to true when the click-order system has delivered the player into range;
+# cleared when the combatant accepts the basic_attack() call or the target
+# leaves range / is freed.
+var _basic_attack_pending := false
+
 # The current click order -- at most one of these three is ever live.
 var _destination := Vector3.ZERO
 var _has_destination := false
@@ -73,6 +79,37 @@ func _ready() -> void:
 	actor.add_to_group("players")
 
 
+# Ticks the MOBA combatant once per physics frame.  MobaCombatant.tick() drives
+# cooldowns, resource regeneration, and the internal state machine via
+# _tick_state_machine_and_basic_attack(), so no separate MobaStateMachine.tick()
+# call is needed here -- the combatant owns that responsibility.
+#
+# Also fires the ruleset basic attack when the click-order system has delivered
+# the player into melee range of an attack target.  Doing it here (on approach)
+# rather than on button press means a single left click issues an order and the
+# attack fires automatically once the player closes the distance, instead of
+# one press both ordering and immediately attacking.
+func _physics_process(_delta: float) -> void:
+	var combatant := _combatant()
+	if combatant:
+		combatant.tick(_delta)
+
+		# Fire the basic attack as soon as the player reaches the order target.
+		# _basic_attack_pending is set by get_attack_target() when the player
+		# enters range; cleared here after the combatant accepts the call.
+		if _basic_attack_pending and _attack_target != null and is_instance_valid(_attack_target):
+			var target_combatant := _attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
+			if target_combatant:
+				if combatant.basic_attack(target_combatant):
+					_basic_attack_pending = false
+			else:
+				# Target has no MobaCombatant; clear pending so it doesn't
+				# remain set indefinitely.
+				_basic_attack_pending = false
+		elif _basic_attack_pending:
+			_basic_attack_pending = false
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("jump"):
 		_jump_requested = true
@@ -82,6 +119,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		# happens to be under the crosshair rather than what the player aimed at.
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			_issue_order_from_click(get_viewport().get_mouse_position())
+	# Ability slots: keys 1-4 / gamepad A/B/X/Y.
+	elif event.is_action_pressed("ability_1"):
+		_activate_slot(1)
+	elif event.is_action_pressed("ability_2"):
+		_activate_slot(2)
+	elif event.is_action_pressed("ability_3"):
+		_activate_slot(3)
+	elif event.is_action_pressed("ability_4"):
+		_activate_slot(4)
+	# NOTE: basic_attack is also bound to left mouse button (same as
+	# action_primary in project.godot).  It is intentionally NOT consumed
+	# here: reading it from _unhandled_input would cause a single left click
+	# to both issue a click-to-order (via action_primary) and fire an extra
+	# basic attack.  Instead, the basic attack fires automatically in
+	# _physics_process once the click-order brings the player into range.
+	# Gamepad RT (axis 5) shares the binding; Batch 3 will add a device-
+	# agnostic intent layer (§1.6) that unifies RT vs keyboard routing.
 
 
 # Returns world-space movement direction. Keyboard input is relative to the
@@ -124,6 +178,19 @@ func consume_jump() -> bool:
 # arrived this frame resolves on the same frame it arrived.
 func get_attack_target() -> Actor:
 	if _attack_target == null or not _in_range_of(_attack_target, attack_range):
+		return null
+	# When this actor has a MobaCombatant the ruleset basic-attack path
+	# (MobaCombatant.basic_attack) handles combat resolution, driven in
+	# _physics_process once the player closes range.  Cancel the movement
+	# order so the player stops walking, schedule the attack cycle, but
+	# return null so Actor._resolve_attack() does NOT additionally fire for
+	# the same input (architecture constraint: ruleset path wins).
+	# Gate the order-cancel + flag-set on the flag not already being live so
+	# that standing still in range does not repeatedly call cancel_order().
+	if _combatant() != null:
+		if not _basic_attack_pending:
+			cancel_order()
+			_basic_attack_pending = true
 		return null
 	var target := _attack_target
 	cancel_order()
@@ -309,3 +376,19 @@ func _actor_of(collider: Node) -> Actor:
 
 func _body() -> CharacterBody3D:
 	return actor.get_node_or_null("Body") as CharacterBody3D
+
+
+# Returns the MobaCombatant child of the actor, or null if there isn't one.
+func _combatant() -> MobaCombatant:
+	return actor.get_node_or_null("MobaCombatant") as MobaCombatant
+
+
+# Activate ability slot `index` (1-4) through the actor's MobaAbilityCaster.
+# An empty slot produces no console output: MobaAbilityCaster returns a failed
+# ActionResult with FAILURE_EMPTY_SLOT, which is silently discarded here.
+func _activate_slot(index: int) -> void:
+	var caster := actor.get_node_or_null("MobaAbilityCaster") as MobaAbilityCaster
+	if not caster:
+		return
+	var context := MobaCastContext.new(actor)
+	caster.activate_slot(index, context)
