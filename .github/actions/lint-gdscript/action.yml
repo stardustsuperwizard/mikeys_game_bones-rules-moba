@@ -43,6 +43,18 @@ runs:
       with:
         python-version: "3.11"
 
+    # Keyed on the version pin itself (below), not a requirements file --
+    # there isn't one, this is an inline `pip install`. Restoring pip's
+    # wheel cache here only saves the download on a cold runner; a warm
+    # job calling this action a second time (gdscript-lint.yml's re-check
+    # after an auto-fix) already has it in the same job's pip cache dir
+    # regardless.
+    - name: Restore Cached gdtoolkit Wheel
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: pip-gdtoolkit-4-${{ runner.os }}
+
     - name: Lint and Format
       id: run
       shell: bash
