@@ -24,7 +24,15 @@ enum ActivationFailure {
 }
 
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
-@export var loadout: MobaLoadout
+## Registers the loadout's action abilities as soon as it is assigned, so a
+## combatant that never enters the tree (e.g. a standalone test fixture) or
+## has its loadout assigned after _ready() still resolves them without a
+## separate manual register_ability() step.
+@export var loadout: MobaLoadout:
+	set(value):
+		loadout = value
+		if loadout != null:
+			_register_loadout_abilities()
 
 # Property accessors for current_resource and maximum_resource
 var current_resource: float:
@@ -48,10 +56,6 @@ func _ready() -> void:
 	_runtime_stat_block = stat_block.duplicate()
 	_current_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	_current_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
-
-	# Register loadout abilities if present
-	if loadout != null:
-		_register_loadout_abilities()
 
 	# Defer seeding the parent Actor's character_sheet because children ready before parents,
 	# and the Actor's _ready() hasn't yet duplicated its character_sheet.
