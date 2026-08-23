@@ -4,6 +4,8 @@
 [ext_resource type="Script" uid="uid://cjdpbv8uumhmx" path="res://addons/mikeys_game_bones/world/world_manager.gd" id="3"]
 [ext_resource type="Resource" path="res://resources/player_spawn_point.tres" id="4"]
 [ext_resource type="Resource" path="res://resources/enemy_spawn_point.tres" id="5"]
+[ext_resource type="PackedScene" path="res://rules/ui/moba_combat_hud.tscn" id="6"]
+[ext_resource type="Script" path="res://scripts/combat_hud_binder.gd" id="7"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(20, 0.2, 20)
@@ -111,3 +113,10 @@ spawn_path = NodePath("..")
 [node name="ThirdPersonCamera" type="Camera3D" parent="." unique_id=1317531167]
 script = ExtResource("2")
 target_path = NodePath("../WorldManager/Player/Body")
+
+[node name="MobaCombatHUD" parent="." instance=ExtResource("6")]
+
+[node name="CombatHUDBinder" type="Node" parent="."]
+script = ExtResource("7")
+hud_path = NodePath("../MobaCombatHUD")
+combatant_path = NodePath("../WorldManager/Player/MobaCombatant")
