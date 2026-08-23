@@ -50,9 +50,7 @@ static func _create_test_combatant() -> MobaCombatant:
 	var combatant := MobaCombatant.new()
 	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
-	combatant._current_health = combatant._runtime_stat_block.get_stat_value(
-		MobaStatBlock.HEALTH
-	)
+	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(
 		MobaStatBlock.RESOURCE
 	)
@@ -73,9 +71,7 @@ static func _create_test_actor_with_loadout() -> Dictionary:
 	combatant.name = "MobaCombatant"
 	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
-	combatant._current_health = combatant._runtime_stat_block.get_stat_value(
-		MobaStatBlock.HEALTH
-	)
+	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(
 		MobaStatBlock.RESOURCE
 	)
