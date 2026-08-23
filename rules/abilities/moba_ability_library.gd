@@ -1,7 +1,9 @@
 ## MobaAbilityLibrary loads and indexes all MobaAbility .tres files from a target directory.
 ##
 ## Provides safe-by-construction loading: a bad file is reported by path and excluded,
-## never crashes startup, and never prevents valid abilities from loading.
+## never crashes startup, and never prevents valid abilities from loading. An empty id, or
+## an id that duplicates one already indexed, is treated the same as a load error: reported
+## by path and excluded, keeping whichever resource for that id was scanned first.
 ##
 ## Follows the MobaRules pattern of static methods and static cache state.
 class_name MobaAbilityLibrary
@@ -64,10 +66,7 @@ static func _load_single_ability(file_path: String) -> void:
 
 	# Check if the resource is actually a MobaAbility by script class name
 	var script = resource.get_script()
-	if script != null and script.get_global_name() == "MobaAbility":
-		_cache[StringName(resource.id)] = resource
-	else:
-		# Not a MobaAbility instance
+	if script == null or script.get_global_name() != "MobaAbility":
 		var actual_type = script.get_global_name() if script != null else resource.get_class()
 		printerr(
 			(
@@ -75,6 +74,26 @@ static func _load_single_ability(file_path: String) -> void:
 				% [file_path, actual_type]
 			)
 		)
+		return
+
+	var ability := resource as MobaAbility
+
+	if ability.id == "":
+		printerr("MobaAbilityLibrary: %s has an empty id and was excluded" % file_path)
+		return
+
+	var id := StringName(ability.id)
+
+	if _cache.has(id):
+		printerr(
+			(
+				"MobaAbilityLibrary: %s has duplicate id '%s'; keeping the first-loaded resource"
+				% [file_path, ability.id]
+			)
+		)
+		return
+
+	_cache[id] = ability
 
 
 ## Reset the cache (primarily for testing).
