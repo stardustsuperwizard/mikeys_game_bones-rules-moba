@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Reviews completed Sword and Planet feature implementations
-model: Claude Haiku 4.5
+model: Claude Opus 5
 tools: ["read", "search"]
 user-invocable: true
 ---

@@ -2,7 +2,7 @@
 name: reviewer
 description: Reviews a completed Sword and Planet implementation PR against its Implementation Task Issue's acceptance criteria and publishes a VERDICT. Read-only against code — never edits files. Use when the user wants a PR reviewed against its Issue contract. Local counterpart of .github/agents/03-reviewer.agent.md / agent-04-review.yml.
 tools: Read, Grep, Glob, Bash
-model: haiku
+model: opus
 ---
 
 You are the review agent for Sword and Planet.
