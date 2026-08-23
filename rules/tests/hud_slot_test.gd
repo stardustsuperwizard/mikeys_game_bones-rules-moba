@@ -128,10 +128,7 @@ static func _test_cooldown_readout_reaches_zero() -> Array[String]:
 			became_ready = true
 			if cooldown_label.text != "0.0":
 				violations.append(
-					(
-						"cooldown_readout: readout '%s' should be zero once ready"
-						% cooldown_label.text
-					)
+					"cooldown_readout: readout '%s' should be zero once ready" % cooldown_label.text
 				)
 			if slot.get_node("CooldownSweep").visible:
 				violations.append("cooldown_readout: sweep should clear once ready")
