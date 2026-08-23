@@ -59,14 +59,15 @@ jobs:
     name: Agent - PR Review
     runs-on: ubuntu-latest
 
-    # Automatic on a Copilot branch becoming ready; manual anywhere else via
+    # Automatic on a Copilot or Claude branch becoming ready; manual anywhere else via
     # the agent:review label, which works from the GitHub mobile apps.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
        github.event.label.name == 'agent:review') ||
       (github.event.action == 'ready_for_review' &&
-       startsWith(github.event.pull_request.head.ref, 'copilot/'))
+       (startsWith(github.event.pull_request.head.ref, 'copilot/') ||
+        startsWith(github.event.pull_request.head.ref, 'claude/')))
 
     env:
       GH_TOKEN: ${{ github.token }}

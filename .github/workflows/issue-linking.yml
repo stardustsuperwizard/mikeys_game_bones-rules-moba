@@ -68,12 +68,13 @@ jobs:
     name: Check Dependencies
     runs-on: ubuntu-latest
 
-    # Run automatically only for Copilot-created PRs or Copilot assignments.
+    # Run automatically only for Copilot/Claude-created PRs or Copilot assignments.
     # Human PRs normally do not need to close an Implementation Task.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
        (startsWith(github.event.pull_request.head.ref, 'copilot/') ||
+        startsWith(github.event.pull_request.head.ref, 'claude/') ||
         github.event.pull_request.user.login == 'Copilot')) ||
       (github.event.action == 'assigned' &&
        github.event.assignee.login == 'copilot-swe-agent')
