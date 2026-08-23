@@ -9,6 +9,32 @@ name: GDScript Lint
 # formatting before it ever opens a pull request -- but a human-authored
 # PR, or a cloud-agent PR nobody ran `agent:review` on, would otherwise get
 # no lint signal at all. This workflow is what covers that gap.
+#
+# Unlike a plain gate, this one tries to self-heal before failing:
+#
+#   1. `gdformat` is mechanical and deterministic (same tool and mode
+#      agent-02-execute.yml already runs pre-PR). If it changes anything,
+#      commit and push that -- no model, no judgment call, nothing to gate
+#      behind a human. This alone should resolve the large majority of
+#      findings, the same way it does pre-PR.
+#   2. Whatever gdlint still finds after that has no deterministic fix --
+#      gdtoolkit ships no auto-fix for gdlint (see lint-gdscript/action.yml)
+#      -- so it takes a narrow, capped Copilot CLI session (Haiku by
+#      default) scoped to exactly the reported findings and the files they
+#      're in, nothing else. This is deliberately NOT routed through
+#      agent-05-fix.yml: that workflow's prompt is built from a PR's
+#      `<!-- agent-review-verdict -->` comment and full diff, which doesn't
+#      exist yet here and shouldn't be faked just to reuse it. It shares
+#      only the generic `run-copilot-session` action, with its own prompt,
+#      its own (cheap, capped) model list, and its own validation gate.
+#
+# This is a deliberate, narrow exception to the rule elsewhere in this repo
+# that spending a Copilot session requires a human decision (see the note
+# in agent-05-fix.yml): a lint fix is bounded, single-file, mechanically
+# verifiable (`validate-godot.sh` + a re-run of gdlint itself), and cheap
+# enough that failing the PR and waiting for a human to notice, add
+# `agent:fix`, and get a review verdict first is pure overhead for
+# something this small.
 
 on:
   pull_request:
@@ -18,8 +44,27 @@ on:
       - '.github/workflows/gdscript-lint.yml'
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: read
+  copilot-requests: write
+
+concurrency:
+  group: gdscript-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+  # Cheap tier by default: these are narrow, single-file, already-diagnosed
+  # findings, not open-ended judgment calls -- the same "Haiku first" shape
+  # as EXECUTOR_MODELS in agent-02-execute.yml. Overridable via the
+  # LINT_FIXER_MODELS repository variable (comma-separated).
+  LINT_FIXER_MODELS: >-
+    ${{ vars.LINT_FIXER_MODELS || 'claude-haiku-4.5,claude-sonnet-5' }}
+
+  # The Copilot CLI rejects anything below 30 -- a floor, not a tuning
+  # choice. A single-file lint fix doesn't need more.
+  LINT_FIXER_MAX_AI_CREDITS: "30"
 
 jobs:
   lint:
@@ -30,10 +75,25 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # A fork PR's branch cannot be pushed to with this token. Detected
+      # up front so every later step can gate on it, rather than
+      # discovering it as a failed `git push`.
+      - name: Resolve Pull Request
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json headRefName,isCrossRepository \
+            > pr-meta.json
+
+          echo "head_ref=$(jq -r '.headRefName' pr-meta.json)" >> "$GITHUB_OUTPUT"
+          echo "fork=$(jq -r '.isCrossRepository' pr-meta.json)" >> "$GITHUB_OUTPUT"
+
       - name: List Changed GDScript Files
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -47,25 +107,241 @@ jobs:
           echo "Changed GDScript files:"
           cat changed-gd-files.txt || echo "(none)"
 
-      - name: Lint Changed Files
-        id: lint
+      - name: Check Out Pull Request Branch
+        if: steps.pr.outputs.fork != 'true'
+        shell: bash
+        run: gh pr checkout "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY"
+
+      - name: Configure Git Identity
+        if: steps.pr.outputs.fork != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Fork PRs can't be pushed to, so there's no point mutating files
+      # locally just to discard them -- check mode reports the same
+      # gdformat diff a human would need to apply by hand.
+      - name: Check Only (Fork Pull Requests)
+        if: steps.pr.outputs.fork == 'true'
+        id: lint-check
         uses: ./.github/actions/lint-gdscript
         with:
           mode: check
           files-list-file: changed-gd-files.txt
 
+      - name: Format and Lint
+        if: steps.pr.outputs.fork != 'true'
+        id: lint-fix
+        uses: ./.github/actions/lint-gdscript
+        with:
+          mode: fix
+          files-list-file: changed-gd-files.txt
+
+      - name: Combine Lint Outputs
+        id: lint
+        shell: bash
+        run: |
+          echo "clean=${{ steps.lint-check.outputs.clean || steps.lint-fix.outputs.clean }}" >> "$GITHUB_OUTPUT"
+          echo "formatted=${{ steps.lint-fix.outputs.formatted || 'false' }}" >> "$GITHUB_OUTPUT"
+
       - name: Show Report
         shell: bash
         run: |
-          cat "${{ steps.lint.outputs.report-file }}" >> "$GITHUB_STEP_SUMMARY"
-          cat "${{ steps.lint.outputs.report-file }}"
+          cat gdscript-lint-report.md >> "$GITHUB_STEP_SUMMARY"
+          cat gdscript-lint-report.md
 
-      - name: Fail on Findings
-        if: steps.lint.outputs.clean != 'true'
+      # Mechanical and deterministic -- no model call. Mirrors
+      # agent-02-execute.yml's pre-PR formatting pass: commit, validate,
+      # push, or revert and continue unformatted if validation somehow
+      # regressed (gdformat shouldn't change behavior, but this is a cheap
+      # safety net either way).
+      - name: Commit Formatting Fix
+        if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.formatted == 'true'
+        id: commit-format
         shell: bash
         run: |
-          echo "::error::gdformat/gdlint found issues in changed files." \
-               "See the step summary for the report. Run \`gdformat\` and" \
-               "fix \`gdlint\` findings locally, or let the executor's" \
-               "pre-PR pass apply them automatically for scripted tasks."
+          set -euo pipefail
+
+          git add -u -- '*.gd'
+          git commit -m "style: apply gdformat"
+
+          if ! .github/scripts/validate-godot.sh > format-validate-output.txt 2>&1; then
+            echo "::warning::Validation failed after applying gdformat." \
+                 "Reverting the formatting commit and continuing unformatted."
+            tail -c 4000 format-validate-output.txt
+            git reset --hard HEAD~1
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          else
+            git push origin "HEAD:${{ steps.pr.outputs.head_ref }}"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Whatever gdlint still finds after formatting has no deterministic
+      # fix (gdtoolkit ships no auto-fix for gdlint findings). Scope this
+      # tightly: only the gdlint output and the files it names, not the PR
+      # diff or task context -- this is a mechanical correction, not a
+      # review-driven one.
+      - name: Build Lint Fix Prompt
+        if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true'
+        id: build-prompt
+        shell: python
+        run: |
+          import pathlib
+
+          gdlint_output = pathlib.Path("gdlint-output.txt")
+          findings = gdlint_output.read_text(errors="replace") if gdlint_output.exists() else "(gdlint output unavailable)"
+
+          files_list = pathlib.Path("changed-gd-files.txt")
+          paths = [
+              line.strip()
+              for line in files_list.read_text().splitlines()
+              if line.strip()
+          ]
+
+          sections = [
+              f"Findings ({len(paths)} file(s) targeted):\n\n```\n{findings}\n```"
+          ]
+
+          for path in paths:
+              file_path = pathlib.Path(path)
+
+              if not file_path.exists():
+                  continue
+
+              sections.append(
+                  f"## File: {path}\n\n```gdscript\n{file_path.read_text(errors='replace')}\n```"
+              )
+
+          prompt = f"""
+          You are a narrow, mechanical lint-fixing session for the Sword
+          and Planet Godot project. `gdformat` has already run and made
+          this code as clean as an automatic formatter can -- what remains
+          are `gdlint` findings, which gdtoolkit has no auto-fix for.
+
+          HARD RULES:
+
+          - Fix ONLY the exact findings listed below, in ONLY the files
+            listed below. Do not touch any other file.
+          - Do not change behavior. A finding like max-line-length should
+            be resolved by reflowing/wrapping, not by altering logic.
+          - Do not reformat beyond what fixing the finding requires --
+            gdformat already handled formatting.
+          - If a finding requires a judgment call you're not confident
+            about (e.g. renaming something used elsewhere, restructuring
+            control flow), leave it unfixed and say so in your final
+            message -- do not guess.
+          - Use your edit tool directly. Do NOT run `git commit` or
+            `git push` -- the workflow handles committing after verifying
+            your changes.
+
+          Your final message should be a short list of what you changed
+          per finding, or "unable to fix: <reason>" for anything you left.
+
+          {chr(10).join(sections)}
+          """
+
+          pathlib.Path("lint-fix-prompt.txt").write_text(prompt)
+          print(f"Prompt built: {len(prompt)} chars, {len(paths)} file(s)")
+
+      - name: Run Lint Fix Session
+        if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true'
+        id: fix-session
+        uses: ./.github/actions/run-copilot-session
+        with:
+          prompt-file: lint-fix-prompt.txt
+          models: ${{ env.LINT_FIXER_MODELS }}
+          max-ai-credits: ${{ env.LINT_FIXER_MAX_AI_CREDITS }}
+          step-label: "Auto-fixing lint"
+
+      # The session was told not to touch anything outside the targeted
+      # files. Enforce that instead of trusting it: anything else changed
+      # means the session went out of scope, and nothing here gets
+      # committed on that basis.
+      - name: Verify Fix Stayed In Scope
+        if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true'
+        id: scope-check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --name-only > changed-after-fix.txt
+
+          if [ -s changed-after-fix.txt ] && \
+             comm -23 <(sort changed-after-fix.txt) <(sort changed-gd-files.txt) | grep -q .; then
+            echo "::error::The lint-fix session changed files outside the" \
+                 "targeted list. Discarding all changes -- this needs a" \
+                 "human, not another automated attempt."
+            comm -23 <(sort changed-after-fix.txt) <(sort changed-gd-files.txt)
+            git checkout -- .
+            echo "in_scope=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "in_scope=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Re-run gdformat/gdlint against whatever the session changed: it may
+      # have introduced its own formatting drift, and this is the only
+      # trustworthy way to know whether the findings are actually gone.
+      - name: Re-check After Fix
+        if: >-
+          steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
+          steps.scope-check.outputs.in_scope == 'true'
+        id: recheck
+        uses: ./.github/actions/lint-gdscript
+        with:
+          mode: fix
+          files-list-file: changed-gd-files.txt
+
+      - name: Commit Lint Fix
+        if: >-
+          steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
+          steps.scope-check.outputs.in_scope == 'true' && steps.recheck.outputs.clean == 'true'
+        id: commit-fix
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "::warning::Lint-fix session reported success but made no" \
+                 "changes. Nothing to commit."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! .github/scripts/validate-godot.sh > lint-fix-validate-output.txt 2>&1; then
+            echo "::error::Validation failed after the lint-fix session." \
+                 "Discarding its changes."
+            tail -c 4000 lint-fix-validate-output.txt
+            git checkout -- .
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mapfile -t FILES < changed-gd-files.txt
+          git add -- "${FILES[@]}"
+          git commit -m "style: auto-fix gdlint findings (${{ steps.fix-session.outputs.resolved-model }})"
+          git push origin "HEAD:${{ steps.pr.outputs.head_ref }}"
+
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Show Final Report
+        if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true'
+        shell: bash
+        run: |
+          cat gdscript-lint-report.md >> "$GITHUB_STEP_SUMMARY"
+          cat gdscript-lint-report.md
+
+      - name: Fail on Remaining Findings
+        if: >-
+          steps.lint.outputs.clean != 'true' &&
+          !(steps.pr.outputs.fork != 'true' && steps.commit-fix.outputs.pushed == 'true')
+        shell: bash
+        run: |
+          echo "::error::gdformat/gdlint found issues that could not be" \
+               "resolved automatically. See the step summary for the" \
+               "report and, if one ran, the lint-fix session's log above." \
+               "Run \`gdformat\` and fix \`gdlint\` findings by hand."
           exit 1
