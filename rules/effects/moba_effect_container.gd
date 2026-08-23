@@ -74,7 +74,19 @@ func apply_modifier(modifier: MobaStatModifier, source_ability_id: StringName) -
 		effect_applied.emit(source_ability_id, stat)
 		return true
 
-	var entry: _Entry = _entries[key]
+	return _apply_to_existing_entry(_entries[key], modifier, source_ability_id, stat, key)
+
+
+## Resolve an application against an already-active entry per its stacking
+## policy. Split out of apply_modifier() to keep both functions under the
+## project's max-returns lint limit.
+func _apply_to_existing_entry(
+	entry: _Entry,
+	modifier: MobaStatModifier,
+	source_ability_id: StringName,
+	stat: StringName,
+	key: Array
+) -> bool:
 	match entry.stacking:
 		MobaStatModifier.Stacking.REFRESH:
 			entry.remaining = modifier.duration
@@ -97,11 +109,11 @@ func apply_modifier(modifier: MobaStatModifier, source_ability_id: StringName) -
 			return false
 
 		MobaStatModifier.Stacking.REPLACE_IF_STRONGER:
-			if absf(modifier.amount) > absf(entry.magnitude):
-				_entries[key] = _make_entry(modifier, source_ability_id, stat)
-				effect_applied.emit(source_ability_id, stat)
-				return true
-			return false
+			if absf(modifier.amount) <= absf(entry.magnitude):
+				return false
+			_entries[key] = _make_entry(modifier, source_ability_id, stat)
+			effect_applied.emit(source_ability_id, stat)
+			return true
 
 	return false
 

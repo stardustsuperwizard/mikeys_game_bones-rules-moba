@@ -1,3 +1,4 @@
+# gdlint:ignore = max-public-methods
 ## Health authority, stat access, and death handling for a MOBA actor.
 ##
 ## MobaCombatant is a child of an Actor and owns the actor's MOBA rules state:
