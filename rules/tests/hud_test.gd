@@ -9,6 +9,7 @@ const MobaStatBlock = preload("res://rules/core/moba_stat_block.gd")
 const MobaCombatant = preload("res://rules/core/moba_combatant.gd")
 const MobaAbility = preload("res://rules/abilities/moba_ability.gd")
 const MobaLoadout = preload("res://rules/abilities/moba_loadout.gd")
+const MobaDamage = preload("res://rules/core/moba_damage.gd")
 const HUD_SCENE = preload("res://rules/ui/moba_combat_hud.tscn")
 
 
@@ -125,7 +126,8 @@ static func _test_bars_follow_signals() -> Array[String]:
 	if health_label.text != "%d / %d" % [roundi(maximum_health), roundi(maximum_health)]:
 		violations.append("bars: health label should read current / maximum")
 
-	combatant.apply_damage(10.0, MobaAbility.DamageType.PHYSICAL, null)
+	var damage := MobaDamage.new(10.0, MobaDamage.DamageType.PHYSICAL, null, false)
+	combatant.apply_damage(damage)
 	if health_bar.value >= maximum_health:
 		violations.append("bars: health bar did not follow health_changed")
 
