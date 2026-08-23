@@ -47,8 +47,6 @@ func _process(_delta: float) -> void:
 	if _combatant != null and not is_instance_valid(_combatant):
 		unbind()
 		return
-	if _focused_slot != null:
-		_refresh_tooltip()
 
 
 ## Bind the HUD to one combatant. Rebinding is explicit: any previous
@@ -133,11 +131,13 @@ func _push_current_values() -> void:
 func _on_health_changed(current: float, maximum: float) -> void:
 	_ensure_nodes()
 	_render_bar(_health_bar, _health_label, current, maximum)
+	_refresh_tooltip()
 
 
 func _on_resource_changed(current: float, maximum: float) -> void:
 	_ensure_nodes()
 	_render_bar(_resource_bar, _resource_label, current, maximum)
+	_refresh_tooltip()
 
 
 func _render_bar(bar: TextureProgressBar, label: Label, current: float, maximum: float) -> void:
