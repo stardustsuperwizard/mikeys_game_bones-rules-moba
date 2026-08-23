@@ -202,8 +202,9 @@ func get_attack_target() -> Actor:
 	# that standing still in range does not repeatedly call cancel_order().
 	if _combatant() != null:
 		if not _basic_attack_pending:
-			_pending_attack_target = _attack_target
+			var pending_target := _attack_target
 			cancel_order()
+			_pending_attack_target = pending_target
 			_basic_attack_pending = true
 		return null
 	var target := _attack_target
@@ -220,6 +221,11 @@ func get_interact_target() -> Node:
 
 
 # Drops the live order, whatever kind it is, and resets its stall tracking.
+# Also clears any pending basic attack: without this, disengaging (keyboard
+# movement or a new click) while a basic_attack() call was still waiting on
+# its cooldown would leave _basic_attack_pending latched forever, since
+# get_attack_target() only arms it when it isn't already live -- silently
+# blocking every future attack order for the rest of the session.
 func cancel_order() -> void:
 	_has_destination = false
 	_destination_is_wall = false
@@ -227,6 +233,8 @@ func cancel_order() -> void:
 	_interact_target = null
 	_closest_distance = INF
 	_stall_timer = 0.0
+	_basic_attack_pending = false
+	_pending_attack_target = null
 
 
 # Raycasts from the camera through the clicked pixel and turns whatever it

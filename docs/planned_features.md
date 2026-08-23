@@ -44,17 +44,14 @@ These are small and unlock a disproportionate amount of existing code.
 
 ### 0.1 Put content in the test room
 
-**Done (T4).** A hostile actor scene (`scenes/enemy/enemy.tscn`) now exists with
-`SimpleAIController`, `hostile = true`, and a `MobaCombatant` carrying the
-melee-bruiser loadout.  It is registered as the second entry in
-`WorldManager.spawn_points` in `scenes/main.tscn` and spawns at runtime at
-position (-2, 0, -3).  The player scene also carries a `MobaCombatant`,
-`MobaStateMachine`, and `MobaAbilityCaster`; ability slots 1-4 are wired to
-the `ability_1`–`ability_4` input actions.
-
-The actor scene can mirror `scenes/player/player.tscn` with `PlayerController3D`
-swapped for `SimpleAIController` and `hostile = true`. Both get added to
-`WorldManager.spawn_points` as new `SpawnPoint` resources.
+**Hostile actor done (T4); `Door` instance still outstanding.** A hostile
+actor scene (`scenes/enemy/enemy.tscn`) now exists with `SimpleAIController`,
+`hostile = true`, and a `MobaCombatant` carrying the melee-bruiser loadout.
+It is registered as the second entry in `WorldManager.spawn_points` in
+`scenes/main.tscn` and spawns at runtime at position (-2, 0, -3). The player
+scene also carries a `MobaCombatant`, `MobaStateMachine`, and
+`MobaAbilityCaster`; ability slots 1-4 are wired to the `ability_1`–`ability_4`
+input actions. A `Door` instance in the main scene is still needed.
 
 ### 0.2 Minimum viable UI
 
