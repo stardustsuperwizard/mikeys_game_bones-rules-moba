@@ -61,10 +61,14 @@ var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
 var _attack_target: Node = null
 var _attack_time_since_ready: float = INF
 var _effect_container: MobaEffectContainer = null
-## Per-stat cache of the modifier-applied value. get_stat() is on the damage
-## path and the movement path, so the modifier list is summed only when it
-## actually changes rather than on every read; any container mutation clears
-## the whole cache through _invalidate_stat_cache().
+## Per-stat cache of the modifier bonuses (flat, percent), NOT the final
+## value: the base is always re-read live from _runtime_stat_block so a
+## direct mutation of the runtime stat block (as several existing test
+## suites do) is never masked by a stale cached result. get_stat() is on the
+## damage path and the movement path, so it is the container's modifier
+## list -- not the stat block -- that is only scanned when it actually
+## changes; any container mutation clears the whole cache through
+## _invalidate_stat_cache().
 var _stat_cache: Dictionary = {}
 
 
@@ -142,21 +146,25 @@ func get_base_stat(stat: StringName) -> float:
 ## Internal seam for stat modifications.
 ##
 ## Modifier order is pinned: (base + sum(flat)) * (1 + sum(percent)).
-## Percentages sum additively among themselves. Results are cached per stat
-## and invalidated on any effect container mutation.
+## Percentages sum additively among themselves. The (flat, percent) bonus
+## pair is cached per stat and invalidated on any effect container mutation;
+## the base value itself is always re-read live so a direct mutation of
+## _runtime_stat_block is reflected immediately, never masked by a stale
+## cached result.
 func _get_modified_stat(stat: StringName) -> float:
+	var bonus: Dictionary
 	if stat in _stat_cache:
-		return _stat_cache[stat]
+		bonus = _stat_cache[stat]
+	else:
+		var container := get_effect_container()
+		bonus = {"flat": container.get_flat_bonus(stat), "percent": container.get_percent_bonus(stat)}
+		_stat_cache[stat] = bonus
 
 	var base: float = _runtime_stat_block.get_stat_value(stat)
-	var container := get_effect_container()
-	var value: float = (
-		(base + container.get_flat_bonus(stat)) * (1.0 + container.get_percent_bonus(stat))
-	)
+	var value: float = (base + bonus["flat"]) * (1.0 + bonus["percent"])
 	if stat == MobaStatBlock.ATTACK_SPEED:
 		value = maxf(value, _MINIMUM_ATTACK_SPEED)
 
-	_stat_cache[stat] = value
 	return value
 
 

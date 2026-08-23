@@ -390,6 +390,14 @@ static func _test_invalid_stat_rejected() -> Array[String]:
 	if not _approx_equal(combatant.get_stat(MobaStatBlock.ATTACK_DAMAGE), 50.0):
 		violations.append("invalid_stat: get_stat should stay at base 50.0")
 
+	# apply_modifier() calls push_error() on this exact reject path (see
+	# moba_effect_container.gd), but GDScript has no supported hook to
+	# intercept push_error() from a test script -- there is no signal or
+	# override point the engine calls through, only a stderr/log side
+	# effect. invalid_stat_message() is the same string apply_modifier()
+	# passes to push_error(), so asserting it here is the closest available
+	# proxy for "the error names the offending stat and source ability";
+	# it does not prove push_error() itself was called.
 	var message := MobaEffectContainer.invalid_stat_message(&"attak_damage", &"typo_source")
 	if not message.contains("attak_damage") or not message.contains("typo_source"):
 		violations.append("invalid_stat: error message must name the stat and the source ability")
