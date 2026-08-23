@@ -135,3 +135,36 @@ func tick(delta: float) -> void:
 			# Stop the timer when max charges is reached
 			if state.available_charges >= state.max_charges:
 				state.timer_remaining = 0.0
+
+
+## Get the effective (haste-adjusted) duration locked in when the active timer started.
+##
+## Args:
+##     ability_id: Unique identifier for the ability
+##
+## Returns:
+##     Effective cooldown duration in seconds (0.0 if not started)
+func duration(ability_id: StringName) -> float:
+	if not ability_id in _ability_states:
+		return 0.0
+
+	var state: _AbilityState = _ability_states[ability_id]
+	return maxf(0.0, state.timer_duration)
+
+
+## Get the maximum number of charges recorded for the given ability.
+##
+## Named maximum_charges() rather than max_charges() because start() already
+## takes a max_charges parameter, which GDScript treats as a name collision.
+##
+## Args:
+##     ability_id: Unique identifier for the ability
+##
+## Returns:
+##     Maximum charge count (0 if not started)
+func maximum_charges(ability_id: StringName) -> int:
+	if not ability_id in _ability_states:
+		return 0
+
+	var state: _AbilityState = _ability_states[ability_id]
+	return state.max_charges

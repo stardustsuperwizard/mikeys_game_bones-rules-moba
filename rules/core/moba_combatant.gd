@@ -233,6 +233,50 @@ func register_ability(ability: MobaAbility) -> void:
 	_abilities[StringName(ability.id)] = ability
 
 
+## Get the remaining cooldown time for an ability, in seconds.
+## Pure query. Returns 0.0 for an ability id whose cooldown was never started.
+func get_cooldown_remaining(ability_id: StringName) -> float:
+	return _cooldowns.remaining(ability_id)
+
+
+## Get the effective, haste-adjusted duration of the running cooldown timer.
+## Pure query. Returns 0.0 for an ability id whose cooldown was never started.
+## Divide get_cooldown_remaining() by this to compute a HUD sweep fraction.
+func get_cooldown_duration(ability_id: StringName) -> float:
+	return _cooldowns.duration(ability_id)
+
+
+## Get the number of available charges for an ability.
+## Pure query. Returns 0 for an unknown ability id.
+func get_charges(ability_id: StringName) -> int:
+	return _cooldowns.charges(ability_id)
+
+
+## Get the maximum number of charges recorded for an ability.
+## Pure query. Returns 0 for an unknown ability id.
+func get_max_charges(ability_id: StringName) -> int:
+	return _cooldowns.maximum_charges(ability_id)
+
+
+## Get the registered MobaAbility behind an ability id.
+## Pure query. Returns null for an unregistered id without pushing an error.
+func get_ability(ability_id: StringName) -> MobaAbility:
+	if ability_id not in _abilities:
+		return null
+	return _abilities[ability_id]
+
+
+## Get the configured passive ability id from the assigned loadout.
+## Pure query. Returns &"" when no loadout is assigned or the passive slot is empty.
+func get_passive_slot_id() -> StringName:
+	if loadout == null:
+		return &""
+	var passive_id_str: String = loadout.get_passive_slot()
+	if passive_id_str == "":
+		return &""
+	return StringName(passive_id_str)
+
+
 ## Get the ability id from a 1-based action slot.
 ## Returns empty StringName if the slot is empty or out of range.
 func get_action_slot_ability_id(slot: int) -> StringName:

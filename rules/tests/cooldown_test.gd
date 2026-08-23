@@ -7,6 +7,7 @@ class_name CooldownTest
 const MobaStatBlock = preload("res://rules/core/moba_stat_block.gd")
 const MobaCombatant = preload("res://rules/core/moba_combatant.gd")
 const MobaAbility = preload("res://rules/abilities/moba_ability.gd")
+const MobaLoadout = preload("res://rules/abilities/moba_loadout.gd")
 
 
 static func _approx_equal(a: float, b: float, tolerance: float = 0.0001) -> bool:
@@ -25,6 +26,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_charge_refill_timing())
 	all_violations.append_array(_test_no_timer_reset())
 	all_violations.append_array(_test_large_cost_refused())
+	all_violations.append_array(_test_hud_getters())
 
 	if all_violations.is_empty():
 		return true
@@ -413,5 +415,85 @@ static func _test_large_cost_refused() -> Array[String]:
 
 	if combatant._cooldowns.remaining(&"test_ability") > 0.0:
 		violations.append("large_cost_refused: cooldown should not have started")
+
+	return violations
+
+
+static func _test_hud_getters() -> Array[String]:
+	var violations: Array[String] = []
+
+	var combatant = MobaCombatant.new()
+	combatant._runtime_stat_block = combatant.stat_block.duplicate()
+	combatant._current_health = 500.0
+	combatant._current_resource = 500.0
+	combatant._runtime_stat_block.ability_haste = 0
+
+	var ability = MobaAbility.new()
+	ability.id = "test_ability"
+	ability.resource_cost = 10.0
+	ability.cooldown = 4.0
+	ability.charges = 2
+
+	combatant.register_ability(ability)
+
+	# Unknown ability id: every getter must answer safely and mutate nothing.
+	if not is_equal_approx(combatant.get_cooldown_remaining(&"nope"), 0.0):
+		violations.append("hud_getters: unknown id remaining should be 0.0")
+	if not is_equal_approx(combatant.get_cooldown_duration(&"nope"), 0.0):
+		violations.append("hud_getters: unknown id duration should be 0.0")
+	if combatant.get_charges(&"nope") != 0:
+		violations.append("hud_getters: unknown id charges should be 0")
+	if combatant.get_max_charges(&"nope") != 0:
+		violations.append("hud_getters: unknown id max charges should be 0")
+	if combatant.get_ability(&"nope") != null:
+		violations.append("hud_getters: unknown id ability should be null")
+	if not is_equal_approx(combatant._current_resource, 500.0):
+		violations.append("hud_getters: unknown id getters must not spend resource")
+
+	# Registered but never started.
+	if not is_equal_approx(combatant.get_cooldown_remaining(&"test_ability"), 0.0):
+		violations.append("hud_getters: unstarted remaining should be 0.0")
+	if not is_equal_approx(combatant.get_cooldown_duration(&"test_ability"), 0.0):
+		violations.append("hud_getters: unstarted duration should be 0.0")
+	if combatant.get_ability(&"test_ability") != ability:
+		violations.append("hud_getters: get_ability should return the registered ability")
+
+	combatant.commit_activate(&"test_ability")
+
+	var ledger_remaining = combatant._cooldowns.remaining(&"test_ability")
+	if not _approx_equal(combatant.get_cooldown_remaining(&"test_ability"), ledger_remaining):
+		violations.append("hud_getters: remaining should match the ledger")
+	if not _approx_equal(combatant.get_cooldown_duration(&"test_ability"), 4.0):
+		violations.append(
+			(
+				"hud_getters: duration should be 4.0, got %f"
+				% combatant.get_cooldown_duration(&"test_ability")
+			)
+		)
+	if combatant.get_charges(&"test_ability") != 1:
+		violations.append("hud_getters: charges should be 1 after one use")
+	if combatant.get_max_charges(&"test_ability") != 2:
+		violations.append("hud_getters: max charges should be 2")
+
+	# Remaining stays a pure read: repeated calls must not advance the timer.
+	var repeated = combatant.get_cooldown_remaining(&"test_ability")
+	for _i in range(5):
+		if not _approx_equal(combatant.get_cooldown_remaining(&"test_ability"), repeated):
+			violations.append("hud_getters: get_cooldown_remaining mutated the timer")
+
+	# Passive slot.
+	if combatant.get_passive_slot_id() != &"":
+		violations.append("hud_getters: no loadout should yield empty passive id")
+
+	var loadout = MobaLoadout.new()
+	combatant.loadout = loadout
+	if combatant.get_passive_slot_id() != &"":
+		violations.append("hud_getters: empty passive slot should yield empty passive id")
+
+	loadout.set_passive_slot("test_passive")
+	if combatant.get_passive_slot_id() != &"test_passive":
+		violations.append(
+			"hud_getters: passive id should be test_passive, got %s" % combatant.get_passive_slot_id()
+		)
 
 	return violations
