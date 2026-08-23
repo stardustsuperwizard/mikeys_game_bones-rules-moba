@@ -164,3 +164,18 @@ static func is_critical(roll: float, crit_chance: float) -> bool:
 ##     raw × crit_damage
 static func apply_crit(raw: float, crit_damage: float) -> float:
 	return raw * crit_damage
+
+
+## Calculate basic attack damage before mitigation.
+##
+## Per §9, a basic attack's raw damage is the equipped weapon's damage with
+## the attacking combatant's Attack Damage statistic as scaling input.
+##
+## Args:
+##     weapon_damage: The equipped weapon's damage value
+##     attack_damage: The attacking combatant's Attack Damage stat
+##
+## Returns:
+##     Raw basic attack damage, before apply_damage()'s mitigation pipeline
+static func basic_attack_damage(weapon_damage: float, attack_damage: float) -> float:
+	return weapon_damage + attack_damage
