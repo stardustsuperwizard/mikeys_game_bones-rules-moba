@@ -72,6 +72,12 @@ func _ready() -> void:
 		if loadout_passed:
 			print("\nLoadout Test PASSED")
 
+		# Run the HUD slot test
+		var hud_slot_passed = HudSlotTest.run()
+
+		if hud_slot_passed:
+			print("\nHUD Slot Test PASSED")
+
 		# Exit after the tests complete to avoid loading the main scene
 		call_deferred("_quit_engine")
 
