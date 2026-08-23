@@ -75,7 +75,9 @@ static func _create_test_actor() -> Dictionary:
 	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
+	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.RESOURCE
+	)
 
 	# Register all available abilities
 	var power_strike = MobaAbilityLibrary.get_ability(&"power_strike")
@@ -112,7 +114,9 @@ static func _create_target_with_combatant() -> Node:
 	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
+	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.RESOURCE
+	)
 
 	# Store combatant as test metadata
 	target.set_meta("_test_combatant", combatant)
@@ -161,8 +165,10 @@ static func _test_targeted_damage_ability() -> Array[String]:
 		var expected_resource = initial_resource - power_strike.resource_cost
 		if not is_equal_approx(caster_combatant._current_resource, expected_resource):
 			violations.append(
-				"targeted_damage: resource should be spent (expected %f, got %f)"
-				% [expected_resource, caster_combatant._current_resource]
+				(
+					"targeted_damage: resource should be spent (expected %f, got %f)"
+					% [expected_resource, caster_combatant._current_resource]
+				)
 			)
 
 	# Cleanup
@@ -204,8 +210,10 @@ static func _test_self_ability() -> Array[String]:
 		var expected_resource = initial_resource - self_ability.resource_cost
 		if not is_equal_approx(caster_combatant._current_resource, expected_resource):
 			violations.append(
-				"self_ability: resource should be spent (expected %f, got %f)"
-				% [expected_resource, caster_combatant._current_resource]
+				(
+					"self_ability: resource should be spent (expected %f, got %f)"
+					% [expected_resource, caster_combatant._current_resource]
+				)
 			)
 
 	# Cleanup
@@ -279,7 +287,10 @@ static func _test_insufficient_resource() -> Array[String]:
 
 	if result.reason != &"insufficient_resource":
 		violations.append(
-			"insufficient_resource: reason should be 'insufficient_resource', got '%s'" % result.reason
+			(
+				"insufficient_resource: reason should be 'insufficient_resource', got '%s'"
+				% result.reason
+			)
 		)
 
 	# Check resource was NOT spent
@@ -328,9 +339,7 @@ static func _test_on_cooldown() -> Array[String]:
 		violations.append("on_cooldown: second activation should fail")
 
 	if result2.reason != &"on_cooldown":
-		violations.append(
-			"on_cooldown: reason should be 'on_cooldown', got '%s'" % result2.reason
-		)
+		violations.append("on_cooldown: reason should be 'on_cooldown', got '%s'" % result2.reason)
 
 	# Cleanup
 	MobaAbilityLibrary._reset()
@@ -367,7 +376,10 @@ static func _test_targeting_not_implemented() -> Array[String]:
 
 	if result.reason != &"targeting_not_implemented":
 		violations.append(
-			"targeting_not_implemented: reason should be 'targeting_not_implemented', got '%s'" % result.reason
+			(
+				"targeting_not_implemented: reason should be 'targeting_not_implemented', got '%s'"
+				% result.reason
+			)
 		)
 
 	# Cleanup
@@ -459,9 +471,7 @@ static func _test_out_of_range() -> Array[String]:
 		violations.append("out_of_range: activation should fail")
 
 	if result.reason != &"out_of_range":
-		violations.append(
-			"out_of_range: reason should be 'out_of_range', got '%s'" % result.reason
-		)
+		violations.append("out_of_range: reason should be 'out_of_range', got '%s'" % result.reason)
 
 	# Check that resource was NOT spent
 	if caster_combatant._current_resource != initial_resource:
@@ -558,8 +568,10 @@ static func _test_atomic_resource_commitment() -> Array[String]:
 
 		if caster_combatant._current_resource != expected_after_first:
 			violations.append(
-				"atomic_commitment: resource should remain at first cost (expected %f, got %f)"
-				% [expected_after_first, caster_combatant._current_resource]
+				(
+					"atomic_commitment: resource should remain at first cost (expected %f, got %f)"
+					% [expected_after_first, caster_combatant._current_resource]
+				)
 			)
 
 	# Cleanup

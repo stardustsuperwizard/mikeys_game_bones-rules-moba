@@ -145,9 +145,7 @@ func execute() -> ActionResult:
 
 		if target_combatant != null:
 			var damage := MobaDamage.new(
-				ability.base_damage,
-				_damage_type_to_moba(ability.damage_type),
-				actor  # source is the caster
+				ability.base_damage, _damage_type_to_moba(ability.damage_type), actor  # source is the caster
 			)
 			target_combatant.apply_damage(damage)
 
