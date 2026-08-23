@@ -70,8 +70,10 @@ static func _load_single_ability(file_path: String) -> void:
 		# Not a MobaAbility instance
 		var actual_type = script.get_global_name() if script != null else resource.get_class()
 		printerr(
-			"MobaAbilityLibrary: %s is not a MobaAbility resource (got %s)"
-			% [file_path, actual_type]
+			(
+				"MobaAbilityLibrary: %s is not a MobaAbility resource (got %s)"
+				% [file_path, actual_type]
+			)
 		)
 
 
