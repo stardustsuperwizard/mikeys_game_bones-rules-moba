@@ -200,8 +200,12 @@ func _apply_damage(ability: MobaAbility, target: Node, caster_combatant: MobaCom
 	if target_combatant == null:
 		return
 
-	# source is the caster
-	var damage := MobaDamage.new(raw_amount, _damage_type_to_moba(ability.damage_type), actor)
+	# source is the caster's MobaCombatant, not the caster Actor: apply_damage()
+	# reads the attacker's crit statistics off it, and MobaDamage.source is a
+	# MobaCombatant at every construction site.
+	var damage := MobaDamage.new(
+		raw_amount, _damage_type_to_moba(ability.damage_type), caster_combatant
+	)
 	target_combatant.apply_damage(damage)
 
 

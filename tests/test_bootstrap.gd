@@ -1,92 +1,66 @@
 ## Bootstrap autoload for running tests in headless mode.
 ##
-## This autoload runs the extraction contract test during headless validation
-## to check that the rules module contains no outward references, and runs the
-## ability data validation test to ensure all ability and passive resources
-## pass semantic validation.
+## Runs every rules/ test suite during headless validation and makes the result
+## the process exit code: 0 when every suite passes, 1 when any suite fails.
 ##
-## The test results are printed to stderr. Violations are reported with file paths
-## and line numbers for easy debugging.
+## That exit code is the whole point of this file. `validate-godot.sh` runs
+## `godot --headless --quit` and treats a non-zero exit as a failed build, so a
+## suite that returns false must exit non-zero or the failure is invisible to
+## CI -- a green check would mean only "the project imports and boots", not
+## "the tests pass".
+##
+## Individual suites print their own violation detail to stderr; this file adds
+## the per-suite pass/fail line and the closing summary.
 extends Node
+
+## Suite names that returned false this run.
+var _failures: Array[String] = []
+
+## Suite names that returned true this run.
+var _passes: Array[String] = []
 
 
 func _ready() -> void:
-	if DisplayServer.get_name() == "headless":
-		# Run the extraction contract test
-		var extraction_passed = ExtractionContractTest.run()
+	if DisplayServer.get_name() != "headless":
+		return
 
-		if extraction_passed:
-			print("\nExtraction Contract Test PASSED")
+	_check("Extraction Contract Test", ExtractionContractTest.run())
+	_check("Ability Data Test", AbilityDataTest.run())
+	_check("Combatant Test", CombatantTest.run())
+	_check("Resource Test", ResourceTest.run())
+	_check("Formulas Test", FormulasTest.run())
+	_check("State Machine Test", StateMachineTest.run())
+	_check("Cooldown Test", CooldownTest.run())
+	_check("Ability Library Test", AbilityLibraryTest.run())
+	_check("Ability Activation Test", AbilityActivationTest.run())
+	_check("Loadout Test", LoadoutTest.run())
+	_check("HUD Slot Test", HudSlotTest.run())
+	_check("HUD Test", HudTest.run())
 
-		# Run the ability data validation test
-		var ability_data_passed = AbilityDataTest.run()
+	_report()
 
-		if ability_data_passed:
-			print("\nAbility Data Test PASSED")
+	# Exit after the tests complete to avoid loading the main scene.
+	call_deferred("_quit_engine")
 
-		# Run the combatant test
-		var combatant_passed = CombatantTest.run()
 
-		if combatant_passed:
-			print("\nCombatant Test PASSED")
+## Record and announce one suite's result.
+func _check(suite_name: String, passed: bool) -> void:
+	if passed:
+		_passes.append(suite_name)
+		print("PASS %s" % suite_name)
+	else:
+		_failures.append(suite_name)
+		printerr("FAIL %s" % suite_name)
 
-		# Run the resource test
-		var resource_passed = ResourceTest.run()
 
-		if resource_passed:
-			print("\nResource Test PASSED")
+func _report() -> void:
+	var total := _passes.size() + _failures.size()
+	if _failures.is_empty():
+		print("\nAll %d test suites passed." % total)
+		return
 
-		# Run the formulas test
-		var formulas_passed = FormulasTest.run()
-
-		if formulas_passed:
-			print("\nFormulas Test PASSED")
-
-		# Run the state machine test
-		var state_machine_passed = StateMachineTest.run()
-
-		if state_machine_passed:
-			print("\nState Machine Test PASSED")
-
-		# Run the cooldown test
-		var cooldown_passed = CooldownTest.run()
-
-		if cooldown_passed:
-			print("\nCooldown Test PASSED")
-
-		# Run the ability library test
-		var ability_library_passed = AbilityLibraryTest.run()
-
-		if ability_library_passed:
-			print("\nAbility Library Test PASSED")
-
-		# Run the ability activation test
-		var ability_activation_passed = AbilityActivationTest.run()
-
-		if ability_activation_passed:
-			print("\nAbility Activation Test PASSED")
-
-		# Run the loadout test
-		var loadout_passed = LoadoutTest.run()
-
-		if loadout_passed:
-			print("\nLoadout Test PASSED")
-
-		# Run the HUD slot test
-		var hud_slot_passed = HudSlotTest.run()
-
-		if hud_slot_passed:
-			print("\nHUD Slot Test PASSED")
-
-		# Run the HUD test
-		var hud_passed = HudTest.run()
-
-		if hud_passed:
-			print("\nHUD Test PASSED")
-
-		# Exit after the tests complete to avoid loading the main scene
-		call_deferred("_quit_engine")
+	printerr("\n%d of %d test suites FAILED: %s" % [_failures.size(), total, ", ".join(_failures)])
 
 
 func _quit_engine() -> void:
-	get_tree().quit()
+	get_tree().quit(1 if not _failures.is_empty() else 0)

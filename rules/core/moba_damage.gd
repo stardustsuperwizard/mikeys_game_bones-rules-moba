@@ -20,7 +20,14 @@ var amount: float
 ## Type of damage (PHYSICAL, MAGICAL, or TRUE).
 var damage_type: int = DamageType.PHYSICAL
 
-## Source of the damage (typically the attacker Actor or ability).
+## The attacking MobaCombatant, or null for unattributed damage.
+##
+## Typed as Variant rather than MobaCombatant only because GDScript cannot
+## reference a class that references this one back. It is a MobaCombatant by
+## contract at every construction site, and apply_damage() reads the
+## attacker's crit statistics off it -- so passing an Actor here silently
+## disables crit rather than failing loudly. Reach the Actor through
+## source.get_parent() when attribution needs the scene-tree node.
 var source
 
 ## Whether this damage can trigger a critical strike.

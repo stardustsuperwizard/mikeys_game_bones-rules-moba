@@ -368,16 +368,23 @@ static func _test_crit_before_mitigation() -> Array[String]:
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._runtime_stat_block.armor = 30
-	combatant._runtime_stat_block.crit_damage = 2.0
+
+	# Crit is the attacker's statistic, so the crit stats go on a separate
+	# attacker combatant passed as MobaDamage.source. Setting them on the victim
+	# would prove nothing: apply_damage() reads them off the source.
+	var attacker = MobaCombatant.new()
+	attacker.stat_block = _BASELINE_STAT_BLOCK
+	attacker._runtime_stat_block = attacker.stat_block.duplicate()
+	attacker._runtime_stat_block.crit_chance = 1.0  # Guaranteed crit
+	attacker._runtime_stat_block.crit_damage = 2.0
 
 	var initial_health = combatant._current_health
 
 	# Seed RNG for deterministic crit
 	MobaRules.seed_crit_rng(42)
 
-	# Apply 50 raw damage with high crit chance (will crit)
-	var damage_packet = MobaDamage.new(50.0, MobaDamage.DamageType.PHYSICAL)
-	combatant._runtime_stat_block.crit_chance = 1.0  # Guaranteed crit
+	# Apply 50 raw damage from an attacker who always crits
+	var damage_packet = MobaDamage.new(50.0, MobaDamage.DamageType.PHYSICAL, attacker)
 	combatant.apply_damage(damage_packet)
 
 	# Expected: 50 * 2.0 (crit) * (100 / (100 + 30)) = 100 * 0.7692 = 76.92
@@ -403,10 +410,13 @@ static func _test_seeded_rng() -> Array[String]:
 	combatant1.stat_block = _BASELINE_STAT_BLOCK
 	combatant1._runtime_stat_block = combatant1.stat_block.duplicate()
 	combatant1._current_health = combatant1._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	combatant1._runtime_stat_block.crit_chance = 0.5
+	var attacker1 = MobaCombatant.new()
+	attacker1.stat_block = _BASELINE_STAT_BLOCK
+	attacker1._runtime_stat_block = attacker1.stat_block.duplicate()
+	attacker1._runtime_stat_block.crit_chance = 0.5
 
 	var initial_health1 = combatant1._current_health
-	var damage1 = MobaDamage.new(100.0, MobaDamage.DamageType.PHYSICAL)
+	var damage1 = MobaDamage.new(100.0, MobaDamage.DamageType.PHYSICAL, attacker1)
 	combatant1.apply_damage(damage1)
 	var reduction1 = initial_health1 - combatant1._current_health
 
@@ -416,10 +426,13 @@ static func _test_seeded_rng() -> Array[String]:
 	combatant2.stat_block = _BASELINE_STAT_BLOCK
 	combatant2._runtime_stat_block = combatant2.stat_block.duplicate()
 	combatant2._current_health = combatant2._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	combatant2._runtime_stat_block.crit_chance = 0.5
+	var attacker2 = MobaCombatant.new()
+	attacker2.stat_block = _BASELINE_STAT_BLOCK
+	attacker2._runtime_stat_block = attacker2.stat_block.duplicate()
+	attacker2._runtime_stat_block.crit_chance = 0.5
 
 	var initial_health2 = combatant2._current_health
-	var damage2 = MobaDamage.new(100.0, MobaDamage.DamageType.PHYSICAL)
+	var damage2 = MobaDamage.new(100.0, MobaDamage.DamageType.PHYSICAL, attacker2)
 	combatant2.apply_damage(damage2)
 	var reduction2 = initial_health2 - combatant2._current_health
 
