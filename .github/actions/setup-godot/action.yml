@@ -10,7 +10,19 @@ inputs:
 runs:
   using: composite
   steps:
+    # The engine binary is immutable for a given version tag, so it's a
+    # pure cache-hit-or-download case -- no dependency-file hash needed,
+    # just the version itself. Every call site pins 4.7.1-stable, so after
+    # the first run across the whole repo this should hit every time.
+    - name: Restore Cached Godot Binary
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/godot
+        key: godot-${{ runner.os }}-${{ inputs.godot-version }}
+
     - name: Install Godot engine
+      if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
         GODOT_VERSION: ${{ inputs.godot-version }}
@@ -41,4 +53,8 @@ runs:
         executable.rename(target)
         PY
 
-        echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
+        rm -f "$RUNNER_TEMP/godot/godot.zip"
+
+    - name: Add Godot To PATH
+      shell: bash
+      run: echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
