@@ -116,7 +116,8 @@ jobs:
       # the same rule every other workflow here follows.
       EXECUTOR_MODELS: >-
         ${{ vars.EXECUTOR_MODELS
-        || 'claude-haiku-4.5,claude-sonnet-5' }}
+        # || 'claude-haiku-4.5,claude-sonnet-5' }}
+        || 'claude-sonnet-5' }}
       EXECUTOR_MAX_AI_CREDITS: "150"
 
       # Same variables and defaults as agent-04-review.yml / agent-05-fix.yml
