@@ -33,3 +33,25 @@ func activate(ability_id: StringName, context: MobaCastContext) -> ActionResult:
 
 	var action := MobaAbilityAction.new(context.caster, ability_id, context)
 	return ActionRunner.run(action)
+
+
+## Activate an ability from a positional action slot (1-based).
+## Returns an ActionResult indicating success or failure with a specific reason.
+## Returns a failed ActionResult with reason empty_slot if the slot is empty.
+## Returns a failed ActionResult if the index is out of range [1..4].
+func activate_slot(index: int, context: MobaCastContext) -> ActionResult:
+	if context.caster == null:
+		return ActionResult.new(false, MobaAbilityAction.FAILURE_INVALID_CONTEXT)
+
+	var combatant := context.caster.get_node_or_null("MobaCombatant") as MobaCombatant
+	if combatant == null:
+		return ActionResult.new(false, MobaAbilityAction.FAILURE_INVALID_CONTEXT)
+
+	if index < 1 or index > 4:
+		return ActionResult.new(false, MobaAbilityAction.FAILURE_INVALID_CONTEXT)
+
+	var ability_id: StringName = combatant.get_action_slot_ability_id(index)
+	if ability_id == &"":
+		return ActionResult.new(false, MobaAbilityAction.FAILURE_EMPTY_SLOT)
+
+	return activate(ability_id, context)

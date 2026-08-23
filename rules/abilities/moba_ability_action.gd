@@ -34,6 +34,7 @@ const FAILURE_INSUFFICIENT_RESOURCE = &"insufficient_resource"
 const FAILURE_INVALID_TARGET = &"invalid_target"
 const FAILURE_OUT_OF_RANGE = &"out_of_range"
 const FAILURE_TARGETING_NOT_IMPLEMENTED = &"targeting_not_implemented"
+const FAILURE_EMPTY_SLOT = &"empty_slot"
 ## Not produced by MobaAbilityAction itself -- MobaCastContext.caster is non-nullable
 ## by the time an Action reaches execute(). Returned by MobaAbilityCaster.activate()
 ## when its context has no caster, before an Action is even constructed. Lives here
