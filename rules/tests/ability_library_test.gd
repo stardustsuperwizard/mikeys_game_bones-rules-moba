@@ -98,7 +98,9 @@ static func _test_error_handling() -> Array[String]:
 
 
 ## Test that the library never reads rules/data/generated/.
-## This test verifies that the default scan directory respects the boundary.
+## Loads the real default directory and asserts no indexed resource's path
+## falls under MobaRules.GENERATED_ROOT — a regression guard, not just a
+## restatement of the default argument.
 static func _test_never_reads_generated() -> Array[String]:
 	var violations: Array[String] = []
 
@@ -108,10 +110,15 @@ static func _test_never_reads_generated() -> Array[String]:
 	# Load with the default directory (should be rules/data/abilities/, not generated/)
 	MobaAbilityLibrary._ensure_loaded()
 
-	# Verify the cache doesn't contain anything that would have come from generated/
-	# (We can't directly test "never read" but we verify the default uses DATA_ROOT + "abilities/")
-	# The actual verification is that _ensure_loaded() defaults to the correct path.
-	# If the implementation changes to read generated/ incorrectly, this would fail.
+	if MobaAbilityLibrary._cache.is_empty():
+		violations.append("never_reads_generated: default load indexed nothing to check")
+
+	for id in MobaAbilityLibrary._cache:
+		var ability := MobaAbilityLibrary._cache[id] as MobaAbility
+		if ability.resource_path.begins_with(MobaRules.GENERATED_ROOT):
+			violations.append(
+				"never_reads_generated: %s was loaded from %s" % [id, ability.resource_path]
+			)
 
 	# Cleanup
 	MobaAbilityLibrary._reset()
