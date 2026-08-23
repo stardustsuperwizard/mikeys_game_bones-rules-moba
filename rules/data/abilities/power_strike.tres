@@ -1,0 +1,38 @@
+[gd_resource type="Resource" script_class="MobaAbility" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://rules/abilities/moba_ability.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "power_strike"
+name = "Power Strike"
+discipline = 0
+targeting_type = 1
+aim_assist = 3
+aim_cone_degrees = 0.0
+magnetism = 0.0
+acquisition_range = 0.0
+damage_type = 0
+base_damage = 100.0
+scaling = {}
+resource_cost = 30.0
+cooldown = 6.0
+cast_time = 0.0
+channel_duration = 0.0
+channel_tick_interval = 0.0
+range = 2.0
+projectile_speed = 0.0
+area_radius = 0.0
+duration = 0.0
+charges = 1
+usable_in_air = false
+touch_viable = true
+crowd_control = null
+buffs = []
+debuffs = []
+max_stacks = 1
+cancellable_by_movement = false
+cancellable_by_hard_cc = true
+refund_resource_on_cancel = 0.0
+on_cancel = 2
+on_channel_break = 0

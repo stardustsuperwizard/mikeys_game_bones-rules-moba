@@ -60,6 +60,12 @@ func _ready() -> void:
 		if ability_library_passed:
 			print("\nAbility Library Test PASSED")
 
+		# Run the ability activation test
+		var ability_activation_passed = AbilityActivationTest.run()
+
+		if ability_activation_passed:
+			print("\nAbility Activation Test PASSED")
+
 		# Exit after the tests complete to avoid loading the main scene
 		call_deferred("_quit_engine")
 
