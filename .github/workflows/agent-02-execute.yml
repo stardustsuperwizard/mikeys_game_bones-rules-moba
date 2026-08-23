@@ -150,7 +150,12 @@ jobs:
       FIXER_MODELS: >-
         ${{ vars.FIXER_MODELS
         || 'claude-sonnet-5,claude-sonnet-4.5,claude-opus-5' }}
-      FIXER_MAX_AI_CREDITS: "100"
+      # 150, not the reviewer's 75: this session edits files and re-runs
+      # validation rather than only reading, and 100 was not enough --
+      # the pre-PR fix pass on #165 stopped mid-task with
+      # `budget_exhausted` at the old cap, leaving a partially-applied
+      # fix behind. Kept in lockstep with agent-05-fix.yml.
+      FIXER_MAX_AI_CREDITS: "150"
 
       MAX_DIFF_CHARS: "150000"
 

@@ -334,9 +334,11 @@ Implementation Task
 │ agent-02-execute.yml        │       │
 │ Copilot CLI, spends AI      │       ▼
 │ credits: implements,        │  draft PR
-│ opens the PR, then          │
+│ opens a draft PR, then      │
 │ validates, formats, self-   │
-│ reviews, self-fixes         │
+│ reviews, self-fixes, and    │
+│ marks it ready only if      │
+│ its own validation passes   │
 └─────────────────────────────┘
         │                             │
         └──────────────┬──────────────┘
