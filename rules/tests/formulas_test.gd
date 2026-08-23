@@ -49,7 +49,8 @@ static func run() -> bool:
 	# Test 11: is_critical
 	all_violations.append_array(_test_is_critical())
 
-	# Test 12: haste monotonicity property (mirrored from sim/tests/test_defense.py::test_increasing_haste_decreases_cooldown)
+	# Test 12: haste monotonicity property (mirrored from
+	# sim/tests/test_defense.py::test_increasing_haste_decreases_cooldown)
 	all_violations.append_array(_test_haste_monotonicity())
 
 	if all_violations.is_empty():
