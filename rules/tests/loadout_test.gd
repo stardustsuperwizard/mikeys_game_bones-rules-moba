@@ -352,8 +352,12 @@ static func _test_basic_attack_cycle() -> bool:
 static func _simulate_attacks_for(
 	combatant: MobaCombatant, target: MobaCombatant, seconds: float
 ) -> int:
-	var resolved_count = 0
-	var handler = func(_t, _d): resolved_count += 1
+	# GDScript lambdas capture local variables by value, so an int counter
+	# mutated inside the lambda would not be visible outside it. A one-element
+	# Array is a reference type, so mutating its contents from the lambda is
+	# visible to this function after the signal fires.
+	var resolved_count = [0]
+	var handler = func(_t, _d): resolved_count[0] += 1
 	combatant.basic_attack_resolved.connect(handler)
 
 	var step = 0.01
@@ -365,7 +369,7 @@ static func _simulate_attacks_for(
 		elapsed += step
 
 	combatant.basic_attack_resolved.disconnect(handler)
-	return resolved_count
+	return resolved_count[0]
 
 
 static func _test_attack_cadence_one_per_second() -> bool:
@@ -496,7 +500,7 @@ static func _test_basic_attack_refuses_out_of_range() -> bool:
 	var data := _create_test_actor_with_loadout_and_weapon()
 	var combatant: MobaCombatant = data["combatant"]
 	var target: MobaCombatant = data["target"]
-	var target_actor: Actor = data["target_actor"]
+	var target_actor: Node = data["target_actor"]
 	var state_machine: MobaStateMachine = data["state_machine"]
 
 	target_actor.global_position = Vector3(100.0, 0.0, 0.0)
@@ -566,15 +570,17 @@ static func _test_basic_attack_damage_amount() -> bool:
 	var attack_damage = combatant.get_stat(MobaStatBlock.ATTACK_DAMAGE)
 	var expected_amount = MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
 
-	var observed_amount = -1.0
+	# One-element Arrays are reference types, so mutating their contents from
+	# inside a lambda is visible here after the signal fires; a plain float
+	# local would only be mutated inside the lambda's own captured-by-value copy.
+	var observed_amount = [-1.0]
 	var handler = func(t, d):
 		if t == target:
-			observed_amount = d
+			observed_amount[0] = d
 	combatant.basic_attack_resolved.connect(handler)
 
-	var observed_raw = -1.0
-	var damage_handler = func(raw, _final, _damage_type, _was_crit, _source):
-		observed_raw = raw
+	var observed_raw = [-1.0]
+	var damage_handler = func(raw, _final, _damage_type, _was_crit, _source): observed_raw[0] = raw
 	target.damage_resolved.connect(damage_handler)
 
 	if not combatant.basic_attack(target):
@@ -587,11 +593,11 @@ static func _test_basic_attack_damage_amount() -> bool:
 	combatant.basic_attack_resolved.disconnect(handler)
 	target.damage_resolved.disconnect(damage_handler)
 
-	if not is_equal_approx(observed_amount, expected_amount):
-		print("ERROR: Expected damage %f, got %f" % [expected_amount, observed_amount])
+	if not is_equal_approx(observed_amount[0], expected_amount):
+		print("ERROR: Expected damage %f, got %f" % [expected_amount, observed_amount[0]])
 		return false
-	if not is_equal_approx(observed_raw, expected_amount):
-		print("ERROR: Expected damage_resolved raw %f, got %f" % [expected_amount, observed_raw])
+	if not is_equal_approx(observed_raw[0], expected_amount):
+		print("ERROR: Expected damage_resolved raw %f, got %f" % [expected_amount, observed_raw[0]])
 		return false
 
 	return true
