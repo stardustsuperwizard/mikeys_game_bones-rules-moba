@@ -1,3 +1,4 @@
+# gdlint:ignore = max-public-methods
 ## Health authority, stat access, and death handling for a MOBA actor.
 ##
 ## MobaCombatant is a child of an Actor and owns the actor's MOBA rules state:
@@ -25,7 +26,13 @@ enum ActivationFailure {
 	UNKNOWN_ABILITY = 4,
 }
 
+## Name of the lazily created child MobaEffectContainer node.
+const _EFFECT_CONTAINER_NAME := "MobaEffectContainer"
+## Positive floor applied to attack_speed after modifiers.
+const _MINIMUM_ATTACK_SPEED := 0.01
+
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
+
 ## Registers the loadout's action abilities as soon as it is assigned, so a
 ## combatant that never enters the tree (e.g. a standalone test fixture) or
 ## has its loadout assigned after _ready() still resolves them without a
@@ -53,6 +60,16 @@ var _cooldowns: MobaCooldowns = MobaCooldowns.new()
 var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
 var _attack_target: Node = null
 var _attack_time_since_ready: float = INF
+var _effect_container: MobaEffectContainer = null
+## Per-stat cache of the modifier bonuses (flat, percent), NOT the final
+## value: the base is always re-read live from _runtime_stat_block so a
+## direct mutation of the runtime stat block (as several existing test
+## suites do) is never masked by a stale cached result. get_stat() is on the
+## damage path and the movement path, so it is the container's modifier
+## list -- not the stat block -- that is only scanned when it actually
+## changes; any container mutation clears the whole cache through
+## _invalidate_stat_cache().
+var _stat_cache: Dictionary = {}
 
 
 func _ready() -> void:
@@ -79,10 +96,46 @@ func _seed_actor_character_sheet() -> void:
 	parent_actor.character_sheet.current_hp = int(_current_health)
 
 
-## Get the current effective value of a stat (today equals the base value).
-## Routes through an indirection that a modifier layer can later hook.
+## Get the current effective value of a stat: the base value with every
+## active modifier in the effect container applied.
 func get_stat(stat: StringName) -> float:
 	return _get_modified_stat(stat)
+
+
+## Get the effect container holding this combatant's active stat modifiers,
+## discovering an existing child or creating one on first use. Works on a
+## standalone fixture that never enters the scene tree.
+func get_effect_container() -> MobaEffectContainer:
+	if _effect_container != null:
+		return _effect_container
+
+	_effect_container = get_node_or_null(NodePath(_EFFECT_CONTAINER_NAME)) as MobaEffectContainer
+	if _effect_container == null:
+		_effect_container = MobaEffectContainer.new()
+		_effect_container.name = _EFFECT_CONTAINER_NAME
+		add_child(_effect_container)
+
+	# Any container mutation makes the cached per-stat values stale.
+	_effect_container.effect_applied.connect(_on_effect_container_changed)
+	_effect_container.effect_refreshed.connect(_on_effect_container_changed)
+	_effect_container.effect_stacks_changed.connect(_on_effect_stacks_changed)
+	_effect_container.effect_expired.connect(_on_effect_container_changed)
+	return _effect_container
+
+
+func _on_effect_container_changed(_source_ability_id: StringName, _stat: StringName) -> void:
+	_invalidate_stat_cache()
+
+
+func _on_effect_stacks_changed(
+	_source_ability_id: StringName, _stat: StringName, _stacks: int
+) -> void:
+	_invalidate_stat_cache()
+
+
+## Drop every cached modifier-applied stat value.
+func _invalidate_stat_cache() -> void:
+	_stat_cache.clear()
 
 
 ## Get the unmodified base value of a stat.
@@ -91,10 +144,30 @@ func get_base_stat(stat: StringName) -> float:
 
 
 ## Internal seam for stat modifications.
-## Currently just returns the base value, but this is where the buff/debuff
-## system will hook to apply modifiers.
+##
+## Modifier order is pinned: (base + sum(flat)) * (1 + sum(percent)).
+## Percentages sum additively among themselves. The (flat, percent) bonus
+## pair is cached per stat and invalidated on any effect container mutation;
+## the base value itself is always re-read live so a direct mutation of
+## _runtime_stat_block is reflected immediately, never masked by a stale
+## cached result.
 func _get_modified_stat(stat: StringName) -> float:
-	return _runtime_stat_block.get_stat_value(stat)
+	var bonus: Dictionary
+	if stat in _stat_cache:
+		bonus = _stat_cache[stat]
+	else:
+		var container := get_effect_container()
+		bonus = {
+			"flat": container.get_flat_bonus(stat), "percent": container.get_percent_bonus(stat)
+		}
+		_stat_cache[stat] = bonus
+
+	var base: float = _runtime_stat_block.get_stat_value(stat)
+	var value: float = (base + bonus["flat"]) * (1.0 + bonus["percent"])
+	if stat == MobaStatBlock.ATTACK_SPEED:
+		value = maxf(value, _MINIMUM_ATTACK_SPEED)
+
+	return value
 
 
 ## Apply damage to the combatant via a MobaDamage packet.
@@ -348,6 +421,9 @@ func commit_activate(ability_id: StringName) -> int:
 func tick(delta: float) -> void:
 	# Advance cooldowns
 	_cooldowns.tick(delta)
+
+	# Advance active stat modifiers so timed effects expire on the caller's clock.
+	get_effect_container().tick(delta)
 
 	# Advance the sibling state machine and the basic-attack cycle together.
 	# MobaCombatant.tick() is the single driver of MobaStateMachine.tick() for
