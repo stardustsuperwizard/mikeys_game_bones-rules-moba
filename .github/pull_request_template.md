@@ -26,8 +26,16 @@ Closes #<issue-number>
 
 ## Discovered Out-of-Scope Work
 
-<!-- Work found but deliberately not done. The planner decides whether these
-     become Issues. Do not file them from the implementation session. -->
+<!-- Work found but deliberately not done.
+
+     An executor session working an [impl] Issue lists them here and does not
+     file them. The planner decides what becomes work; an executor filing its
+     own discoveries is how scope creeps back in, one "while I was in there"
+     Issue at a time.
+
+     A review, audit, or other freeform session is already doing the planner's
+     job -- deciding what should become work is its whole deliverable. It may
+     file discovered work when asked to, and should link it here. -->
 
 - <or "None">
 

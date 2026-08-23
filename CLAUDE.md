@@ -42,3 +42,16 @@ the scripted `agent-02-execute.yml` executor: read the Issue body in full
 ready. The automated reviewer (`agent-04-review.yml`) only auto-triggers on
 `copilot/*` branches, so a Claude Code PR needs the manual label to enter
 the same review gate everything else uses.
+
+## Working without an Issue
+
+A review, audit, or exploratory session is not an executor session, and the
+scope rules written for executors do not all transfer. The clearest case is
+the PR template telling the implementation session not to file the
+out-of-scope work it discovers: that exists to stop an executor widening its
+own Issue, and it inverts when deciding what should become work is the point
+of the session. File discovered work when asked, and link it from the PR.
+
+Such a PR has no originating Issue and so no `Closes #<issue>` line. Say that
+explicitly at the top instead of leaving the template's placeholder in, and
+still add `agent:review` — the gate is the same one everything else uses.
