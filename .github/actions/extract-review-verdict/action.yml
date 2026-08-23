@@ -57,6 +57,7 @@ runs:
 
         REQUIRED_SECTIONS = [
             "## Acceptance Criteria",
+            "## Architecture Constraints",
             "## Scope Adherence",
             "## Findings",
             "## Required Before Merge",
