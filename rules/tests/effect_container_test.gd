@@ -105,9 +105,7 @@ static func _test_refresh() -> Array[String]:
 	if not _approx_equal(combatant.get_stat(MobaStatBlock.ARMOR), 30.0):
 		violations.append("refresh: unmodified combatant should return the base value")
 
-	var modifier := _make_modifier(
-		"armor", 15.0, false, 5.0, MobaStatModifier.Stacking.REFRESH
-	)
+	var modifier := _make_modifier("armor", 15.0, false, 5.0, MobaStatModifier.Stacking.REFRESH)
 	container.apply_modifier(modifier, &"buff")
 	container.tick(2.0)
 
@@ -158,9 +156,7 @@ static func _test_stack_past_cap_refreshes_duration() -> Array[String]:
 
 	var combatant := _make_combatant()
 	var container := combatant.get_effect_container()
-	var modifier := _make_modifier(
-		"armor", 2.0, false, 4.0, MobaStatModifier.Stacking.STACK, 2
-	)
+	var modifier := _make_modifier("armor", 2.0, false, 4.0, MobaStatModifier.Stacking.STACK, 2)
 
 	container.apply_modifier(modifier, &"grit")
 	container.apply_modifier(modifier, &"grit")

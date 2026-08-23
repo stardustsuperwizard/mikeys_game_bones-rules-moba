@@ -149,8 +149,8 @@ func _get_modified_stat(stat: StringName) -> float:
 
 	var base: float = _runtime_stat_block.get_stat_value(stat)
 	var container := get_effect_container()
-	var value: float = (base + container.get_flat_bonus(stat)) * (
-		1.0 + container.get_percent_bonus(stat)
+	var value: float = (
+		(base + container.get_flat_bonus(stat)) * (1.0 + container.get_percent_bonus(stat))
 	)
 	if stat == MobaStatBlock.ATTACK_SPEED:
 		value = maxf(value, _MINIMUM_ATTACK_SPEED)

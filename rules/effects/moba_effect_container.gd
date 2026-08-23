@@ -58,7 +58,9 @@ class _Entry:
 ## or a weaker REPLACE_IF_STRONGER application).
 func apply_modifier(modifier: MobaStatModifier, source_ability_id: StringName) -> bool:
 	if modifier == null:
-		push_error("MobaEffectContainer: null modifier from source ability '%s'." % source_ability_id)
+		push_error(
+			"MobaEffectContainer: null modifier from source ability '%s'." % source_ability_id
+		)
 		return false
 
 	var stat := StringName(modifier.stat)
