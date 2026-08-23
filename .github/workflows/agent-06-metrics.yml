@@ -28,7 +28,7 @@ on:
       issue_number:
         description: "Issue number to post the report to"
         required: true
-        type: number
+        type: string
       limit:
         description: "Merged PRs to examine"
         required: false
