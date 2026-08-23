@@ -24,6 +24,15 @@ enum ActivationFailure {
 }
 
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
+## Registers the loadout's action abilities as soon as it is assigned, so a
+## combatant that never enters the tree (e.g. a standalone test fixture) or
+## has its loadout assigned after _ready() still resolves them without a
+## separate manual register_ability() step.
+@export var loadout: MobaLoadout:
+	set(value):
+		loadout = value
+		if loadout != null:
+			_register_loadout_abilities()
 
 # Property accessors for current_resource and maximum_resource
 var current_resource: float:
@@ -218,6 +227,29 @@ func restore_resource(amount: float) -> void:
 ## Register an ability for cooldown and activation tracking.
 func register_ability(ability: MobaAbility) -> void:
 	_abilities[StringName(ability.id)] = ability
+
+
+## Get the ability id from a 1-based action slot.
+## Returns empty StringName if the slot is empty or out of range.
+func get_action_slot_ability_id(slot: int) -> StringName:
+	if loadout == null:
+		return &""
+	if slot < 1 or slot > 4:
+		return &""
+	var ability_id_str: String = loadout.get_action_slot(slot)
+	if ability_id_str == "":
+		return &""
+	return StringName(ability_id_str)
+
+
+## Register all abilities in the loadout with this combatant.
+func _register_loadout_abilities() -> void:
+	for i in range(1, 5):
+		var ability_id_str: String = loadout.get_action_slot(i)
+		if ability_id_str != "":
+			var ability := MobaAbilityLibrary.get_ability(StringName(ability_id_str))
+			if ability != null:
+				register_ability(ability)
 
 
 ## Check if an ability can be activated without side effects.

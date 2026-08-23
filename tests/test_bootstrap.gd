@@ -66,6 +66,12 @@ func _ready() -> void:
 		if ability_activation_passed:
 			print("\nAbility Activation Test PASSED")
 
+		# Run the loadout test
+		var loadout_passed = LoadoutTest.run()
+
+		if loadout_passed:
+			print("\nLoadout Test PASSED")
+
 		# Exit after the tests complete to avoid loading the main scene
 		call_deferred("_quit_engine")
 
