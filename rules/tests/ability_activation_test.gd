@@ -64,6 +64,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_invalid_target_reference())
 	all_violations.append_array(_test_atomic_resource_commitment())
 	all_violations.append_array(_test_ability_caster_activate())
+	all_violations.append_array(_test_ability_caster_activate_without_preregistration())
 
 	if all_violations.is_empty():
 		return true
@@ -89,7 +90,11 @@ static func _ensure_all_test_abilities_loaded() -> void:
 ## Helper to create a test actor with a real MobaCombatant and MobaStateMachine
 ## as child nodes (not test-only metadata), matching how MobaAbilityAction looks
 ## them up in production via get_node_or_null().
-static func _create_test_actor() -> Dictionary:
+##
+## By default every ability in _ALL_ABILITY_IDS is pre-registered on the combatant.
+## Pass register_abilities = false to get a bare combatant with nothing registered,
+## exercising MobaAbilityCaster.activate()'s own idempotent register_ability() step.
+static func _create_test_actor(register_abilities: bool = true) -> Dictionary:
 	var actor = Actor.new()
 	actor.owner_id = 1
 
@@ -102,10 +107,11 @@ static func _create_test_actor() -> Dictionary:
 		MobaStatBlock.RESOURCE
 	)
 
-	for ability_id in _ALL_ABILITY_IDS:
-		var ability = MobaAbilityLibrary.get_ability(ability_id)
-		if ability != null:
-			combatant.register_ability(ability)
+	if register_abilities:
+		for ability_id in _ALL_ABILITY_IDS:
+			var ability = MobaAbilityLibrary.get_ability(ability_id)
+			if ability != null:
+				combatant.register_ability(ability)
 
 	actor.add_child(combatant)
 
@@ -171,6 +177,13 @@ static func _test_targeted_damage_ability() -> Array[String]:
 	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)  # Within 2.0 range
 
+	# Disable crit on the target so the damage figure is deterministic, matching
+	# the convention established by combatant_test.gd/resource_test.gd. Also seed
+	# the crit RNG for deterministic replay per §34, even though crit_chance = 0.0
+	# already makes the roll irrelevant.
+	_target_combatant(target)._runtime_stat_block.crit_chance = 0.0
+	MobaRules.seed_crit_rng(42)
+
 	var initial_health = _target_combatant(target)._current_health
 	var initial_resource = caster_combatant._current_resource
 
@@ -182,9 +195,25 @@ static func _test_targeted_damage_ability() -> Array[String]:
 	if not result.success:
 		violations.append("targeted_damage: activation should succeed, got: %s" % result.reason)
 
-	# Check damage was applied
-	if _target_combatant(target)._current_health >= initial_health:
-		violations.append("targeted_damage: target should take damage")
+	# Check the exact mitigated damage figure via MobaFormulas, not just that health
+	# dropped -- §19: 100 physical vs 30 armor ≈ 76.9.
+	var power_strike_ability = MobaAbilityLibrary.get_ability(&"power_strike")
+	if power_strike_ability != null:
+		var target_armor: float = _target_combatant(target).get_stat(MobaStatBlock.ARMOR)
+		var expected_damage := MobaFormulas.physical_damage(
+			power_strike_ability.base_damage, target_armor
+		)
+		var actual_damage: float = initial_health - _target_combatant(target)._current_health
+		if not is_equal_approx(actual_damage, expected_damage):
+			(
+				violations
+				. append(
+					(
+						"targeted_damage: damage should match MobaFormulas.physical_damage (expected %f, got %f)"
+						% [expected_damage, actual_damage]
+					)
+				)
+			)
 
 	# Check resource was spent
 	var power_strike = MobaAbilityLibrary.get_ability(&"power_strike")
@@ -262,7 +291,7 @@ static func _test_unknown_ability() -> Array[String]:
 	if result.success:
 		violations.append("unknown_ability: activation should fail")
 
-	if result.reason != &"unknown_ability":
+	if result.reason != MobaAbilityAction.FAILURE_UNKNOWN_ABILITY:
 		violations.append(
 			"unknown_ability: reason should be 'unknown_ability', got '%s'" % result.reason
 		)
@@ -299,7 +328,7 @@ static func _test_illegal_state() -> Array[String]:
 	if result.success:
 		violations.append("illegal_state: activation should fail")
 
-	if result.reason != &"illegal_state":
+	if result.reason != MobaAbilityAction.FAILURE_ILLEGAL_STATE:
 		violations.append(
 			"illegal_state: reason should be 'illegal_state', got '%s'" % result.reason
 		)
@@ -347,7 +376,7 @@ static func _test_insufficient_resource() -> Array[String]:
 	if result.success:
 		violations.append("insufficient_resource: activation should fail")
 
-	if result.reason != &"insufficient_resource":
+	if result.reason != MobaAbilityAction.FAILURE_INSUFFICIENT_RESOURCE:
 		violations.append(
 			(
 				"insufficient_resource: reason should be 'insufficient_resource', got '%s'"
@@ -408,7 +437,7 @@ static func _test_no_charges() -> Array[String]:
 	if result2.success:
 		violations.append("no_charges: second activation should fail")
 
-	if result2.reason != &"no_charges":
+	if result2.reason != MobaAbilityAction.FAILURE_NO_CHARGES:
 		violations.append("no_charges: reason should be 'no_charges', got '%s'" % result2.reason)
 
 	if caster_combatant._current_resource != resource_after_first:
@@ -459,7 +488,7 @@ static func _test_targeting_not_implemented_variants() -> Array[String]:
 		if result.success:
 			violations.append("targeting_not_implemented(%s): activation should fail" % type_name)
 
-		if result.reason != &"targeting_not_implemented":
+		if result.reason != MobaAbilityAction.FAILURE_TARGETING_NOT_IMPLEMENTED:
 			(
 				violations
 				. append(
@@ -518,7 +547,7 @@ static func _test_target_freed_before_activation() -> Array[String]:
 	if result.success:
 		violations.append("target_freed_before_activation: activation should fail")
 
-	if result.reason != &"invalid_target":
+	if result.reason != MobaAbilityAction.FAILURE_INVALID_TARGET:
 		violations.append(
 			(
 				"target_freed_before_activation: reason should be 'invalid_target', got '%s'"
@@ -641,7 +670,7 @@ static func _test_out_of_range() -> Array[String]:
 	if result.success:
 		violations.append("out_of_range: activation should fail")
 
-	if result.reason != &"out_of_range":
+	if result.reason != MobaAbilityAction.FAILURE_OUT_OF_RANGE:
 		violations.append("out_of_range: reason should be 'out_of_range', got '%s'" % result.reason)
 
 	# Check that resource was NOT spent
@@ -679,7 +708,7 @@ static func _test_invalid_target_reference() -> Array[String]:
 	if result.success:
 		violations.append("invalid_target_reference: activation should fail")
 
-	if result.reason != &"invalid_target":
+	if result.reason != MobaAbilityAction.FAILURE_INVALID_TARGET:
 		violations.append(
 			"invalid_target_reference: reason should be 'invalid_target', got '%s'" % result.reason
 		)
@@ -782,12 +811,60 @@ static func _test_ability_caster_activate() -> Array[String]:
 	if bad_result.success:
 		violations.append("ability_caster: unknown ability should fail")
 
-	if bad_result.reason != &"unknown_ability":
+	if bad_result.reason != MobaAbilityAction.FAILURE_UNKNOWN_ABILITY:
 		violations.append(
 			(
 				"ability_caster: unknown ability reason should be 'unknown_ability', got '%s'"
 				% bad_result.reason
 			)
+		)
+
+	# Cleanup
+	MobaAbilityLibrary._reset()
+
+	return violations
+
+
+## Test 14: MobaAbilityCaster.activate() registers the ability with the caster's
+## MobaCombatant before checking legality (per the Scope's "stands in for real
+## loadout-time registration" step), so a caller that never separately registered
+## the ability still activates successfully.
+static func _test_ability_caster_activate_without_preregistration() -> Array[String]:
+	var violations: Array[String] = []
+
+	# Setup
+	MobaAbilityLibrary._reset()
+	_ensure_all_test_abilities_loaded()
+
+	# register_abilities = false: nothing is registered on this combatant yet.
+	var caster_data = _create_test_actor(false)
+	var caster = caster_data["actor"]
+	var caster_combatant = caster_data["combatant"]
+
+	if &"power_strike" in caster_combatant._abilities:
+		violations.append(
+			"ability_caster_without_preregistration: power_strike should not be pre-registered"
+		)
+
+	var target = _create_target_with_combatant()
+	target.global_position = Vector3(1, 0, 0)
+
+	var caster_node = MobaAbilityCaster.new()
+
+	var context = MobaCastContext.new(caster, target)
+	var result = caster_node.activate(&"power_strike", context)
+
+	if not result.success:
+		violations.append(
+			(
+				"ability_caster_without_preregistration: activation should succeed without"
+				+ " prior registration, got: %s" % result.reason
+			)
+		)
+
+	if not caster_combatant._abilities.has(&"power_strike"):
+		violations.append(
+			"ability_caster_without_preregistration: activate() should register the ability"
 		)
 
 	# Cleanup

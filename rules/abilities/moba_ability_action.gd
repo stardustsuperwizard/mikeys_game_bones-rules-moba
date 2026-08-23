@@ -19,6 +19,10 @@
 ## - invalid_target: explicit_target is freed/invalid (for targeted abilities)
 ## - out_of_range: target out of ability range (for targeted abilities)
 ## - targeting_not_implemented: unimplemented targeting type
+## - invalid_context: MobaCastContext has no caster (MobaAbilityCaster.activate)
+##
+## This is the canonical place these reasons are defined; both this file and
+## its test reference these constants rather than duplicating the literals.
 class_name MobaAbilityAction
 extends Action
 
@@ -30,6 +34,11 @@ const FAILURE_INSUFFICIENT_RESOURCE = &"insufficient_resource"
 const FAILURE_INVALID_TARGET = &"invalid_target"
 const FAILURE_OUT_OF_RANGE = &"out_of_range"
 const FAILURE_TARGETING_NOT_IMPLEMENTED = &"targeting_not_implemented"
+## Not produced by MobaAbilityAction itself -- MobaCastContext.caster is non-nullable
+## by the time an Action reaches execute(). Returned by MobaAbilityCaster.activate()
+## when its context has no caster, before an Action is even constructed. Lives here
+## so it shares the one canonical failure-reason block the Scope requires.
+const FAILURE_INVALID_CONTEXT = &"invalid_context"
 
 var ability_id: StringName
 var context: MobaCastContext
@@ -80,7 +89,7 @@ func execute() -> ActionResult:
 	if resolved_target != null and is_instance_valid(resolved_target):
 		# Step 8: Apply damage (Batch 2 will defer this if cast_time > 0)
 		# For now, apply immediately
-		_apply_damage(ability, resolved_target)
+		_apply_damage(ability, resolved_target, combatant)
 
 		# Step 9: Apply effects (crowd control, buffs, debuffs) - Batch 2 seam
 		_apply_effects_seam(ability, resolved_target)
@@ -178,18 +187,37 @@ func _commit_activation(combatant: MobaCombatant) -> StringName:
 ## Apply the ability's damage to the resolved target, if any.
 ## Safe to call with an invalid/freed target (guards with is_instance_valid()) --
 ## already-committed resource/cooldown cost is never refunded in that case.
-func _apply_damage(ability: MobaAbility, target: Node) -> void:
-	if target == null or not is_instance_valid(target) or ability.base_damage <= 0.0:
+func _apply_damage(ability: MobaAbility, target: Node, caster_combatant: MobaCombatant) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+
+	var raw_amount := _compute_scaled_damage(ability, caster_combatant)
+	if raw_amount <= 0.0:
 		return
 
 	var target_combatant := _get_combatant(target)
 	if target_combatant == null:
 		return
 
-	var damage := MobaDamage.new(
-		ability.base_damage, _damage_type_to_moba(ability.damage_type), actor  # source is the caster
-	)
+	# source is the caster
+	var damage := MobaDamage.new(raw_amount, _damage_type_to_moba(ability.damage_type), actor)
 	target_combatant.apply_damage(damage)
+
+
+## Compute the raw damage amount: base_damage plus ability.scaling ratios against
+## the caster's live stats (e.g. {"attack_damage": 0.6} adds 0.6 * caster attack_damage).
+## This is only the "base + scaling*stat" summation, not a mitigation/crit/cooldown
+## formula, so it is not a MobaFormulas concern per that file's own docstring --
+## MobaFormulas.physical_damage()/magical_damage()/etc. are still the only place
+## mitigation math happens, inside MobaCombatant.apply_damage().
+func _compute_scaled_damage(ability: MobaAbility, caster_combatant: MobaCombatant) -> float:
+	var amount := ability.base_damage
+	if caster_combatant == null:
+		return amount
+	for stat_name in ability.scaling:
+		var ratio: float = ability.scaling[stat_name]
+		amount += ratio * caster_combatant.get_stat(StringName(stat_name))
+	return amount
 
 
 ## Map MobaAbility.DamageType to MobaDamage.DamageType
