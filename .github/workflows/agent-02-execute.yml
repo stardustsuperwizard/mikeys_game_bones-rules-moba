@@ -431,6 +431,29 @@ jobs:
           excluded-tools: "task,write_agent"
           step-label: "Executing"
 
+      # Safety net for a session that made real changes but stopped short
+      # of running `git commit` itself (for example it ran out of budget,
+      # or simply forgot the hard rule above). Without this, that work is
+      # discarded entirely: "Check For Commit" below treats any leftover
+      # working-tree changes as a hard failure so a half-finished, unreviewed
+      # diff never becomes a pull request under the executor's name. Folding
+      # it into a commit here instead means that work survives and gets
+      # reviewed like any other implementation, while a session that
+      # committed nothing at all is unaffected (git commit is a no-op there,
+      # by the `git status --porcelain` guard).
+      - name: Commit Leftover Changes
+        if: steps.context.outputs.ok == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::warning::The executor left uncommitted changes;" \
+                 "committing them so the work is not discarded."
+            git add -A
+            git commit -m "Apply uncommitted executor changes"
+          fi
+
       # Whether a commit exists is the only signal trusted here -- not the
       # session's own claims. A session that talks as if it finished but
       # left the tree dirty, or decided not to commit at all, does not get
