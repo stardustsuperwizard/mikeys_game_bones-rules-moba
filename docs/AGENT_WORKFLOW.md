@@ -574,8 +574,8 @@ no picker involved:
    `AGENTS.md` and `.github/copilot-instructions.md`.
 3. Requires an actual commit to exist afterward — not just a session that
    talked as if it finished — then immediately opens the pull request
-   itself, on branch `agent-exec/<issue#>`, with `Closes #n` already in the
-   body.
+   itself, on branch `agent-exec/<issue#>`, as a **draft**, with `Closes #n`
+   already in the body.
 4. Re-runs `validate-godot.sh` and applies `gdformat` to any changed
    GDScript, pushing any formatting fix onto that already-open pull
    request.
@@ -583,6 +583,10 @@ no picker involved:
    `agent-04-review.yml` uses) against the already-open pull request. If
    that verdict is `FIX`, runs one bounded self-fix pass (`FIXER_MODELS`)
    and pushes it too.
+6. Runs `validate-godot.sh` one last time against whatever commit the
+   branch ends up pointing at, writes the exit status into the pull
+   request body, and marks it ready for review if — and only if — that run
+   passed.
 
 A `PASS` (or an unfixed `FIX`) is posted to the pull request as the real
 verdict, `review:*` label included — so adding `agent:review` to it is a
@@ -595,6 +599,32 @@ pull request exists — no commit, an uncommitted session, `gh pr create`
 itself failing — comments on the Issue and removes `agent:execute` rather
 than opening a broken PR, so re-adding the label is a clean retry in that
 case.
+
+#### Why the draft state carries the validation result
+
+Step 6 is the only statement about validation on an executor pull request
+that is not a session talking about itself. The completion report becomes
+the body verbatim; the pre-PR review and fix comments are written by
+sessions too. None of that is checked against anything, and the prose looks
+the same whether a session validated, skipped validation and said so, or
+merely claimed a run it never made — all three have happened.
+
+So the body leads with a `## Workflow-verified validation` section that only
+`agent-02-execute.yml` writes, and the pull request stays a draft until that
+run passes. **A draft executor PR is one no verified validation stands
+behind.** Read the section, not the report.
+
+This is load-bearing on one specific path. An executor is told not to commit
+work it has not validated, and one that follows that rule leaves the tree
+dirty; `Commit Leftover Changes` then commits it anyway, so the work is not
+thrown away. That is the right trade — but it manufactures the very "a
+commit exists" signal the next step says it trusts, so an unvalidated
+session's work can and does reach a pull request. Draft-until-verified is
+what keeps that from being indistinguishable from finished work.
+
+It costs nothing elsewhere: the saved views and the control plane already
+read draft as *Implementing* and ready as *Awaiting review*, which is
+exactly the distinction being drawn.
 
 Run it by hand against any Issue number to re-check:
 
@@ -776,6 +806,12 @@ Order matters in the task table: a draft PR reads as *Implementing* even when
 a `review:fix` label is still present, because that label persists through the
 bounded correction that answers it. Testing draft-ness first is what stops
 every in-flight fix from showing as waiting on you.
+
+*Implementing* now also covers an executor PR whose validation never came
+back green: `agent-02-execute.yml` marks its pull requests ready only after
+its own `validate-godot.sh` run passes (see **Why the draft state carries the
+validation result**). Either way the reading is the same — a draft is not
+finished work — which is why the table needed no new row.
 
 #### Rendering it
 

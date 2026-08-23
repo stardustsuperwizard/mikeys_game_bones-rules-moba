@@ -7,6 +7,25 @@ name: Agent - AW02 Execute Task
 # review says FIX -- all as best-effort follow-ups pushed onto the branch
 # behind the pull request that is already open by then.
 #
+# The pull request opens as a **draft**, and only "Record Verified
+# Validation" (the last step to touch it) marks it ready for review, after
+# running `validate-godot.sh` itself against the commit the branch ends up
+# pointing at and writing the exit status into the body. Everything else a
+# reader would take as a validation result -- the completion report that
+# becomes the body, the pre-PR review and fix comments -- is a session
+# describing its own work, and none of it is checked against anything.
+# Sessions have both skipped validation and reported it in the same
+# breath, and the shape of the prose does not distinguish the two, so the
+# draft state is what carries the difference: draft means no verified run
+# stands behind this pull request yet.
+#
+# This matters most on the path where the executor deliberately did *not*
+# commit. "Commit Leftover Changes" rescues that work rather than
+# discarding it, which is right -- but it manufactures the very signal
+# "Check For Commit" says it trusts, so an unvalidated session's work can
+# reach a pull request. Draft-until-verified is what keeps that from
+# looking identical to a finished one.
+#
 # The gdformat pass is unconditional and needs no model: mechanical,
 # diff-scoped (see lint-gdscript/action.yml for why not whole-repo), and
 # committed before the pre-PR review runs so the reviewer never spends
@@ -553,8 +572,34 @@ jobs:
               "unknown (resumed from a previous run)" if resumed else ""
           )
 
+          # The executor's completion report is the session's own account
+          # of what it did, and nothing downstream verifies its claims --
+          # a session that skipped validation and said so, or one that
+          # claimed a passing run it never made, both produce a body that
+          # reads the same. So the body leads with a slot only this
+          # workflow ever writes ("Record Verified Validation", below),
+          # and the report follows it as commentary. Until that step fills
+          # the slot in, the placeholder says plainly that nothing has
+          # been verified yet -- and the pull request stays a draft.
+          validation_placeholder = "\n".join([
+              "<!-- agent-execute-validation-record -->",
+              "## Workflow-verified validation",
+              "",
+              "**Not yet recorded.** This pull request opened as a draft"
+              " immediately after the executor's commit, before the"
+              " workflow ran `.github/scripts/validate-godot.sh` itself."
+              " It is marked ready for review only once that run passes.",
+              "",
+              "Nothing below this section is evidence that validation ran:"
+              " the completion report is the executor session's own"
+              " account, unverified.",
+              "<!-- /agent-execute-validation-record -->",
+          ])
+
           lines = [
               f"Closes #{issue_number}",
+              "",
+              validation_placeholder,
               "",
               exec_report,
               "",
@@ -584,12 +629,48 @@ jobs:
               capture_output=True, text=True, check=True,
           ).stdout.strip()
 
-          create = subprocess.run(
-              ["gh", "pr", "create", "--repo", repo, "--base", base,
-               "--head", branch, "--title", pr_title,
-               "--body-file", "pr-body.md"],
-              capture_output=True, text=True,
-          )
+          # Opened as a draft on purpose. The commit behind it may be one
+          # the executor itself refused to make: "Commit Leftover Changes"
+          # above deliberately rescues an unfinished session's work rather
+          # than discarding it, which means the pull request can exist for
+          # code the executor stopped short of validating -- exactly the
+          # case its own hard rules tell it not to commit. Draft is how
+          # that distinction survives into something a human can see:
+          # "Record Verified Validation" marks it ready only after this
+          # workflow's own `validate-godot.sh` run passes against the
+          # commit the branch actually points at. A pull request still
+          # sitting in draft is one no verified validation stands behind.
+          #
+          # This costs nothing in the dashboard or the saved views: both
+          # already read draft as "Implementing" and ready as "Awaiting
+          # review" (see docs/AGENT_WORKFLOW.md), which is precisely the
+          # distinction being drawn here.
+          def create_pr(draft):
+              command = ["gh", "pr", "create", "--repo", repo, "--base", base,
+                         "--head", branch, "--title", pr_title,
+                         "--body-file", "pr-body.md"]
+
+              if draft:
+                  command.append("--draft")
+
+              return subprocess.run(command, capture_output=True, text=True)
+
+          create = create_pr(draft=True)
+
+          # Draft pull requests are not available on every plan/visibility
+          # combination. Losing the draft gate is worth strictly less than
+          # losing the pull request, so fall back rather than fail -- the
+          # verified-validation section still lands in the body either
+          # way, which is the part that carries the actual evidence.
+          if create.returncode != 0:
+              print(create.stderr)
+              print(
+                  "::warning::Opening the pull request as a draft failed."
+                  " Retrying without --draft; the ready-for-review gate on"
+                  " verified validation will not apply to this pull"
+                  " request, though its validation record still will."
+              )
+              create = create_pr(draft=False)
 
           # The branch is already pushed at this point, so a failure here
           # must not surface as an opaque, uncaught CalledProcessError --
@@ -915,6 +996,176 @@ jobs:
             git reset --hard "$IMPL_SHA"
             echo "fix_applied=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # The one place a validation result reaches the pull request as
+      # fact rather than as an agent's claim.
+      #
+      # Every other statement about validation on an executor pull request
+      # is a session talking about itself: the executor's completion
+      # report becomes the body verbatim, and the pre-PR review and fix
+      # comments are written by sessions too. None of that is checked
+      # against anything. A session that skipped validation, a session
+      # that ran it and passed, and a session that simply said it passed
+      # all produce prose of the same shape -- and the reader has no way
+      # to tell them apart.
+      #
+      # So this runs `validate-godot.sh` once more, last, against the
+      # commit the remote branch actually points at, and writes the exit
+      # status into the body slot reserved for it. Deliberately a fresh
+      # run rather than a reuse of `steps.validate.outputs.status`: that
+      # one measured the executor's commit, and formatting and the pre-PR
+      # fix pass can both have moved the branch since.
+      #
+      # Runs under `always()` because a validation failure upstream skips
+      # the whole review-and-fix pass -- that is precisely the case where
+      # the body must not be left claiming nothing was checked when it
+      # was, or vice versa. `continue-on-error` keeps it from turning a
+      # working pull request into a failed job.
+      - name: Record Verified Validation
+        if: >-
+          always() &&
+          steps.context.outputs.ok == 'true' &&
+          steps.commit.outputs.made == 'true' &&
+          steps.pr.outcome == 'success'
+        continue-on-error: true
+        shell: python
+        env:
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository
+            }}/actions/runs/${{ github.run_id }}
+        run: |
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["BRANCH"]
+          run_url = os.environ["RUN_URL"]
+          pr_number = re.search(r"(\d+)$", os.environ["PR_URL"]).group(1)
+
+          MARKER_OPEN = "<!-- agent-execute-validation-record -->"
+          MARKER_CLOSE = "<!-- /agent-execute-validation-record -->"
+
+          log = pathlib.Path("verified-validate-output.txt")
+
+          with log.open("wb") as handle:
+              status = subprocess.run(
+                  [".github/scripts/validate-godot.sh"],
+                  stdout=handle, stderr=subprocess.STDOUT,
+              ).returncode
+
+          def git(*args):
+              return subprocess.run(
+                  ["git", *args], capture_output=True, text=True, check=True,
+              ).stdout.strip()
+
+          # What was validated is the runner's working tree; what a
+          # reviewer will read is whatever the branch points at. Those are
+          # the same thing on every path through this job -- but "the same
+          # thing on every path I can think of" is exactly the assumption
+          # this whole step exists to stop trusting, so check it and say
+          # so when it does not hold.
+          local_sha = git("rev-parse", "HEAD")
+          remote_line = git("ls-remote", "origin", f"refs/heads/{branch}")
+          remote_sha = remote_line.split()[0] if remote_line else ""
+
+          in_sync = remote_sha == local_sha
+          verified = status == 0 and in_sync
+
+          if not in_sync:
+              headline = (
+                  f"**Not verified.** The workflow validated `{local_sha}`,"
+                  f" but `{branch}` points at"
+                  f" `{remote_sha or 'nothing'}` -- so this run says"
+                  " nothing about the code in this pull request."
+              )
+          elif status == 0:
+              headline = (
+                  "`.github/scripts/validate-godot.sh` — **passed** (exit"
+                  f" 0), run against `{local_sha}`, the commit"
+                  f" `{branch}` points at."
+              )
+          else:
+              headline = (
+                  "`.github/scripts/validate-godot.sh` — **failed** (exit"
+                  f" {status}), run against `{local_sha}`, the commit"
+                  f" `{branch}` points at."
+              )
+
+          tail = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+
+          section = "\n".join([
+              MARKER_OPEN,
+              "## Workflow-verified validation",
+              "",
+              headline,
+              "",
+              "<details><summary>Validation output (tail)</summary>",
+              "",
+              "```",
+              tail.strip(),
+              "```",
+              "",
+              "</details>",
+              "",
+              "Written by `agent-02-execute.yml` itself, not by an agent"
+              " session. Every other account of validation on this pull"
+              " request -- the completion report included -- comes from a"
+              " session describing its own work, and none of it was"
+              " treated as evidence here.",
+              "",
+              f"[Workflow run]({run_url})",
+              MARKER_CLOSE,
+          ])
+
+          body = subprocess.run(
+              ["gh", "pr", "view", pr_number, "--repo", repo,
+               "--json", "body", "--jq", ".body"],
+              capture_output=True, text=True, check=True,
+          ).stdout
+
+          slot = re.compile(
+              re.escape(MARKER_OPEN) + ".*?" + re.escape(MARKER_CLOSE),
+              re.DOTALL,
+          )
+
+          # `lambda` rather than a plain replacement string: the section
+          # is full of backslashes and backticks from the validation log,
+          # and re.sub would read `\1` and friends in it as group
+          # references.
+          if slot.search(body):
+              body = slot.sub(lambda _: section, body, count=1)
+          else:
+              body = body.rstrip() + "\n\n" + section + "\n"
+
+          pathlib.Path("pr-body-verified.md").write_text(body + "\n")
+
+          subprocess.run(
+              ["gh", "pr", "edit", pr_number, "--repo", repo,
+               "--body-file", "pr-body-verified.md"],
+              check=True,
+          )
+
+          if not verified:
+              print(
+                  "::warning::No verified validation stands behind this"
+                  " pull request, so it stays a draft."
+              )
+              raise SystemExit(0)
+
+          # `check=False`: the pull request is only a draft if `--draft`
+          # was accepted when it opened, and `gh pr ready` errors on one
+          # that never was. That is not a failure worth reporting -- the
+          # body already carries the result either way.
+          ready = subprocess.run(
+              ["gh", "pr", "ready", pr_number, "--repo", repo],
+              capture_output=True, text=True,
+          )
+
+          if ready.returncode != 0:
+              print(ready.stderr)
 
       # Best-effort: the pull request is already open by this point (it
       # opened right after the executor's commit, well before this step),
