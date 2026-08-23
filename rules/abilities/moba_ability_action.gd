@@ -1,11 +1,14 @@
 ## Action that activates a MOBA ability.
 ##
 ## MobaAbilityAction executes the full ability activation pipeline:
-## 1. Legality checks (state, cooldown, charges, resource)
-## 2. Target resolution (self, targeted, or unimplemented)
-## 3. Resource and cooldown commitment
-## 4. Damage application (if not cast_time-delayed to Batch 2)
-## 5. State machine transitions for cast/channel states
+## 1. Legality: state machine can(&"ability")
+## 2. Legality: cooldown/charges/resource via MobaCombatant.can_activate()
+## 3. Legality: silenced seam (Batch 2, empty for now)
+## 4. Target resolution (self, targeted, or unimplemented)
+## 5. Resource and cooldown commitment
+## 6. State machine transition into ABILITY_CAST if cast_time > 0
+## 7. Damage application (if not cast_time-delayed to Batch 2)
+## 8. Effects seam (crowd control/buffs/debuffs, Batch 2, empty for now)
 ##
 ## Failure reasons returned as StringName:
 ## - unknown_ability: ability_id not found in library
@@ -49,7 +52,7 @@ func execute() -> ActionResult:
 	if combatant == null:
 		return ActionResult.new(false, FAILURE_ILLEGAL_STATE)
 
-	# Step 3+4+4.5: state machine, silenced, and cooldown/charges/resource legality
+	# Steps 1-4: state machine, cooldown/charges/resource legality, then silenced
 	var state_machine := _get_state_machine(actor)
 	var early_failure := _check_early_legality(combatant, state_machine)
 	if early_failure != &"":
@@ -70,42 +73,37 @@ func execute() -> ActionResult:
 	if state_machine != null and ability.cast_time > 0.0:
 		state_machine.try_enter(MobaState.ABILITY_CAST, ability.cast_time)
 
-	# Step 8: Apply damage (Batch 2 will defer this if cast_time > 0)
-	# For now, apply immediately
-	_apply_damage(ability, resolved_target)
+	# Steps 8-9: Apply damage and effects, guarded against the target having
+	# evaporated between commit (step 6) and this resolution step. The
+	# resource spend and cooldown start committed above are never refunded
+	# if that happens -- resolution just safely no-ops.
+	if resolved_target != null and is_instance_valid(resolved_target):
+		# Step 8: Apply damage (Batch 2 will defer this if cast_time > 0)
+		# For now, apply immediately
+		_apply_damage(ability, resolved_target)
 
-	# Step 9: Apply effects (crowd control, buffs, debuffs) - Batch 2 seam
-	if resolved_target != null:
+		# Step 9: Apply effects (crowd control, buffs, debuffs) - Batch 2 seam
 		_apply_effects_seam(ability, resolved_target)
 
 	return ActionResult.new(true)
 
 
-## Find a combatant's MobaCombatant, either as a child node or (for testing) as meta.
+## Find a combatant's MobaCombatant child node.
 func _get_combatant(node: Node) -> MobaCombatant:
-	var combatant: MobaCombatant = node.get_node_or_null("MobaCombatant") as MobaCombatant
-	if combatant == null and node.has_meta("_test_combatant"):
-		combatant = node.get_meta("_test_combatant") as MobaCombatant
-	return combatant
+	return node.get_node_or_null("MobaCombatant") as MobaCombatant
 
 
-## Find a node's MobaStateMachine, either as a child node or (for testing) as meta.
+## Find a node's MobaStateMachine child node.
 func _get_state_machine(node: Node) -> MobaStateMachine:
-	var state_machine: MobaStateMachine = (
-		node.get_node_or_null("MobaStateMachine") as MobaStateMachine
-	)
-	if state_machine == null and node.has_meta("_test_state_machine"):
-		state_machine = node.get_meta("_test_state_machine") as MobaStateMachine
-	return state_machine
+	return node.get_node_or_null("MobaStateMachine") as MobaStateMachine
 
 
-## Check state machine, silenced seam, and cooldown/charges/resource legality.
+## Check state machine, cooldown/charges/resource legality, then the silenced seam.
+## Order pinned by the Scope: step 1 (state), steps 2-3 (cooldown/charges/resource
+## via MobaCombatant.can_activate), step 4 (silenced).
 ## Returns an empty StringName if legal, otherwise a FAILURE_* constant.
 func _check_early_legality(combatant: MobaCombatant, state_machine: MobaStateMachine) -> StringName:
 	if state_machine != null and not state_machine.can(&"ability"):
-		return FAILURE_ILLEGAL_STATE
-
-	if _check_silenced_seam(combatant):
 		return FAILURE_ILLEGAL_STATE
 
 	var legality_result: int = combatant.can_activate(ability_id)
@@ -123,7 +121,13 @@ func _check_early_legality(combatant: MobaCombatant, state_machine: MobaStateMac
 			failure = &""
 		_:
 			failure = FAILURE_ILLEGAL_STATE
-	return failure
+	if failure != &"":
+		return failure
+
+	if _check_silenced_seam(combatant):
+		return FAILURE_ILLEGAL_STATE
+
+	return &""
 
 
 ## Resolve the ability's target based on its targeting type.
@@ -172,8 +176,10 @@ func _commit_activation(combatant: MobaCombatant) -> StringName:
 
 
 ## Apply the ability's damage to the resolved target, if any.
+## Safe to call with an invalid/freed target (guards with is_instance_valid()) --
+## already-committed resource/cooldown cost is never refunded in that case.
 func _apply_damage(ability: MobaAbility, target: Node) -> void:
-	if target == null or ability.base_damage <= 0.0:
+	if target == null or not is_instance_valid(target) or ability.base_damage <= 0.0:
 		return
 
 	var target_combatant := _get_combatant(target)
