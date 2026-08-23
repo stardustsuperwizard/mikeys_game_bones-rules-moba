@@ -221,26 +221,6 @@ jobs:
           excluded-tools: "task,write_agent"
           step-label: "Fixing"
 
-      # If the fixer edited tracked files but failed to commit, commit those
-      # edits here so the push gate can proceed.
-      - name: Commit Fixer Edits If Needed
-        if: steps.build.outputs.verdict == 'FIX'
-        id: fallback_commit
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -z "$(git status --porcelain --untracked-files=no)" ]; then
-            echo "committed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git add -u
-          git commit -m "fix: apply automated fixer edits"
-
-          echo "committed=true" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
       # The prompt tells the model to commit but never push. This is the
       # single place that decides whether anything reaches the branch: a
       # session that edited files but never committed, or committed nothing

@@ -412,7 +412,11 @@ static func _test_attack_cycle_limiter() -> bool:
 		print("ERROR: First attack should succeed")
 		return false
 
-	combatant.tick(1.1)
+	# At t=1.0 the attack-speed interval has already elapsed, but the cycle
+	# (0.6 wind-up + 0.5 recovery = 1.1s) has not finished (still 0.1s of
+	# recovery left), so the cycle -- not the interval -- must be the
+	# reason the next attack is refused.
+	combatant.tick(1.0)
 
 	if combatant.basic_attack(target):
 		print("ERROR: Second attack should not be ready when cycle exceeds interval")
@@ -568,16 +572,26 @@ static func _test_basic_attack_damage_amount() -> bool:
 			observed_amount = d
 	combatant.basic_attack_resolved.connect(handler)
 
+	var observed_raw = -1.0
+	var damage_handler = func(raw, _final, _damage_type, _was_crit, _source):
+		observed_raw = raw
+	target.damage_resolved.connect(damage_handler)
+
 	if not combatant.basic_attack(target):
 		combatant.basic_attack_resolved.disconnect(handler)
+		target.damage_resolved.disconnect(damage_handler)
 		print("ERROR: basic_attack should succeed")
 		return false
 
 	combatant.tick(weapon.wind_up + 0.01)
 	combatant.basic_attack_resolved.disconnect(handler)
+	target.damage_resolved.disconnect(damage_handler)
 
 	if not is_equal_approx(observed_amount, expected_amount):
 		print("ERROR: Expected damage %f, got %f" % [expected_amount, observed_amount])
+		return false
+	if not is_equal_approx(observed_raw, expected_amount):
+		print("ERROR: Expected damage_resolved raw %f, got %f" % [expected_amount, observed_raw])
 		return false
 
 	return true
@@ -601,11 +615,18 @@ static func _test_basic_attack_no_weapon_fails_cleanly() -> bool:
 	return true
 
 
+## A lightweight stand-in for a positioned parent node in tests. A plain Node
+## with a real (settable, non-computed) global_position field -- not Node3D,
+## whose global_position getter/setter requires the node to be inside a live
+## SceneTree -- matching ability_activation_test.gd's _TestTarget pattern.
+class _TestPositionedNode:
+	extends Node
+	var global_position: Vector3 = Vector3.ZERO
+
+
 static func _create_test_actor_with_loadout_and_weapon() -> Dictionary:
-	var attacker := Actor.new()
-	attacker.owner_id = 1
+	var attacker := _TestPositionedNode.new()
 	attacker.global_position = Vector3.ZERO
-	attacker.character_sheet = CharacterSheet.new()
 
 	var attacker_combatant := MobaCombatant.new()
 	attacker_combatant.name = "MobaCombatant"
@@ -631,10 +652,8 @@ static func _create_test_actor_with_loadout_and_weapon() -> Dictionary:
 	state_machine._load_state_table()
 	attacker.add_child(state_machine)
 
-	var target_actor := Actor.new()
-	target_actor.owner_id = 2
+	var target_actor := _TestPositionedNode.new()
 	target_actor.global_position = Vector3(5.0, 0.0, 0.0)
-	target_actor.character_sheet = CharacterSheet.new()
 
 	var target_combatant := MobaCombatant.new()
 	target_combatant.name = "MobaCombatant"

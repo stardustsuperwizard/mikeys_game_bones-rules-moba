@@ -53,7 +53,6 @@ var _cooldowns: MobaCooldowns = MobaCooldowns.new()
 var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
 var _attack_target: Node = null
 var _attack_time_since_ready: float = INF
-var _attack_hit_applied: bool = false
 
 
 func _ready() -> void:
@@ -362,20 +361,27 @@ func basic_attack(target: MobaCombatant) -> bool:
 		return false
 	_attack_target = target
 	_attack_time_since_ready = 0.0
-	_attack_hit_applied = false
 	return true
 
 
-## Fail-closed: an attacker or target without a positioned parent Actor is
-## treated as out of range rather than in range, so range gating cannot be
-## bypassed by an incomplete scene setup.
+## Fail-closed: an attacker or target whose parent exposes no global_position
+## is treated as out of range rather than in range, so range gating cannot be
+## bypassed by an incomplete scene setup. Duck-typed via get("global_position")
+## -- matching MobaAbilityAction._get_position() -- so rules/ keeps no
+## outward reference to Actor.
 func _is_in_range(target: MobaCombatant, range_m: float) -> bool:
-	var this_combatant := get_parent() as Actor
-	var target_actor := target.get_parent() as Actor
-	if this_combatant == null or target_actor == null:
+	var this_position = _get_parent_position(self)
+	var target_position = _get_parent_position(target)
+	if this_position == null or target_position == null:
 		return false
-	var distance = this_combatant.global_position.distance_to(target_actor.global_position)
-	return distance <= range_m
+	return (this_position as Vector3).distance_to(target_position as Vector3) <= range_m
+
+
+func _get_parent_position(combatant: MobaCombatant) -> Variant:
+	var parent := combatant.get_parent()
+	if parent == null:
+		return null
+	return parent.get("global_position")
 
 
 func _get_state_machine() -> MobaStateMachine:
@@ -433,20 +439,16 @@ func _tick_state_machine_and_basic_attack(delta: float) -> void:
 func _advance_basic_attack_phase(expiring_state: int, state_machine: MobaStateMachine) -> void:
 	if expiring_state != MobaState.BASIC_ATTACK_WINDUP:
 		_attack_target = null
-		_attack_hit_applied = false
 		return
 
 	var weapon := loadout.get_weapon() if loadout != null else null
 	if weapon == null:
 		_attack_target = null
-		_attack_hit_applied = false
 		return
 
 	_apply_basic_attack_hit(weapon)
-	_attack_hit_applied = true
 	if not state_machine.try_enter(MobaState.BASIC_ATTACK_RECOVERY, weapon.recovery):
 		_attack_target = null
-		_attack_hit_applied = false
 
 
 func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
