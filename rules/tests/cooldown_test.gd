@@ -493,7 +493,10 @@ static func _test_hud_getters() -> Array[String]:
 	loadout.set_passive_slot("test_passive")
 	if combatant.get_passive_slot_id() != &"test_passive":
 		violations.append(
-			"hud_getters: passive id should be test_passive, got %s" % combatant.get_passive_slot_id()
+			(
+				"hud_getters: passive id should be test_passive, got %s"
+				% combatant.get_passive_slot_id()
+			)
 		)
 
 	return violations
