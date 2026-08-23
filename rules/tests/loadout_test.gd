@@ -35,8 +35,15 @@ static func run() -> bool:
 	results.append(_test_activate_slot_cooldown_and_mapping_stable())
 	results.append(_test_basic_attack_cycle())
 	results.append(_test_attack_cadence_one_per_second())
+	results.append(_test_attack_cadence_one_point_five_per_second())
 	results.append(_test_attack_cycle_limiter())
 	results.append(_test_attack_idle_time_when_interval_longer())
+	results.append(_test_basic_attack_state_legality())
+	results.append(_test_basic_attack_refuses_out_of_range())
+	results.append(_test_basic_attack_refuses_dead_target())
+	results.append(_test_basic_attack_refuses_when_state_forbids())
+	results.append(_test_basic_attack_damage_amount())
+	results.append(_test_basic_attack_no_weapon_fails_cleanly())
 
 	return results.all(func(result: bool) -> bool: return result)
 
@@ -338,6 +345,27 @@ static func _test_basic_attack_cycle() -> bool:
 	return true
 
 
+## Simulates repeat-attacking for `seconds` of gameplay by ticking in small
+## steps and calling basic_attack() whenever is_basic_attack_ready() allows
+## it - the same loop the game side would run - and returns how many
+## attacks resolved (via basic_attack_resolved).
+static func _simulate_attacks_for(combatant: MobaCombatant, target: MobaCombatant, seconds: float) -> int:
+	var resolved_count = 0
+	var handler = func(_t, _d): resolved_count += 1
+	combatant.basic_attack_resolved.connect(handler)
+
+	var step = 0.01
+	var elapsed = 0.0
+	while elapsed < seconds:
+		if combatant.is_basic_attack_ready():
+			combatant.basic_attack(target)
+		combatant.tick(step)
+		elapsed += step
+
+	combatant.basic_attack_resolved.disconnect(handler)
+	return resolved_count
+
+
 static func _test_attack_cadence_one_per_second() -> bool:
 	var data := _create_test_actor_with_loadout_and_weapon()
 	var combatant: MobaCombatant = data["combatant"]
@@ -345,25 +373,26 @@ static func _test_attack_cadence_one_per_second() -> bool:
 
 	combatant._runtime_stat_block.attack_speed = 1.0
 
-	var damage_count = 0
-	var handler = func(_t, _d): damage_count += 1
-	combatant.basic_attack_resolved.connect(handler)
-
-	if not combatant.basic_attack(target):
-		print("ERROR: First attack should succeed")
+	var resolved = _simulate_attacks_for(combatant, target, 1.0)
+	if resolved != 1:
+		print("ERROR: Expected exactly 1 attack at 1.0 attack speed, got %d" % resolved)
 		return false
 
-	var weapon = combatant.loadout.get_weapon()
-	var cycle_duration = weapon.wind_up + weapon.recovery
+	return true
 
-	combatant.tick(cycle_duration + 0.01)
 
-	if damage_count < 1:
-		print("ERROR: Should have at least 1 attack resolved")
-		combatant.basic_attack_resolved.disconnect(handler)
+static func _test_attack_cadence_one_point_five_per_second() -> bool:
+	var data := _create_test_actor_with_loadout_and_weapon()
+	var combatant: MobaCombatant = data["combatant"]
+	var target: MobaCombatant = data["target"]
+
+	combatant._runtime_stat_block.attack_speed = 1.5
+
+	var resolved = _simulate_attacks_for(combatant, target, 2.0)
+	if resolved != 3:
+		print("ERROR: Expected exactly 3 attacks over 2s at 1.5 attack speed, got %d" % resolved)
 		return false
 
-	combatant.basic_attack_resolved.disconnect(handler)
 	return true
 
 
@@ -372,6 +401,7 @@ static func _test_attack_cycle_limiter() -> bool:
 	var combatant: MobaCombatant = data["combatant"]
 	var target: MobaCombatant = data["target"]
 
+	combatant._runtime_stat_block.attack_speed = 1.0
 	var weapon = combatant.loadout.get_weapon()
 	weapon.wind_up = 0.6
 	weapon.recovery = 0.5
@@ -418,6 +448,152 @@ static func _test_attack_idle_time_when_interval_longer() -> bool:
 	combatant.tick(0.6)
 	if not combatant.basic_attack(target):
 		print("ERROR: Second attack should be ready after interval")
+		return false
+
+	return true
+
+
+static func _test_basic_attack_state_legality() -> bool:
+	var data := _create_test_actor_with_loadout_and_weapon()
+	var combatant: MobaCombatant = data["combatant"]
+	var target: MobaCombatant = data["target"]
+	var state_machine: MobaStateMachine = data["state_machine"]
+
+	if not combatant.basic_attack(target):
+		print("ERROR: basic_attack should succeed")
+		return false
+
+	if state_machine.current_state != MobaState.BASIC_ATTACK_WINDUP:
+		print("ERROR: Should be in BASIC_ATTACK_WINDUP")
+		return false
+	if state_machine.can(&"ability"):
+		print("ERROR: can(ability) should be false during wind-up")
+		return false
+
+	var weapon = combatant.loadout.get_weapon()
+	combatant.tick(weapon.wind_up + 0.01)
+
+	if state_machine.current_state != MobaState.BASIC_ATTACK_RECOVERY:
+		print("ERROR: Should be in BASIC_ATTACK_RECOVERY")
+		return false
+	if not state_machine.can(&"ability"):
+		print("ERROR: can(ability) should be true during recovery")
+		return false
+	if state_machine.can(&"basic_attack"):
+		print("ERROR: can(basic_attack) should be false during recovery")
+		return false
+
+	return true
+
+
+static func _test_basic_attack_refuses_out_of_range() -> bool:
+	var data := _create_test_actor_with_loadout_and_weapon()
+	var combatant: MobaCombatant = data["combatant"]
+	var target: MobaCombatant = data["target"]
+	var target_actor: Actor = data["target_actor"]
+	var state_machine: MobaStateMachine = data["state_machine"]
+
+	target_actor.global_position = Vector3(100.0, 0.0, 0.0)
+	var initial_health = target._current_health
+
+	if combatant.basic_attack(target):
+		print("ERROR: basic_attack should refuse an out-of-range target")
+		return false
+	if state_machine.current_state != MobaState.IDLE:
+		print("ERROR: Should not have entered the cycle")
+		return false
+	if target._current_health != initial_health:
+		print("ERROR: Out-of-range target should not take damage")
+		return false
+
+	return true
+
+
+static func _test_basic_attack_refuses_dead_target() -> bool:
+	var data := _create_test_actor_with_loadout_and_weapon()
+	var combatant: MobaCombatant = data["combatant"]
+	var target: MobaCombatant = data["target"]
+	var state_machine: MobaStateMachine = data["state_machine"]
+
+	target._current_health = 0.0
+
+	if combatant.basic_attack(target):
+		print("ERROR: basic_attack should refuse a dead target")
+		return false
+	if state_machine.current_state != MobaState.IDLE:
+		print("ERROR: Should not have entered the cycle")
+		return false
+
+	return true
+
+
+static func _test_basic_attack_refuses_when_state_forbids() -> bool:
+	var data := _create_test_actor_with_loadout_and_weapon()
+	var combatant: MobaCombatant = data["combatant"]
+	var target: MobaCombatant = data["target"]
+	var state_machine: MobaStateMachine = data["state_machine"]
+
+	if not combatant.basic_attack(target):
+		print("ERROR: First attack should succeed")
+		return false
+
+	var initial_health = target._current_health
+	if combatant.basic_attack(target):
+		print("ERROR: basic_attack should refuse while already in the cycle")
+		return false
+	if target._current_health != initial_health:
+		print("ERROR: Refused attack should not apply damage")
+		return false
+	if state_machine.current_state != MobaState.BASIC_ATTACK_WINDUP:
+		print("ERROR: Cycle should be unaffected by the refused call")
+		return false
+
+	return true
+
+
+static func _test_basic_attack_damage_amount() -> bool:
+	var data := _create_test_actor_with_loadout_and_weapon()
+	var combatant: MobaCombatant = data["combatant"]
+	var target: MobaCombatant = data["target"]
+
+	var weapon = combatant.loadout.get_weapon()
+	var attack_damage = combatant.get_stat(MobaStatBlock.ATTACK_DAMAGE)
+	var expected_amount = MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
+
+	var observed_amount = -1.0
+	var handler = func(t, d):
+		if t == target:
+			observed_amount = d
+	combatant.basic_attack_resolved.connect(handler)
+
+	if not combatant.basic_attack(target):
+		combatant.basic_attack_resolved.disconnect(handler)
+		print("ERROR: basic_attack should succeed")
+		return false
+
+	combatant.tick(weapon.wind_up + 0.01)
+	combatant.basic_attack_resolved.disconnect(handler)
+
+	if not is_equal_approx(observed_amount, expected_amount):
+		print("ERROR: Expected damage %f, got %f" % [expected_amount, observed_amount])
+		return false
+
+	return true
+
+
+static func _test_basic_attack_no_weapon_fails_cleanly() -> bool:
+	var data := _create_test_actor_with_loadout_and_weapon()
+	var combatant: MobaCombatant = data["combatant"]
+	var target: MobaCombatant = data["target"]
+	var state_machine: MobaStateMachine = data["state_machine"]
+
+	combatant.loadout.weapon = null
+
+	if combatant.basic_attack(target):
+		print("ERROR: basic_attack should fail cleanly with no weapon equipped")
+		return false
+	if state_machine.current_state != MobaState.IDLE:
+		print("ERROR: Should not have entered the cycle without a weapon")
 		return false
 
 	return true

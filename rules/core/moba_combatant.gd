@@ -310,10 +310,14 @@ func tick(delta: float) -> void:
 	# Advance cooldowns
 	_cooldowns.tick(delta)
 
-	# Advance state machine
-	var state_machine := _get_state_machine()
-	if state_machine != null:
-		state_machine.tick(delta)
+	# Advance the sibling state machine and the basic-attack cycle together.
+	# MobaCombatant.tick() is the single driver of MobaStateMachine.tick() for
+	# a combatant: nothing else in rules/ ticks it. Game-side code (T4) must
+	# not also call MobaStateMachine.tick() directly for a combatant driven
+	# through here, or states would expire twice as fast.
+	if _attack_time_since_ready != INF:
+		_attack_time_since_ready += delta
+	_tick_state_machine_and_basic_attack(delta)
 
 	# Accumulate resource regeneration
 	var resource_regen = get_stat(MobaStatBlock.RESOURCE_REGEN)
@@ -328,13 +332,22 @@ func tick(delta: float) -> void:
 		_current_health = minf(_current_health + health_regen * delta, max_health)
 		_update_health()
 
-	_tick_basic_attack(delta)
 
-
-func basic_attack(target: MobaCombatant) -> bool:
+## Whether basic_attack() may be called right now to start a new cycle: the
+## state machine currently permits a basic attack and the attack-speed
+## interval (1.0 / attack_speed) has elapsed since the last attack started.
+## This is the minimal query the game side needs to drive repeat attacks.
+func is_basic_attack_ready() -> bool:
 	var state_machine := _get_state_machine()
 	if state_machine == null or not state_machine.can(&"basic_attack"):
 		return false
+	var attack_speed := get_stat(MobaStatBlock.ATTACK_SPEED)
+	if attack_speed <= 0.0:
+		return false
+	return _attack_time_since_ready >= 1.0 / attack_speed
+
+
+func basic_attack(target: MobaCombatant) -> bool:
 	if loadout == null:
 		return false
 	var weapon := loadout.get_weapon()
@@ -344,10 +357,9 @@ func basic_attack(target: MobaCombatant) -> bool:
 		return false
 	if not _is_in_range(target, weapon.attack_range):
 		return false
-	var attack_speed := get_stat(MobaStatBlock.ATTACK_SPEED)
-	var attack_interval := 1.0 / attack_speed
-	if _attack_time_since_ready < attack_interval:
+	if not is_basic_attack_ready():
 		return false
+	var state_machine := _get_state_machine()
 	if not state_machine.try_enter(MobaState.BASIC_ATTACK_WINDUP, weapon.wind_up):
 		return false
 	_attack_target = target
@@ -356,13 +368,14 @@ func basic_attack(target: MobaCombatant) -> bool:
 	return true
 
 
+## Fail-closed: an attacker or target without a positioned parent Actor is
+## treated as out of range rather than in range, so range gating cannot be
+## bypassed by an incomplete scene setup.
 func _is_in_range(target: MobaCombatant, range_m: float) -> bool:
 	var this_combatant := get_parent() as Actor
 	var target_actor := target.get_parent() as Actor
 	if this_combatant == null or target_actor == null:
-		return true
-	if not this_combatant.is_inside_tree() or not target_actor.is_inside_tree():
-		return true
+		return false
 	var distance = this_combatant.global_position.distance_to(target_actor.global_position)
 	return distance <= range_m
 
@@ -374,42 +387,71 @@ func _get_state_machine() -> MobaStateMachine:
 	return parent.get_node_or_null("MobaStateMachine") as MobaStateMachine
 
 
-func _tick_basic_attack(delta: float) -> void:
-	if _attack_time_since_ready != INF:
-		_attack_time_since_ready += delta
-	if _attack_target == null:
-		return
+## Advances the sibling MobaStateMachine and the basic-attack cycle together.
+##
+## The wind-up and recovery phases are tracked through the state machine's
+## own duration/expiry mechanism (try_enter()/tick()), but a naive single
+## state_machine.tick(delta) call would silently drop any overshoot past a
+## phase boundary (the delta beyond exactly when wind-up or recovery
+## expires), making cycle durations drift with tick granularity. This loop
+## ticks the state machine only up to the next phase boundary, applies the
+## hit or returns to ready exactly at that boundary, and carries the
+## leftover delta into the following phase - bounded to at most the two
+## basic-attack phase boundaries per call, so it always terminates.
+func _tick_state_machine_and_basic_attack(delta: float) -> void:
 	var state_machine := _get_state_machine()
 	if state_machine == null:
+		return
+
+	var remaining_delta := delta
+	while remaining_delta > 0.0:
+		var expiring_state = state_machine.current_state
+		var in_attack_phase = (
+			expiring_state == MobaState.BASIC_ATTACK_WINDUP
+			or expiring_state == MobaState.BASIC_ATTACK_RECOVERY
+		)
+
+		if not in_attack_phase or state_machine.remaining <= 0.0 or state_machine.remaining > remaining_delta:
+			state_machine.tick(remaining_delta)
+			remaining_delta = 0.0
+			continue
+
+		# This tick exactly exhausts the current attack phase; carry the
+		# overshoot into the phase that follows.
+		var overshoot = remaining_delta - state_machine.remaining
+		state_machine.tick(state_machine.remaining)
+		_advance_basic_attack_phase(expiring_state, state_machine)
+		remaining_delta = overshoot
+
+
+## Called exactly when `expiring_state` (WINDUP or RECOVERY) has expired
+## back to IDLE. Applies the hit and enters recovery, or clears the cycle
+## and lets the readiness interval (tracked separately) gate the next
+## attack.
+func _advance_basic_attack_phase(expiring_state: int, state_machine: MobaStateMachine) -> void:
+	if expiring_state != MobaState.BASIC_ATTACK_WINDUP:
 		_attack_target = null
 		_attack_hit_applied = false
 		return
-	var current_state = state_machine.current_state
+
 	var weapon := loadout.get_weapon() if loadout != null else null
 	if weapon == null:
 		_attack_target = null
 		_attack_hit_applied = false
 		return
-	if current_state == MobaState.BASIC_ATTACK_WINDUP:
-		return
-	if current_state == MobaState.BASIC_ATTACK_RECOVERY:
-		return
-	if not _attack_hit_applied:
-		_apply_basic_attack_hit(weapon)
-		_attack_hit_applied = true
-		if not state_machine.try_enter(MobaState.BASIC_ATTACK_RECOVERY, weapon.recovery):
-			_attack_target = null
-			_attack_hit_applied = false
-		return
-	_attack_target = null
-	_attack_hit_applied = false
+
+	_apply_basic_attack_hit(weapon)
+	_attack_hit_applied = true
+	if not state_machine.try_enter(MobaState.BASIC_ATTACK_RECOVERY, weapon.recovery):
+		_attack_target = null
+		_attack_hit_applied = false
 
 
 func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 	if _attack_target == null or not _attack_target.is_alive():
 		return
 	var attack_damage := get_stat(MobaStatBlock.ATTACK_DAMAGE)
-	var total_damage := weapon.damage + attack_damage
+	var total_damage := MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
 	var damage := MobaDamage.new(
 		total_damage,
 		weapon.damage_type,
