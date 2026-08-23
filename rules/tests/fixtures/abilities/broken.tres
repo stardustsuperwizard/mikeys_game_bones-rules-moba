@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="MobaAbility" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://nonexistent/broken_script.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "test_broken_ability"
+name = "Test Broken Ability"

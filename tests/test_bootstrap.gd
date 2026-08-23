@@ -54,6 +54,12 @@ func _ready() -> void:
 		if cooldown_passed:
 			print("\nCooldown Test PASSED")
 
+		# Run the ability library test
+		var ability_library_passed = AbilityLibraryTest.run()
+
+		if ability_library_passed:
+			print("\nAbility Library Test PASSED")
+
 		# Exit after the tests complete to avoid loading the main scene
 		call_deferred("_quit_engine")
 
