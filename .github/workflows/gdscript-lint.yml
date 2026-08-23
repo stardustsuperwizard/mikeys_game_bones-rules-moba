@@ -75,6 +75,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # Both the gdformat-fix and gdlint-fix commit steps below gate on
+      # `validate-godot.sh`, which needs the engine on PATH.
+      - name: Setup Godot
+        uses: ./.github/actions/setup-godot
+        with:
+          godot-version: 4.7.1-stable
+
       # A fork PR's branch cannot be pushed to with this token. Detected
       # up front so every later step can gate on it, rather than
       # discovering it as a failed `git push`.
