@@ -197,16 +197,6 @@ func _update_health() -> void:
 			parent_actor.die()
 
 
-## Get current resource value.
-func get_current_resource() -> float:
-	return _current_resource
-
-
-## Get maximum resource value from the stat block.
-func get_maximum_resource() -> float:
-	return get_stat(MobaStatBlock.RESOURCE)
-
-
 ## Spend resource from the pool.
 ## Returns false and mutates nothing if amount exceeds current_resource.
 ## Otherwise deducts amount, emits resource_changed, and returns true.
