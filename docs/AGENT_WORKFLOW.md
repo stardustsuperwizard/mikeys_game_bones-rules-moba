@@ -35,6 +35,7 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 | Executor — scripted (`agent:execute`) | Claude Haiku 4.5, then Sonnet 5 | `EXECUTOR_MODELS` env / `vars.EXECUTOR_MODELS` in `agent-02-execute.yml` |
 | Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-04-review.yml` (also used by `agent-02-execute.yml`'s pre-PR self-review) |
 | Fixer | Claude Sonnet 5, then fallbacks | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-execute.yml`'s pre-PR self-fix) |
+| Lint fixer | Claude Haiku 4.5, then Sonnet 5 | `LINT_FIXER_MODELS` env / `vars.LINT_FIXER_MODELS` in `gdscript-lint.yml` |
 
 Planner, the scripted executor, reviewer, and fixer are all Copilot CLI
 sessions, so each one's model is a string in version control rather than a
@@ -42,6 +43,16 @@ dropdown someone has to remember. All four are overridable with a repository
 variable, so changing one does not need a commit. Only the native cloud
 agent — the other way to execute a task — still requires a human at a
 picker; see *Four entry points* below.
+
+The lint fixer isn't part of that four-role pipeline — it's not behind an
+`agent:*` label or a *Four entry points* path, it's a narrow, unlabeled
+self-heal step inside the plain `gdscript-lint.yml` status check: `gdformat`
+runs unconditionally and deterministically first (no model), and only the
+`gdlint` findings gdformat can't touch — which gdtoolkit has no auto-fix for
+at all — go to a capped Copilot CLI session scoped to just those findings and
+the files they're in. See the comment at the top of `gdscript-lint.yml` for
+why that's a deliberate, narrow exception to spending a Copilot session
+without a human decision first.
 
 ### All four are lists, because CLI availability is per-identity
 
