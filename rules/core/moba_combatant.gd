@@ -348,17 +348,15 @@ func is_basic_attack_ready() -> bool:
 
 
 func basic_attack(target: MobaCombatant) -> bool:
-	if loadout == null:
+	var weapon := loadout.get_weapon() if loadout != null else null
+	if (
+		weapon == null
+		or not target.is_alive()
+		or not _is_in_range(target, weapon.attack_range)
+		or not is_basic_attack_ready()
+	):
 		return false
-	var weapon := loadout.get_weapon()
-	if weapon == null:
-		return false
-	if not target.is_alive():
-		return false
-	if not _is_in_range(target, weapon.attack_range):
-		return false
-	if not is_basic_attack_ready():
-		return false
+
 	var state_machine := _get_state_machine()
 	if not state_machine.try_enter(MobaState.BASIC_ATTACK_WINDUP, weapon.wind_up):
 		return false
