@@ -27,6 +27,7 @@ func _ready() -> void:
 	_check("Extraction Contract Test", ExtractionContractTest.run())
 	_check("Ability Data Test", AbilityDataTest.run())
 	_check("Combatant Test", CombatantTest.run())
+	_check("Effect Container Test", EffectContainerTest.run())
 	_check("Resource Test", ResourceTest.run())
 	_check("Formulas Test", FormulasTest.run())
 	_check("State Machine Test", StateMachineTest.run())
