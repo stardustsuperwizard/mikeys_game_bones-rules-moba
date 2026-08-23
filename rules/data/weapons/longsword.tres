@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="MobaWeapon" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://rules/core/moba_weapon.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+damage = 50.0
+damage_type = 0
+attack_speed = 1.0
+attack_range = 2.0
+wind_up = 0.3
+recovery = 0.7
+projectile_speed = 0.0
