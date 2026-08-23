@@ -157,7 +157,9 @@ func _get_modified_stat(stat: StringName) -> float:
 		bonus = _stat_cache[stat]
 	else:
 		var container := get_effect_container()
-		bonus = {"flat": container.get_flat_bonus(stat), "percent": container.get_percent_bonus(stat)}
+		bonus = {
+			"flat": container.get_flat_bonus(stat), "percent": container.get_percent_bonus(stat)
+		}
 		_stat_cache[stat] = bonus
 
 	var base: float = _runtime_stat_block.get_stat_value(stat)
