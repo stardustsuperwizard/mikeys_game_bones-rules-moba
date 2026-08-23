@@ -411,7 +411,11 @@ func _tick_state_machine_and_basic_attack(delta: float) -> void:
 			or expiring_state == MobaState.BASIC_ATTACK_RECOVERY
 		)
 
-		if not in_attack_phase or state_machine.remaining <= 0.0 or state_machine.remaining > remaining_delta:
+		if (
+			not in_attack_phase
+			or state_machine.remaining <= 0.0
+			or state_machine.remaining > remaining_delta
+		):
 			state_machine.tick(remaining_delta)
 			remaining_delta = 0.0
 			continue

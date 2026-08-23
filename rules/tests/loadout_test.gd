@@ -349,7 +349,9 @@ static func _test_basic_attack_cycle() -> bool:
 ## steps and calling basic_attack() whenever is_basic_attack_ready() allows
 ## it - the same loop the game side would run - and returns how many
 ## attacks resolved (via basic_attack_resolved).
-static func _simulate_attacks_for(combatant: MobaCombatant, target: MobaCombatant, seconds: float) -> int:
+static func _simulate_attacks_for(
+	combatant: MobaCombatant, target: MobaCombatant, seconds: float
+) -> int:
 	var resolved_count = 0
 	var handler = func(_t, _d): resolved_count += 1
 	combatant.basic_attack_resolved.connect(handler)
