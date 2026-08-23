@@ -44,14 +44,14 @@ These are small and unlock a disproportionate amount of existing code.
 
 ### 0.1 Put content in the test room
 
-Add a hostile actor scene and a `Door` instance to the main scene.
-
-The actor scene can mirror `scenes/player/player.tscn` with `PlayerController3D`
-swapped for `SimpleAIController` and `hostile = true`. Both get added to
-`WorldManager.spawn_points` as new `SpawnPoint` resources.
-
-**Why first:** this turns a large share of the existing codebase from dead code
-into playable, testable behavior. Highest value per unit of effort in the repo.
+**Hostile actor done (T4); `Door` instance still outstanding.** A hostile
+actor scene (`scenes/enemy/enemy.tscn`) now exists with `SimpleAIController`,
+`hostile = true`, and a `MobaCombatant` carrying the melee-bruiser loadout.
+It is registered as the second entry in `WorldManager.spawn_points` in
+`scenes/main.tscn` and spawns at runtime at position (-2, 0, -3). The player
+scene also carries a `MobaCombatant`, `MobaStateMachine`, and
+`MobaAbilityCaster`; ability slots 1-4 are wired to the `ability_1`–`ability_4`
+input actions. A `Door` instance in the main scene is still needed.
 
 ### 0.2 Minimum viable UI
 
@@ -139,14 +139,17 @@ Also the prerequisite for loot and any sense of reward.
 
 Ruleset section 5. The `InputMap` in `../project.godot` now carries both
 keyboard + mouse and gamepad bindings, including `basic_attack`,
-`ability_1`–`ability_4`, `lock_on`, and `defend`. Only movement, jump, and
-camera recenter are actually consumed — by `../scripts/player_controller_3d.gd`
-and `../scripts/third_person_camera_3d.gd`, which read `Input` actions directly.
+`ability_1`–`ability_4`, `lock_on`, and `defend`.
+
+**Status as of T4:** `ability_1`–`ability_4` now have consumers in
+`../scripts/player_controller_3d.gd` (activate the corresponding slot on the
+player's `MobaAbilityCaster`). The basic-attack path fires automatically when
+the click-order system delivers the player into melee range of an attack target,
+so `basic_attack` is driven by proximity rather than read directly from input
+(this avoids the dual left-click conflict between `action_primary` and
+`basic_attack`). `lock_on` and `defend` remain unbound.
 
 Needs, in order:
-
-- Consumers for the new actions. They arrive with 1.2 (abilities) and 1.3
-  (targeting); until then they are bindings with nothing behind them.
 - Gamepad camera look. `ThirdPersonCamera3D` orbits on mouse motion only, so
   the right stick is bound to `turn_left`/`turn_right` — it turns the body
   rather than the camera. §5.1 wants the right stick on the camera, which
