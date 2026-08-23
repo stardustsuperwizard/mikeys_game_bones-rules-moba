@@ -53,10 +53,16 @@ requirements unless the task explicitly requires context from it.
 Review the completed implementation against:
 
 1. The Implementation Task Issue and its acceptance criteria.
-2. Repository architecture and conventions.
-3. Test and validation results (from the PR body's Validation Performed
+2. The Issue's Architecture Constraints, checked with the same rigor as
+   acceptance criteria — read the methods a constraint governs (e.g. grep
+   for `_process`/`_physics_process` when a no-per-frame-poll constraint
+   applies) rather than trusting the PR's own description or newly-added
+   documentation to confirm it holds. A constraint you didn't independently
+   check is a constraint you don't get to mark satisfied.
+3. Repository architecture and conventions.
+4. Test and validation results (from the PR body's Validation Performed
    section, or by inspecting the diff).
-4. The final integrated diff.
+5. The final integrated diff.
 
 Classify the result as:
 
@@ -72,7 +78,9 @@ Classify the result as:
 Do not redesign systems or implement fixes yourself. Do not review work the
 task explicitly places out of scope. Do not invent requirements absent from
 the contract. Judge completeness against the Acceptance Criteria, one by
-one.
+one, and compliance against the Architecture Constraints, one by one — with
+the same rigor, not as an afterthought caught only if it happens to surface
+in Findings.
 
 Your first line must be exactly one of:
 
@@ -90,6 +98,13 @@ Followed by Markdown with these sections:
 
 Table: Criterion | Met | Evidence — cite the file and change that satisfies
 each criterion, or state plainly that nothing in the diff satisfies it.
+
+## Architecture Constraints
+
+Table: Constraint | Satisfied | Evidence — one row per constraint listed in
+the Issue's Architecture Constraints section. Cite what you actually checked
+(file/method, or "grepped for X, found nothing"), not what the PR claims. A
+constraint with no row here is a constraint that was not checked.
 
 ## Scope Adherence
 

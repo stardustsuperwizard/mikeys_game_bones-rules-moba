@@ -264,6 +264,17 @@ runs:
         - Do not review work the task explicitly places out of scope.
         - Do not invent requirements absent from the contract.
         - Judge completeness against the Acceptance Criteria, one by one.
+        - Judge compliance against the Architecture Constraints, one by one
+          -- with the same rigor as the Acceptance Criteria, not as an
+          afterthought caught only if it happens to surface in Findings. A
+          constraint like "only X polls per frame" or "no rules logic in
+          this layer" is a claim about the whole diff, not one line of it:
+          check it by reading every relevant method the diff touches or
+          adds (e.g. grep for `_process`/`_physics_process` when a
+          no-per-frame-poll constraint is in play), not by skimming the
+          lines the PR description points at. A PR's own new documentation
+          asserting a constraint holds is not evidence that it holds --
+          verify the claim against the code directly.
 
         Your first line MUST be exactly one of:
 
@@ -279,6 +290,14 @@ runs:
         A table with columns: Criterion | Met | Evidence.
         Cite the file and change that satisfies each criterion, or state
         plainly that nothing in the diff satisfies it.
+
+        ## Architecture Constraints
+
+        A table with columns: Constraint | Satisfied | Evidence, one row per
+        constraint listed in the Issue's Architecture Constraints section.
+        Cite what you checked (file/method, or "grepped for X, found
+        nothing"), not just what the PR claims. A constraint with no rows in
+        this table is a constraint that was not checked.
 
         ## Scope Adherence
 

@@ -22,9 +22,14 @@ explicitly requires context from it.
 Review the completed implementation against:
 
 1. The Implementation Task Issue and its acceptance criteria.
-2. Repository architecture and conventions.
-3. Test and validation results.
-4. The final integrated diff.
+2. The Issue's Architecture Constraints, checked with the same rigor as
+   acceptance criteria — read the methods a constraint governs (e.g. grep
+   for `_process`/`_physics_process` when a no-per-frame-poll constraint
+   applies) rather than trusting the PR's own description or newly-added
+   documentation to confirm it holds.
+3. Repository architecture and conventions.
+4. Test and validation results.
+5. The final integrated diff.
 
 Classify the result as:
 
