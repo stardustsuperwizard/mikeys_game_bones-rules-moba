@@ -65,7 +65,10 @@ def effective_armor(target_armor: float, flat_pen: float = 0.0, percent_pen: flo
         72.0  # (100 - 10) * (1.0 - 0.2) = 90 * 0.8
     """
     reduced = max(0.0, target_armor - flat_pen)
-    return reduced * (1.0 - percent_pen)
+    # Clamped at zero to match MobaFormulas.effective_defense(): over-penetration
+    # (percent_pen above 1.0) must never turn into negative defense, which
+    # mitigation_multiplier would read as a damage amplifier.
+    return max(0.0, reduced * (1.0 - percent_pen))
 
 
 def physical_damage(

@@ -406,11 +406,36 @@ func _combatant() -> MobaCombatant:
 
 
 # Activate ability slot `index` (1-4) through the actor's MobaAbilityCaster.
-# An empty slot produces no console output: MobaAbilityCaster returns a failed
-# ActionResult with FAILURE_EMPTY_SLOT, which is silently discarded here.
+#
+# An empty slot stays silent -- pressing 3 with nothing bound to it is not an
+# error worth printing every keypress. Every other failure is reported, because
+# a targeted ability that silently declines to fire is indistinguishable in play
+# from an input that never arrived.
 func _activate_slot(index: int) -> void:
 	var caster := actor.get_node_or_null("MobaAbilityCaster") as MobaAbilityCaster
 	if not caster:
 		return
-	var context := MobaCastContext.new(actor)
-	caster.activate_slot(index, context)
+	var context := MobaCastContext.new(actor, _ability_target())
+	var result := caster.activate_slot(index, context)
+	if result.success or result.reason == MobaAbilityAction.FAILURE_EMPTY_SLOT:
+		return
+	# ActionRunner returns an empty reason when Authority refuses the action
+	# outright, which would otherwise print as a blank line.
+	var reason: StringName = result.reason if result.reason != &"" else &"denied"
+	print("Ability slot %d did not activate: %s" % [index, reason])
+
+
+# The target a targeted ability resolves against.
+#
+# PLACEHOLDER, replaced by #39's lock-on. Reuses whichever actor the click-order
+# system is already pointing at -- the live attack order, or the target of an
+# attack cycle in flight -- because that is the only expressed target intent the
+# player currently has. It is not acquisition: there is no candidate search, no
+# cycling, and nothing on screen saying what is targeted. Without it a TARGETED
+# ability has no target at all and fails with invalid_target on every press.
+func _ability_target() -> Node:
+	if _attack_target != null and is_instance_valid(_attack_target):
+		return _attack_target
+	if _pending_attack_target != null and is_instance_valid(_pending_attack_target):
+		return _pending_attack_target
+	return null

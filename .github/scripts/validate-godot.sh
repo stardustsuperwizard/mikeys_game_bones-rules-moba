@@ -27,9 +27,16 @@ fi
 run_pass() {
   local label="$1" log="$2"
   shift 2
-  if ! "$godot_bin" --headless --path "$project_path" "$@" --log-file "$log"; then
-    local status=$?
-    echo "Godot ${label} failed."
+
+  # Capture the status with `|| status=$?`, not inside `if ! cmd; then`.
+  # After a negated command `$?` is the status of the negation -- always 0 --
+  # so the previous form reported the failure and then exited 0, and a Godot
+  # pass that returned 1 still produced a green build.
+  local status=0
+  "$godot_bin" --headless --path "$project_path" "$@" --log-file "$log" || status=$?
+
+  if [ "$status" -ne 0 ]; then
+    echo "Godot ${label} failed (exit ${status})."
     cat "$log" || true
     exit "$status"
   fi

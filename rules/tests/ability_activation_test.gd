@@ -177,11 +177,12 @@ static func _test_targeted_damage_ability() -> Array[String]:
 	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)  # Within 2.0 range
 
-	# Disable crit on the target so the damage figure is deterministic, matching
-	# the convention established by combatant_test.gd/resource_test.gd. Also seed
-	# the crit RNG for deterministic replay per §34, even though crit_chance = 0.0
-	# already makes the roll irrelevant.
-	_target_combatant(target)._runtime_stat_block.crit_chance = 0.0
+	# Disable crit on the CASTER so the damage figure is deterministic: crit is
+	# the attacker's statistic and apply_damage() reads it off MobaDamage.source.
+	# Zeroing it on the target would leave the caster's baseline 5% live and make
+	# this assertion fail one run in twenty. Also seed the crit RNG for
+	# deterministic replay per §34.
+	caster_combatant._runtime_stat_block.crit_chance = 0.0
 	MobaRules.seed_crit_rng(42)
 
 	var initial_health = _target_combatant(target)._current_health

@@ -114,10 +114,16 @@ func apply_damage(damage: MobaDamage) -> void:
 	var final: float = raw
 	var was_crit: bool = false
 
-	# Step 2: Crit roll and multiplier
-	if damage.can_crit:
-		var crit_chance: float = get_stat(MobaStatBlock.CRIT_CHANCE)
-		var crit_damage: float = get_stat(MobaStatBlock.CRIT_DAMAGE)
+	# Step 2: Crit roll and multiplier.
+	#
+	# Crit is the ATTACKER's statistic, so it is read off damage.source -- not
+	# off self, which is the combatant taking the hit. Unattributed damage
+	# (source is null, or is not a MobaCombatant) has no attacker to roll for
+	# and therefore never crits.
+	var attacker := damage.source as MobaCombatant
+	if damage.can_crit and attacker != null:
+		var crit_chance: float = attacker.get_stat(MobaStatBlock.CRIT_CHANCE)
+		var crit_damage: float = attacker.get_stat(MobaStatBlock.CRIT_DAMAGE)
 		var crit_roll: float = MobaRules.roll_crit()
 
 		if MobaFormulas.is_critical(crit_roll, crit_chance):
@@ -352,18 +358,34 @@ func tick(delta: float) -> void:
 		_attack_time_since_ready += delta
 	_tick_state_machine_and_basic_attack(delta)
 
-	# Accumulate resource regeneration
+	# Accumulate resource regeneration.
+	#
+	# Both regeneration blocks below only emit when the value actually moved.
+	# At full resource or full health the clamp makes the new value identical
+	# to the old one, and emitting anyway would fire both signals on every
+	# physics frame for every combatant -- re-rendering the HUD bars and
+	# rebuilding the tooltip sixty times a second to say nothing changed.
 	var resource_regen = get_stat(MobaStatBlock.RESOURCE_REGEN)
 	var max_resource = get_stat(MobaStatBlock.RESOURCE)
-	_current_resource = minf(_current_resource + resource_regen * delta, max_resource)
-	resource_changed.emit(_current_resource, max_resource)
+	var new_resource = minf(_current_resource + resource_regen * delta, max_resource)
+	if new_resource != _current_resource:
+		_current_resource = new_resource
+		resource_changed.emit(_current_resource, max_resource)
 
-	# Accumulate health regeneration (only if alive)
+	# Accumulate health regeneration (only if alive).
+	#
+	# Skipping _update_health() on a no-op also stops this from writing over
+	# the parent Actor's character_sheet.current_hp every frame. That mirror
+	# write is correct when health really changed and destructive when it did
+	# not: anything else that decremented current_hp between two ticks was
+	# silently reset to this combatant's value.
 	if is_alive():
 		var health_regen = get_stat(MobaStatBlock.HEALTH_REGEN)
 		var max_health = get_stat(MobaStatBlock.HEALTH)
-		_current_health = minf(_current_health + health_regen * delta, max_health)
-		_update_health()
+		var new_health = minf(_current_health + health_regen * delta, max_health)
+		if new_health != _current_health:
+			_current_health = new_health
+			_update_health()
 
 
 ## Whether basic_attack() may be called right now to start a new cycle: the
