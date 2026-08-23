@@ -13,6 +13,8 @@ signal health_changed(current: float, maximum: float)
 signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: bool, source)
 ## Emitted when current or maximum resource changes.
 signal resource_changed(current: float, maximum: float)
+## Emitted when a basic attack hit is resolved.
+signal basic_attack_resolved(target, damage_amount: float)
 
 ## Typed failure reason for activation checks.
 enum ActivationFailure {
@@ -49,6 +51,9 @@ var _has_died: bool = false
 var _current_resource: float = 0.0
 var _cooldowns: MobaCooldowns = MobaCooldowns.new()
 var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
+var _attack_target: Node = null
+var _attack_time_since_ready: float = INF
+var _attack_hit_applied: bool = false
 
 
 func _ready() -> void:
@@ -305,6 +310,11 @@ func tick(delta: float) -> void:
 	# Advance cooldowns
 	_cooldowns.tick(delta)
 
+	# Advance state machine
+	var state_machine := _get_state_machine()
+	if state_machine != null:
+		state_machine.tick(delta)
+
 	# Accumulate resource regeneration
 	var resource_regen = get_stat(MobaStatBlock.RESOURCE_REGEN)
 	var max_resource = get_stat(MobaStatBlock.RESOURCE)
@@ -317,3 +327,90 @@ func tick(delta: float) -> void:
 		var max_health = get_stat(MobaStatBlock.HEALTH)
 		_current_health = minf(_current_health + health_regen * delta, max_health)
 		_update_health()
+
+	_tick_basic_attack(delta)
+
+
+func basic_attack(target: MobaCombatant) -> bool:
+	var state_machine := _get_state_machine()
+	if state_machine == null or not state_machine.can(&"basic_attack"):
+		return false
+	if loadout == null:
+		return false
+	var weapon := loadout.get_weapon()
+	if weapon == null:
+		return false
+	if not target.is_alive():
+		return false
+	if not _is_in_range(target, weapon.attack_range):
+		return false
+	var attack_speed := get_stat(MobaStatBlock.ATTACK_SPEED)
+	var attack_interval := 1.0 / attack_speed
+	if _attack_time_since_ready < attack_interval:
+		return false
+	if not state_machine.try_enter(MobaState.BASIC_ATTACK_WINDUP, weapon.wind_up):
+		return false
+	_attack_target = target
+	_attack_time_since_ready = 0.0
+	_attack_hit_applied = false
+	return true
+
+
+func _is_in_range(target: MobaCombatant, range_m: float) -> bool:
+	var this_combatant := get_parent() as Actor
+	var target_actor := target.get_parent() as Actor
+	if this_combatant == null or target_actor == null:
+		return true
+	if not this_combatant.is_inside_tree() or not target_actor.is_inside_tree():
+		return true
+	var distance = this_combatant.global_position.distance_to(target_actor.global_position)
+	return distance <= range_m
+
+
+func _get_state_machine() -> MobaStateMachine:
+	var parent := get_parent()
+	if parent == null:
+		return null
+	return parent.get_node_or_null("MobaStateMachine") as MobaStateMachine
+
+
+func _tick_basic_attack(delta: float) -> void:
+	if _attack_time_since_ready != INF:
+		_attack_time_since_ready += delta
+	if _attack_target == null:
+		return
+	var state_machine := _get_state_machine()
+	if state_machine == null:
+		_attack_target = null
+		_attack_hit_applied = false
+		return
+	var current_state = state_machine.current_state
+	var weapon := loadout.get_weapon() if loadout != null else null
+	if weapon == null:
+		_attack_target = null
+		_attack_hit_applied = false
+		return
+	if current_state == MobaState.BASIC_ATTACK_WINDUP:
+		return
+	if current_state == MobaState.BASIC_ATTACK_RECOVERY:
+		return
+	if not _attack_hit_applied:
+		_apply_basic_attack_hit(weapon)
+		_attack_hit_applied = true
+		if not state_machine.try_enter(MobaState.BASIC_ATTACK_RECOVERY, weapon.recovery):
+			_attack_target = null
+			_attack_hit_applied = false
+		return
+	_attack_target = null
+	_attack_hit_applied = false
+
+
+func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
+	if _attack_target == null or not _attack_target.is_alive():
+		return
+	var attack_damage := get_stat(MobaStatBlock.ATTACK_DAMAGE)
+	var total_damage := weapon.damage + attack_damage
+	var damage := MobaDamage.new(total_damage, weapon.damage_type, self, true,
+		get_stat(MobaStatBlock.ARMOR_PEN_FLAT), get_stat(MobaStatBlock.ARMOR_PEN_PERCENT))
+	_attack_target.apply_damage(damage)
+	basic_attack_resolved.emit(_attack_target, total_damage)

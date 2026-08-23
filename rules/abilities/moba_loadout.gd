@@ -72,6 +72,11 @@ func get_passive_slot() -> String:
 	return passive_slot
 
 
+## Get the equipped weapon.
+func get_weapon() -> MobaWeapon:
+	return weapon
+
+
 ## Set the passive slot value.
 func set_passive_slot(ability_id: String) -> void:
 	passive_slot = ability_id
