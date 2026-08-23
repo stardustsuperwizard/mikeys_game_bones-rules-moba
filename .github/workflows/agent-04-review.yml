@@ -91,7 +91,7 @@ jobs:
       # Soft cap for this review session. The Copilot CLI rejects any
       # value below 30 before it starts work, so 30 is the floor, not a
       # tuning choice.
-      REVIEWER_MAX_AI_CREDITS: "75"
+      REVIEWER_MAX_AI_CREDITS: "150"
 
       # Reviewing a very large diff costs more than it is worth; past this
       # the diff is truncated and the verdict says so.
