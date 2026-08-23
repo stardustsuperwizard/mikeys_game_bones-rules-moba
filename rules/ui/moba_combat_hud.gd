@@ -126,9 +126,7 @@ func _push_current_values() -> void:
 		_render_bar(_health_bar, _health_label, 0.0, 0.0)
 		_render_bar(_resource_bar, _resource_label, 0.0, 0.0)
 		return
-	_on_health_changed(
-		_combatant._current_health, _combatant.get_stat(MobaStatBlock.HEALTH)
-	)
+	_on_health_changed(_combatant._current_health, _combatant.get_stat(MobaStatBlock.HEALTH))
 	_on_resource_changed(_combatant.current_resource, _combatant.maximum_resource)
 
 

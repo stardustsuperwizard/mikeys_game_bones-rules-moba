@@ -109,9 +109,7 @@ static func _test_bars_follow_signals() -> Array[String]:
 	hud.bind(combatant)
 
 	var maximum_health: float = combatant.get_stat(MobaStatBlock.HEALTH)
-	var health_bar: TextureProgressBar = hud.get_node(
-		"Layout/BottomBar/Bars/HealthRow/HealthBar"
-	)
+	var health_bar: TextureProgressBar = hud.get_node("Layout/BottomBar/Bars/HealthRow/HealthBar")
 	var resource_bar: TextureProgressBar = hud.get_node(
 		"Layout/BottomBar/Bars/ResourceRow/ResourceBar"
 	)
@@ -159,8 +157,10 @@ static func _test_slot_order_is_fixed() -> Array[String]:
 		var expected := StringName("slot_%d" % (index + 1))
 		if slot.get_ability_id() != expected:
 			violations.append(
-				"slot_order: position %d holds '%s', expected '%s'"
-				% [index, slot.get_ability_id(), expected]
+				(
+					"slot_order: position %d holds '%s', expected '%s'"
+					% [index, slot.get_ability_id(), expected]
+				)
 			)
 		if not slot.visible:
 			violations.append("slot_order: slot %d must stay visible" % (index + 1))
