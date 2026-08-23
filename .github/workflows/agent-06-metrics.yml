@@ -1,0 +1,164 @@
+name: Agent - Session Metrics
+
+# Runs .github/scripts/agent-metrics.py and posts the report as a comment on
+# an Issue, instead of leaving it as something you have to remember to run
+# locally. See "Measuring the workflow" in docs/AGENT_WORKFLOW.md for what
+# the report does and does not answer -- it is outcome metrics (rework,
+# scope adherence, post-merge fixes) keyed on the model recorded by hand in
+# each PR's Agent Session Metadata block, not a dollar figure: GitHub does
+# not expose per-session credit cost anywhere this repository's access
+# reaches. This just makes the proxy report easy to pull on demand.
+#
+# Spends no AI credits -- it runs a read-only Python script and posts its
+# stdout, no model session involved.
+
+on:
+  # Add `metrics:update` to any Issue and this comments a fresh report on
+  # it, then removes the label -- the same button-not-state pattern as
+  # `dashboard:update` in agent-00-dashboard.yml.
+  issues:
+    types:
+      - labeled
+
+  # Manual runs, or ones scoped to a particular Issue/range. issue_number is
+  # required here because a workflow_dispatch run carries no Issue context
+  # of its own to comment back on.
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to post the report to"
+        required: true
+        type: number
+      limit:
+        description: "Merged PRs to examine"
+        required: false
+        default: "30"
+      since:
+        description: "Only PRs merged on or after this date (YYYY-MM-DD)"
+        required: false
+      window_days:
+        description: "Post-merge fix detection window, in days"
+        required: false
+        default: "14"
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  checks: read
+
+concurrency:
+  # Scoped per issue, not repo-wide: two Issues asking for a report at once
+  # should not cancel each other, only a second request on the same Issue
+  # should supersede the first.
+  group: agent-metrics-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: true
+
+jobs:
+  metrics:
+    name: Agent - Session Metrics
+    runs-on: ubuntu-latest
+
+    # Mirrors agent-00-dashboard.yml: `issues.labeled` fires for every label
+    # on every Issue, so this narrows to the one label name that means
+    # "report". Written as a not-issues escape hatch so workflow_dispatch
+    # needs no second edit here.
+    if: >
+      github.event_name != 'issues' ||
+      github.event.label.name == 'metrics:update'
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REFRESH_LABEL: metrics:update
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+      LIMIT: ${{ inputs.limit || '30' }}
+      SINCE: ${{ inputs.since }}
+      WINDOW_DAYS: ${{ inputs.window_days || '14' }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Ensure the Trigger Label Exists
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXISTING=$(gh label list --repo "$GITHUB_REPOSITORY" \
+            --limit 200 --json name --jq '.[].name')
+
+          if ! grep -qx "$REFRESH_LABEL" <<<"$EXISTING"; then
+            gh label create "$REFRESH_LABEL" \
+              --repo "$GITHUB_REPOSITORY" \
+              --color "5319E7" \
+              --description "Add to an Issue to post a fresh agent-metrics.py report as a comment; consumed on run" \
+              --force
+          fi
+
+      - name: Run agent-metrics.py
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ARGS=(--limit "$LIMIT" --window-days "$WINDOW_DAYS")
+          if [ -n "$SINCE" ]; then
+            ARGS+=(--since "$SINCE")
+          fi
+
+          .github/scripts/agent-metrics.py "${ARGS[@]}" > metrics.md
+          wc -c metrics.md
+
+      - name: Post the Report
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file metrics.md
+          echo "Posted to #$ISSUE_NUMBER"
+
+      # Same reasoning as agent-00-dashboard.yml's Consume step: sweep every
+      # Issue carrying the label rather than only the one that triggered
+      # this run, so a manual workflow_dispatch (which never added the
+      # label in the first place) still leaves things tidy, and a request
+      # that arrives mid-run is not left dangling on some other Issue.
+      - name: Consume the Trigger Label
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NUMBERS=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --label "$REFRESH_LABEL" \
+            --limit 100 \
+            --json number \
+            --jq '.[].number')
+
+          if [ -z "$NUMBERS" ]; then
+            echo "No $REFRESH_LABEL to consume."
+            exit 0
+          fi
+
+          for NUMBER in $NUMBERS; do
+            gh issue edit "$NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$REFRESH_LABEL" \
+              && echo "Consumed $REFRESH_LABEL from #$NUMBER" \
+              || echo "::warning::Could not remove $REFRESH_LABEL from #$NUMBER"
+          done
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Agent Session Metrics"
+            echo
+            echo "Posted to issue #${ISSUE_NUMBER:-?}."
+            echo
+            if [ -f metrics.md ]; then
+              cat metrics.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -296,12 +296,12 @@ this comparison is possible.
 
 ## The workflow
 
-Six workflows in `.github/workflows/`, `agent-00` through `agent-05`. The
+Seven workflows in `.github/workflows/`, `agent-00` through `agent-06`. The
 number no longer maps to file purpose one-to-one — `agent-03-rollup.yml` and
 `agent-04-review.yml` swapped which number carries which role after
 `agent-05-fix.yml` was added — so treat the filename, not the number, as
-authoritative. Four spend AI credits (planner, execute, review, fix); two are
-plumbing and cost nothing (dashboard, rollup). `agent-00-dashboard.yml` no
+authoritative. Four spend AI credits (planner, execute, review, fix); three are
+plumbing and cost nothing (dashboard, rollup, metrics). `agent-00-dashboard.yml` no
 longer runs on every event — it renders on demand now. See *Issue views* and
 *The control plane* below.
 
@@ -448,6 +448,7 @@ depends on the color. Checked live against the repository on 2026-08-22:
 | `review:design-ambiguity` | `#FBCA04` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
 | `dashboard` | `#5319E7` | `agent-00-dashboard.yml` |
 | `dashboard:update` | `#5319E7` | `agent-00-dashboard.yml` |
+| `metrics:update` | `#5319E7` | `agent-06-metrics.yml` |
 
 "Bootstrapped by" only matters if the label is ever deleted: whichever
 workflow's `ensure_label` guard runs next recreates it, from that workflow's
@@ -1024,6 +1025,19 @@ that API is unavailable; moving it under an organization you own would open
 it. Note that even then, `totals_by_model_feature` is empty in GitHub's own
 example schema — do not expect clean per-model cost.
 
+### Getting the report without a shell
+
+`agent-06-metrics.yml` posts the same report as an Issue comment on demand,
+same button-not-state pattern as the control plane: add **`metrics:update`**
+to any Issue and it comments a fresh `agent-metrics.py` run there, then
+removes the label. Works from GitHub Mobile. `workflow_dispatch` also takes
+`issue_number`, `limit`, `since`, and `window_days` directly, for a
+one-off run against a specific range without touching a label at all.
+
+It is still the same outcome-metrics report, not a cost report — see *What it
+cannot measure* above. Comparing Opus vs. Haiku sessions means comparing rows
+by `implementation_model` in the output, not a credits figure.
+
 ## Supporting files
 
 | File | Purpose |
@@ -1034,6 +1048,7 @@ example schema — do not expect clean per-model cost.
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
 | `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix` |
+| `.github/workflows/agent-06-metrics.yml` | Posts an `agent-metrics.py` report as an Issue comment, on `metrics:update` or dispatch |
 | `.github/actions/build-review-request` | Shared by `agent-04-review.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the reviewer prompt |
 | `.github/actions/build-fix-request` | Shared by `agent-05-fix.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the fixer prompt |
 | `.github/actions/run-copilot-session` | Shared by planner, executor, reviewer, and fixer: walks a model preference list, enforces the credit cap |
