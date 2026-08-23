@@ -410,7 +410,13 @@ func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 		return
 	var attack_damage := get_stat(MobaStatBlock.ATTACK_DAMAGE)
 	var total_damage := weapon.damage + attack_damage
-	var damage := MobaDamage.new(total_damage, weapon.damage_type, self, true,
-		get_stat(MobaStatBlock.ARMOR_PEN_FLAT), get_stat(MobaStatBlock.ARMOR_PEN_PERCENT))
+	var damage := MobaDamage.new(
+		total_damage,
+		weapon.damage_type,
+		self,
+		true,
+		get_stat(MobaStatBlock.ARMOR_PEN_FLAT),
+		get_stat(MobaStatBlock.ARMOR_PEN_PERCENT)
+	)
 	_attack_target.apply_damage(damage)
 	basic_attack_resolved.emit(_attack_target, total_damage)

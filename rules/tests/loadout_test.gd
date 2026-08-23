@@ -306,35 +306,35 @@ static func _test_basic_attack_cycle() -> bool:
 	var combatant: MobaCombatant = data["combatant"]
 	var target: MobaCombatant = data["target"]
 	var state_machine: MobaStateMachine = data["state_machine"]
-	
+
 	var initial_health = target._current_health
-	
+
 	if not combatant.basic_attack(target):
 		print("ERROR: basic_attack should succeed")
 		return false
-	
+
 	if state_machine.current_state != MobaState.BASIC_ATTACK_WINDUP:
 		print("ERROR: Should be in BASIC_ATTACK_WINDUP")
 		return false
-	
+
 	var wind_up = combatant.loadout.get_weapon().wind_up
 	combatant.tick(wind_up + 0.01)
-	
+
 	if state_machine.current_state != MobaState.BASIC_ATTACK_RECOVERY:
 		print("ERROR: Should have transitioned to BASIC_ATTACK_RECOVERY after wind-up")
 		return false
-	
+
 	if target._current_health >= initial_health:
 		print("ERROR: Target should have taken damage")
 		return false
-	
+
 	var recovery = combatant.loadout.get_weapon().recovery
 	combatant.tick(recovery + 0.01)
-	
+
 	if state_machine.current_state != MobaState.IDLE:
 		print("ERROR: Should return to IDLE after recovery")
 		return false
-	
+
 	return true
 
 
@@ -342,27 +342,27 @@ static func _test_attack_cadence_one_per_second() -> bool:
 	var data := _create_test_actor_with_loadout_and_weapon()
 	var combatant: MobaCombatant = data["combatant"]
 	var target: MobaCombatant = data["target"]
-	
+
 	combatant._runtime_stat_block.attack_speed = 1.0
-	
+
 	var damage_count = 0
 	var handler = func(_t, _d): damage_count += 1
 	combatant.basic_attack_resolved.connect(handler)
-	
+
 	if not combatant.basic_attack(target):
 		print("ERROR: First attack should succeed")
 		return false
-	
+
 	var weapon = combatant.loadout.get_weapon()
 	var cycle_duration = weapon.wind_up + weapon.recovery
-	
+
 	combatant.tick(cycle_duration + 0.01)
-	
+
 	if damage_count < 1:
 		print("ERROR: Should have at least 1 attack resolved")
 		combatant.basic_attack_resolved.disconnect(handler)
 		return false
-	
+
 	combatant.basic_attack_resolved.disconnect(handler)
 	return true
 
@@ -371,26 +371,26 @@ static func _test_attack_cycle_limiter() -> bool:
 	var data := _create_test_actor_with_loadout_and_weapon()
 	var combatant: MobaCombatant = data["combatant"]
 	var target: MobaCombatant = data["target"]
-	
+
 	var weapon = combatant.loadout.get_weapon()
 	weapon.wind_up = 0.6
 	weapon.recovery = 0.5
-	
+
 	if not combatant.basic_attack(target):
 		print("ERROR: First attack should succeed")
 		return false
-	
+
 	combatant.tick(1.1)
-	
+
 	if combatant.basic_attack(target):
 		print("ERROR: Second attack should not be ready when cycle exceeds interval")
 		return false
-	
+
 	combatant.tick(0.15)
 	if not combatant.basic_attack(target):
 		print("ERROR: Second attack should be ready after cycle completes")
 		return false
-	
+
 	return true
 
 
@@ -398,28 +398,28 @@ static func _test_attack_idle_time_when_interval_longer() -> bool:
 	var data := _create_test_actor_with_loadout_and_weapon()
 	var combatant: MobaCombatant = data["combatant"]
 	var target: MobaCombatant = data["target"]
-	
+
 	var weapon = combatant.loadout.get_weapon()
 	weapon.wind_up = 0.2
 	weapon.recovery = 0.2
-	
+
 	combatant._runtime_stat_block.attack_speed = 1.0
-	
+
 	if not combatant.basic_attack(target):
 		print("ERROR: First attack should succeed")
 		return false
-	
+
 	combatant.tick(0.4)
-	
+
 	if combatant.basic_attack(target):
 		print("ERROR: Second attack should not be ready before interval")
 		return false
-	
+
 	combatant.tick(0.6)
 	if not combatant.basic_attack(target):
 		print("ERROR: Second attack should be ready after interval")
 		return false
-	
+
 	return true
 
 
@@ -428,14 +428,14 @@ static func _create_test_actor_with_loadout_and_weapon() -> Dictionary:
 	attacker.owner_id = 1
 	attacker.global_position = Vector3.ZERO
 	attacker.character_sheet = CharacterSheet.new()
-	
+
 	var attacker_combatant := MobaCombatant.new()
 	attacker_combatant.name = "MobaCombatant"
 	attacker_combatant.stat_block = _BASELINE_STAT_BLOCK
 	attacker_combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
 	attacker_combatant._current_health = 500.0
 	attacker_combatant._current_resource = 250.0
-	
+
 	var loadout := MobaLoadout.new()
 	var weapon := MobaWeapon.new()
 	weapon.damage = 50.0
@@ -444,34 +444,34 @@ static func _create_test_actor_with_loadout_and_weapon() -> Dictionary:
 	weapon.recovery = 0.2
 	weapon.attack_range = 10.0
 	loadout.weapon = weapon
-	
+
 	attacker_combatant.loadout = loadout
 	attacker.add_child(attacker_combatant)
-	
+
 	var state_machine := MobaStateMachine.new()
 	state_machine.name = "MobaStateMachine"
 	state_machine._load_state_table()
 	attacker.add_child(state_machine)
-	
+
 	var target_actor := Actor.new()
 	target_actor.owner_id = 2
 	target_actor.global_position = Vector3(5.0, 0.0, 0.0)
 	target_actor.character_sheet = CharacterSheet.new()
-	
+
 	var target_combatant := MobaCombatant.new()
 	target_combatant.name = "MobaCombatant"
 	target_combatant.stat_block = _BASELINE_STAT_BLOCK
 	target_combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
 	target_combatant._current_health = 500.0
 	target_combatant._current_resource = 250.0
-	
+
 	target_actor.add_child(target_combatant)
-	
+
 	var target_state_machine := MobaStateMachine.new()
 	target_state_machine.name = "MobaStateMachine"
 	target_state_machine._load_state_table()
 	target_actor.add_child(target_state_machine)
-	
+
 	return {
 		"actor": attacker,
 		"combatant": attacker_combatant,
