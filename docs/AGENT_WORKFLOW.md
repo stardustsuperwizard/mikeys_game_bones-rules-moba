@@ -589,6 +589,10 @@ no picker involved:
    branch ends up pointing at, writes the exit status into the pull
    request body, and marks it ready for review if — and only if — that run
    passed.
+7. In a separate `needs:`-gated job — `Independent Validation (agent push)`,
+   not part of the session's job at all — checks out the pushed SHA fresh
+   and runs the same validation again, publishing the result as a check run
+   on that commit. See *The independent validation gate*.
 
 A `PASS` (or an unfixed `FIX`) is posted to the pull request as the real
 verdict, `review:*` label included — so adding `agent:review` to it is a
@@ -604,7 +608,7 @@ case.
 
 #### Why the draft state carries the validation result
 
-Step 6 is the only statement about validation on an executor pull request
+Step 6 is the only statement *in the pull request body* about validation
 that is not a session talking about itself. The completion report becomes
 the body verbatim; the pre-PR review and fix comments are written by
 sessions too. None of that is checked against anything, and the prose looks
@@ -637,6 +641,64 @@ itself under *Implementing* indefinitely.
 Two states, then, and they are not the same thing: **draft** means no
 verified validation stands behind this pull request *yet*; **draft plus
 `validation:failed`** means one ran and did not pass.
+
+#### The independent validation gate
+
+Everything above is still a session's own workflow measuring the tree that
+session just edited. The `Record Verified Validation` step is more
+trustworthy than the completion report — the workflow writes it, not the
+model — but it is a run reporting on its own working directory, which is a
+different claim from "this commit validates".
+
+So both workflows that push agent-authored commits end with a separate
+`needs:`-gated job, `validate-pushed-commit`, that no session touches:
+
+- `agent-02-execute.yml` → `Independent Validation (agent push)`, check run
+  `Godot Validation (agent-02 execute)`
+- `agent-05-fix.yml` → `Independent Validation (agent fix)`, check run
+  `Godot Validation (agent-05 fix)`
+
+Each takes the pushing job's `pushed-sha` output, checks that SHA out into a
+clean runner, and runs `.github/scripts/validate-godot.sh` against it. Both
+gate on the pushing job's `pushed` output, so a run that produced no commit
+skips the job rather than failing it, and both use `always()` so a commit
+left behind by an otherwise-failed run still gets measured.
+
+Neither job re-implements validation. `.github/workflows/godot-validation.yml`
+is the single reusable job definition (`on: workflow_call`), and it has three
+callers:
+
+| Caller | Ref checked out | `head-sha` |
+| --- | --- | --- |
+| `godot-ci-validation.yml` | the caller's default (the PR merge ref) | none |
+| `agent-02-execute.yml` | the executor's pushed SHA | that SHA |
+| `agent-05-fix.yml` | the fixer's pushed SHA | that SHA |
+
+`godot-ci-validation.yml` still owns the human-authored `pull_request` path,
+with its `paths-ignore` deny-list and its `workflow_dispatch` escape hatch,
+unchanged. It passes no `head-sha`, because a `pull_request` run already
+reports its status against the right commit.
+
+The agent callers must pass one. Their runs are triggered by `issues` events,
+so the run's own head SHA is `main` — not the branch the session pushed — and
+a job's implicit check run would attach itself there, where nobody looking at
+the pull request would ever see it. Passing `head-sha` makes the job POST an
+explicit check run against the pushed commit instead, which is what puts the
+result on the pull request.
+
+Calling the workflow as a job of the same run is also what makes the gate
+fire at all: a `pull_request`-triggered validation of an agent push has
+repeatedly landed in `action_required` and never executed, so those commits
+went unmeasured. A called job needs no second trigger.
+
+**No repository secret is required.** Publishing a check run is a REST call,
+not a workflow trigger, so the automatic `GITHUB_TOKEN` covers it — the
+caller jobs grant `contents: read` and `checks: write` and nothing else. No
+PAT, no app token, no `secrets:` block.
+
+The gate reports and nothing else. It does not delete the branch, reset it,
+change a label, or alter the pull request's state. A red check beside a green
+pull request is a decision for a human.
 
 Run it by hand against any Issue number to re-check:
 
@@ -686,7 +748,9 @@ no-op, not a wasted session — and applies one bounded correction against its
 touch them instead of a session — re-plan the former, decide the latter
 yourself. The equivalent local path is `/fix-review <pr-number>` or the
 `fixer` Claude Code agent; commenting `@copilot` on the PR still works too,
-outside this repository's scripted path.
+outside this repository's scripted path. A fix push gets the same
+independent check run an executor push does — see *The independent
+validation gate*.
 
 If a task takes more than two `FIX` cycles, that is a planning problem, not an
 implementation problem. Record it.
@@ -1102,11 +1166,13 @@ by `implementation_model` in the output, not a credits figure.
 | --- | --- |
 | `.github/workflows/agent-00-dashboard.yml` | Rewrites the pinned control plane Issue from derived state, on `dashboard:update` or dispatch |
 | `.github/workflows/agent-01-planner.yml` | Decomposes a Feature into `[impl]` sub-issues |
-| `.github/workflows/agent-02-execute.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:execute` |
+| `.github/workflows/agent-02-execute.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:execute`; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
-| `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix` |
+| `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix`; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/agent-06-metrics.yml` | Posts an `agent-metrics.py` report as an Issue comment, on `metrics:update` or dispatch |
+| `.github/workflows/godot-validation.yml` | The one reusable validation job (`workflow_call`); called by `godot-ci-validation.yml`, `agent-02-execute.yml`, and `agent-05-fix.yml` |
+| `.github/workflows/godot-ci-validation.yml` | Human-authored `pull_request` validation gate (`paths-ignore` deny-list) plus a manual dispatch; calls `godot-validation.yml` |
 | `.github/actions/build-review-request` | Shared by `agent-04-review.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the reviewer prompt |
 | `.github/actions/build-fix-request` | Shared by `agent-05-fix.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the fixer prompt |
 | `.github/actions/run-copilot-session` | Shared by planner, executor, reviewer, and fixer: walks a model preference list, enforces the credit cap |
