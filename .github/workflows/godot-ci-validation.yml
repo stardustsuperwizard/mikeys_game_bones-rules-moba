@@ -65,19 +65,18 @@ on:
   # filter above decided.
   workflow_dispatch:
 
+# The job body moved to `godot-validation.yml` so the agent workflows can
+# run the identical job against the commits they push, instead of depending
+# on this file's `pull_request` trigger firing for them -- which it has
+# repeatedly failed to do (Issue #167). Nothing about this file's behaviour
+# on a human-authored pull request changes: same trigger, same filter, same
+# script, same runner.
+#
+# No `head-sha` is passed. A `pull_request` run already attaches its status
+# to the right commit, so an explicit check run here would only duplicate
+# what GitHub reports for free -- and `checks: write` stays unneeded.
 jobs:
   godot-headless-validation:
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/godot-validation.yml
     permissions:
       contents: read
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/setup-godot
-        with:
-          godot-version: 4.7.1-stable
-
-      - name: Validate Godot project loads headlessly
-        shell: bash
-        run: .github/scripts/validate-godot.sh "$GITHUB_WORKSPACE"
