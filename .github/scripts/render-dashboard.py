@@ -24,10 +24,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+
+# Same directory as this script, which is already sys.path[0] when it is run
+# as a script. Both readings of a task's expected-files section live there --
+# the delicate-paths flag this dashboard prints, and the executor-eligibility
+# rule agent-02-execute.yml refuses on -- so the board and the guard cannot
+# disagree about what a task expects to touch.
+import task_scope
+from task_scope import expected_paths, is_delicate
 
 ISSUE_FIELDS = [
     "number", "title", "url", "state", "labels", "body",
@@ -55,13 +62,6 @@ VERDICT_ADVERSE = {
 # verdict on a branch that no longer validates is exactly the combination
 # worth surfacing rather than averaging away.
 VALIDATION_FAILED = "validation:failed"
-
-# Paths where a weak or unknown model is a bad bet. Godot scene and resource
-# serialization is unforgiving of small mistakes, so a task touching these is
-# flagged for a strong model rather than whatever Auto happens to draw.
-DELICATE_SUFFIXES = (".tscn", ".tres")
-DELICATE_NAMES = ("project.godot",)
-DELICATE_PREFIXES = ("addons/",)
 
 # Task states, in the order the dashboard presents them. The first three are
 # the ones that want a human; the rest are informational.
@@ -101,37 +101,6 @@ def run_gh(args: list[str], repo: str | None) -> str:
 
 def label_names(item: dict) -> set[str]:
     return {label["name"] for label in item.get("labels") or []}
-
-
-def strip_comments(text: str) -> str:
-    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
-
-
-def section(body: str, heading: str) -> str:
-    """Return the text under a markdown heading, up to the next heading."""
-    pattern = rf"^#{{1,6}}\s*{re.escape(heading)}\s*$(.*?)(?=^#{{1,6}}\s|\Z)"
-    match = re.search(pattern, body or "", re.M | re.S | re.I)
-    return match.group(1) if match else ""
-
-
-def expected_paths(body: str) -> set[str]:
-    """Backticked file paths from the task template's expected-changes block."""
-    text = strip_comments(section(body, "Files or Subsystems Expected to Change"))
-    paths = set()
-    for token in re.findall(r"`([^`\n]+)`", text):
-        token = token.strip()
-        if "/" in token or re.search(r"\.\w+$", token):
-            paths.add(token.lstrip("./"))
-    return paths
-
-
-def is_delicate(paths: set[str]) -> bool:
-    return any(
-        path.endswith(DELICATE_SUFFIXES)
-        or path.split("/")[-1] in DELICATE_NAMES
-        or path.startswith(DELICATE_PREFIXES)
-        for path in paths
-    )
 
 
 def fetch(repo: str | None) -> tuple[list[dict], list[dict]]:
@@ -178,6 +147,7 @@ def classify_task(issue: dict, prs: dict[int, dict]) -> tuple[str, dict]:
         paths = expected_paths(issue.get("body") or "")
         detail["paths"] = sorted(paths)
         detail["delicate"] = is_delicate(paths)
+        detail["restricted"] = task_scope.restricted_paths(paths)
         return READY, detail
 
     detail["pr"] = pr["number"]
@@ -314,7 +284,7 @@ def render(model: dict, repo: str | None) -> str:
         out += task_table(
             ready, ["Task", "Feature", "Model", "Title"],
             lambda r: [
-                link(r["issue"]),
+                link(r["issue"]) + (" 🔑" if r.get("restricted") else ""),
                 link(r["issue"]["parent"]),
                 "⚠️ strong" if r.get("delicate") else "any",
                 r["issue"]["title"].removeprefix("[impl] "),
@@ -326,6 +296,16 @@ def render(model: dict, repo: str | None) -> str:
                 "⚠️ means the task expects to touch `.tscn`, `.tres`, "
                 "`project.godot`, or `addons/`. Godot serialization is "
                 "unforgiving — pick a strong model rather than Auto.",
+            ]
+        if any(r.get("restricted") for r in ready):
+            out += [
+                "",
+                "🔑 means the task expects to touch `.github/workflows/` or "
+                "`.github/actions/`, which `GITHUB_TOKEN` cannot push — so "
+                "the paste-into-Copilot instruction above does not apply to "
+                "it, and `agent:execute` is refused. Run it from a "
+                "human-credentialed session (Claude Code) instead; the "
+                "task's own **Run This Task** block says so too.",
             ]
     else:
         out.append("_Nothing ready. Everything is blocked, in flight, or done._")

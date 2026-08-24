@@ -1185,6 +1185,21 @@ jobs:
             "0E8A16" \
             "Feature has been decomposed into implementation tasks"
 
+          # Applied instead of nothing when a task's expected files land in
+          # `.github/workflows/**` or `.github/actions/**`. GITHUB_TOKEN
+          # cannot push those paths, so `agent-02-execute.yml` refuses such a
+          # task outright -- this label is the same fact stated in advance,
+          # where an issue view can query it, rather than only on refusal.
+          #
+          # A positive label rather than a missing `machine` one: these tasks
+          # are still meant for an agent to action, just not for a
+          # workflow-token one, and an absence is not something you can build
+          # a view from.
+          ensure_label \
+            "human-credentials" \
+            "D4C5F9" \
+            "Touches paths GITHUB_TOKEN cannot push; needs a human-credentialed session"
+
           # `plan` is applied by the Issue templates, but a template silently
           # drops a label the repository does not define — so an intake Issue
           # would arrive unlabelled and never appear in the awaiting-planning
@@ -1204,7 +1219,24 @@ jobs:
           import os
           import pathlib
           import subprocess
+          import sys
           import tempfile
+
+          # The same module `agent-02-execute.yml`'s guard and
+          # render-dashboard.py read, so the planner's promise and the
+          # executor's refusal cannot disagree about which paths are
+          # restricted. Imported rather than reimplemented for that reason;
+          # the checkout is at the workspace root.
+          sys.path.insert(
+              0,
+              os.path.join(
+                  os.environ.get("GITHUB_WORKSPACE", "."),
+                  ".github",
+                  "scripts",
+              ),
+          )
+
+          import task_scope
 
           repo = os.environ["GITHUB_REPOSITORY"]
           parent = os.environ["ISSUE_NUMBER"]
@@ -1224,6 +1256,7 @@ jobs:
 
           created = {}
           bodies = {}
+          scopes = {}
 
           def bullets(items, empty="None"):
               if not items:
@@ -1290,6 +1323,21 @@ jobs:
           {bullets(task["depends_on"])}
           """
 
+              # Evaluated against the rendered body rather than against
+              # `task["expected_files"]` directly, because the body is what
+              # agent-02-execute.yml's guard will read back. Judging the two
+              # from different inputs is how a task gets promised as
+              # runnable and then refused.
+              scope = task_scope.evaluate(body)
+              scopes[task["id"]] = scope
+
+              if not scope["executor_eligible"]:
+                  print(
+                      f"{task['id']} expects "
+                      + ", ".join(scope["restricted_paths"])
+                      + " -- not executor-eligible."
+                  )
+
               with tempfile.NamedTemporaryFile(
                   mode="w",
                   suffix=".md",
@@ -1319,6 +1367,16 @@ jobs:
                   "--parent",
                   parent,
               ]
+
+              # `machine` stays: this is still work meant for an agent. What
+              # the extra label records is *which* agent -- one pushing with
+              # a human's credentials, because GITHUB_TOKEN cannot write the
+              # paths this task expects to change.
+              if not scope["executor_eligible"]:
+                  command.extend([
+                      "--label",
+                      "human-credentials",
+                  ])
 
               if milestone:
                   command.extend([
@@ -1414,66 +1472,113 @@ jobs:
           for task_id, entry in created.items():
               number = entry["number"]
 
-              run_block = (
-                  "## Run This Task\n\n"
-                  "Start a Copilot agent session -- mobile or desktop -- and "
-                  "paste this as the task description:\n\n"
-                  "````text\n"
-                  f"Work GitHub issue #{number} in this repository.\n"
-                  "\n"
-                  "Read that issue first, then read the \"Executing an\n"
-                  "Implementation Task\" section of\n"
-                  ".github/copilot-instructions.md -- that is your contract.\n"
-                  "\n"
-                  "The issue's Objective, Scope, Architecture Constraints,\n"
-                  "Acceptance Criteria and Out of Scope sections are\n"
-                  "authoritative. Implement only what they require. Do not\n"
-                  "create issues. Do not close the parent Feature. Report\n"
-                  "discovered out-of-scope work instead of doing it.\n"
-                  "\n"
-                  "Run .github/scripts/validate-godot.sh and report the\n"
-                  "command and its result.\n"
-                  "\n"
-                  f"Title the pull request starting with [{number}], for\n"
-                  f"example \"[{number}] <what it does>\", and include in its\n"
-                  f"description: Closes #{number}\n"
-                  "````\n\n"
-                  "**Pick the model, not the agent.** The `executor` profile "
-                  "adds nothing a cloud session can use: its `tools:` and "
-                  "`model:` keys are both ignored there, and its prose is "
-                  "already in `.github/copilot-instructions.md`, which every "
-                  "cloud session reads. On GitHub Mobile, selecting a custom "
-                  "agent costs you the model picker -- and no picker means "
-                  "Auto.\n\n"
-                  "Assigning this Issue to Copilot works too: same model "
-                  "choice, no paste, no agent.\n\n"
-                  "---\n\n"
-                  "## Implementation Agent Contract\n\n"
-                  "The full contract is *Executing an Implementation Task* "
-                  "in `.github/copilot-instructions.md`, which you are "
-                  "already reading whether you loaded a profile or not. "
-                  "This is its short form.\n\n"
-                  "Implement only the Scope and Acceptance Criteria below. "
-                  "The parent Feature provides context only; it does not "
-                  "expand this task's scope, and neither do sibling "
-                  "tasks.\n\n"
-                  "Do not:\n\n"
-                  "- broaden this task;\n"
-                  "- redesign architecture;\n"
-                  "- implement sibling tasks;\n"
-                  "- make speculative improvements;\n"
-                  "- create additional GitHub Issues;\n"
-                  "- close the parent Feature.\n\n"
-                  "If additional work is discovered, report it under "
-                  "`Discovered out-of-scope work` rather than implementing "
-                  "it.\n\n"
-                  "Run `.github/scripts/validate-godot.sh` before reporting "
-                  "completion. The implementation pull request must be "
-                  f"titled starting with `[{number}]` and must close "
-                  f"this Issue -- `Closes #{number}` -- and must not close "
-                  "the parent Feature.\n\n"
-                  "---\n\n"
-              )
+              restricted = scopes[task_id]["restricted_paths"]
+
+              if restricted:
+                  # The whole point of this branch is that the block it
+                  # replaces is *wrong* for this task. "Start a Copilot
+                  # agent session and paste this" is an instruction that
+                  # cannot work here: neither the cloud agent nor the
+                  # scripted executor can push these paths, and following it
+                  # costs a full session to find that out at the push.
+                  run_block = (
+                      "## Run This Task\n\n"
+                      "**Not runnable by the Copilot executor.** This task "
+                      "expects to change "
+                      + ", ".join(f"`{path}`" for path in restricted)
+                      + ", and `GITHUB_TOKEN` cannot write files under "
+                      "`.github/workflows/` or `.github/actions/`.\n\n"
+                      "No `permissions:` key grants it. GitHub reserves "
+                      "workflow edits for credentials carrying the "
+                      "`workflow` OAuth scope, so that a compromised "
+                      "workflow cannot rewrite its own CI. The restriction "
+                      "is deliberate; this repository respects it rather "
+                      "than working around it. Both automated paths hit it: "
+                      "the scripted executor is rejected at its push, and a "
+                      "Copilot cloud session is rejected at its own.\n\n"
+                      "Adding `agent:execute` to this Issue is refused up "
+                      "front by `agent-02-execute.yml`, before any session "
+                      "is paid for.\n\n"
+                      "**Run it from a human-credentialed session "
+                      "instead.** Claude Code -- terminal, desktop, web, or "
+                      "Remote Control -- pushes with your own credentials "
+                      "and can write these paths. It reads the same "
+                      "contract this Issue encodes; see *Claude Code as an "
+                      "additional environment* in `docs/AGENT_WORKFLOW.md`, "
+                      "and `CLAUDE.md` at the repository root. Point it at "
+                      "this Issue:\n\n"
+                      "````text\n"
+                      f"Work GitHub issue #{number} in this repository.\n"
+                      "````\n\n"
+                      f"Open the pull request with `Closes #{number}`, "
+                      f"titled starting with `[{number}]`, and add "
+                      "`agent:review` to it by hand -- the automated "
+                      "reviewer only auto-triggers on `copilot/*` branches, "
+                      "so that label is what puts this work through the "
+                      "same review gate as everything else.\n\n"
+                      "---\n\n"
+                  )
+              else:
+                  run_block = (
+                      "## Run This Task\n\n"
+                      "Start a Copilot agent session -- mobile or desktop -- and "
+                      "paste this as the task description:\n\n"
+                      "````text\n"
+                      f"Work GitHub issue #{number} in this repository.\n"
+                      "\n"
+                      "Read that issue first, then read the \"Executing an\n"
+                      "Implementation Task\" section of\n"
+                      ".github/copilot-instructions.md -- that is your contract.\n"
+                      "\n"
+                      "The issue's Objective, Scope, Architecture Constraints,\n"
+                      "Acceptance Criteria and Out of Scope sections are\n"
+                      "authoritative. Implement only what they require. Do not\n"
+                      "create issues. Do not close the parent Feature. Report\n"
+                      "discovered out-of-scope work instead of doing it.\n"
+                      "\n"
+                      "Run .github/scripts/validate-godot.sh and report the\n"
+                      "command and its result.\n"
+                      "\n"
+                      f"Title the pull request starting with [{number}], for\n"
+                      f"example \"[{number}] <what it does>\", and include in its\n"
+                      f"description: Closes #{number}\n"
+                      "````\n\n"
+                      "**Pick the model, not the agent.** The `executor` profile "
+                      "adds nothing a cloud session can use: its `tools:` and "
+                      "`model:` keys are both ignored there, and its prose is "
+                      "already in `.github/copilot-instructions.md`, which every "
+                      "cloud session reads. On GitHub Mobile, selecting a custom "
+                      "agent costs you the model picker -- and no picker means "
+                      "Auto.\n\n"
+                      "Assigning this Issue to Copilot works too: same model "
+                      "choice, no paste, no agent.\n\n"
+                      "---\n\n"
+                      "## Implementation Agent Contract\n\n"
+                      "The full contract is *Executing an Implementation Task* "
+                      "in `.github/copilot-instructions.md`, which you are "
+                      "already reading whether you loaded a profile or not. "
+                      "This is its short form.\n\n"
+                      "Implement only the Scope and Acceptance Criteria below. "
+                      "The parent Feature provides context only; it does not "
+                      "expand this task's scope, and neither do sibling "
+                      "tasks.\n\n"
+                      "Do not:\n\n"
+                      "- broaden this task;\n"
+                      "- redesign architecture;\n"
+                      "- implement sibling tasks;\n"
+                      "- make speculative improvements;\n"
+                      "- create additional GitHub Issues;\n"
+                      "- close the parent Feature.\n\n"
+                      "If additional work is discovered, report it under "
+                      "`Discovered out-of-scope work` rather than implementing "
+                      "it.\n\n"
+                      "Run `.github/scripts/validate-godot.sh` before reporting "
+                      "completion. The implementation pull request must be "
+                      f"titled starting with `[{number}]` and must close "
+                      f"this Issue -- `Closes #{number}` -- and must not close "
+                      "the parent Feature.\n\n"
+                      "---\n\n"
+                  )
 
               with tempfile.NamedTemporaryFile(
                   mode="w",
