@@ -153,9 +153,38 @@ jobs:
 
           # 4000 chars, not the whole log: the Checks API caps `output.text`
           # at 65535 bytes and a Godot import pass can exceed that on its own.
+          #
+          # `tail -c` cuts mid-line, so the block would open on a fragment.
+          # Drop that partial line -- but only when the cap actually cut
+          # something. A log shorter than the cap has a *complete* first
+          # line, and the shortest logs are the ones where it matters most:
+          # `validate-godot.sh` failing to find Godot prints three lines, the
+          # first of which is the only one that says what went wrong.
+          #
+          # The `-s` on the trimmed file is what keeps this from ever
+          # emptying the block, and it subsumes a line count: `sed 1d` over a
+          # tail with no newline at all yields nothing, so the fragment is
+          # kept instead.
+          if [ -s "$RUNNER_TEMP/validate-output.txt" ]; then
+            tail -c 4000 "$RUNNER_TEMP/validate-output.txt" \
+              > "$RUNNER_TEMP/check-tail.txt"
+
+            if [ "$(wc -c < "$RUNNER_TEMP/validate-output.txt")" -gt 4000 ]; then
+              sed 1d "$RUNNER_TEMP/check-tail.txt" \
+                > "$RUNNER_TEMP/check-tail-trimmed.txt"
+
+              if [ -s "$RUNNER_TEMP/check-tail-trimmed.txt" ]; then
+                mv "$RUNNER_TEMP/check-tail-trimmed.txt" \
+                   "$RUNNER_TEMP/check-tail.txt"
+              fi
+            fi
+          else
+            echo "(no output captured)" > "$RUNNER_TEMP/check-tail.txt"
+          fi
+
           {
             echo '```'
-            tail -c 4000 "$RUNNER_TEMP/validate-output.txt" 2>/dev/null || echo "(no output captured)"
+            cat "$RUNNER_TEMP/check-tail.txt"
             echo '```'
           } > "$RUNNER_TEMP/check-summary.txt"
 

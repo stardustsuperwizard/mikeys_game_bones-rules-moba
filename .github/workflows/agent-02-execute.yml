@@ -545,7 +545,7 @@ jobs:
         id: pr
         shell: python
         env:
-          EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.assistant-text-file }}
+          EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.final-text-file }}
           EXECUTOR_MODEL: ${{ steps.exec-session.outputs.resolved-model }}
           BRANCH_RESUMED: ${{ steps.branch-check.outputs.exists }}
         run: |
@@ -1126,7 +1126,26 @@ jobs:
                   f" `{branch}` points at."
               )
 
-          tail = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+          raw = log.read_text(errors="replace") if log.exists() else ""
+          tail = raw[-4000:]
+
+          # A byte-count tail lands mid-line, so the block would open on a
+          # fragment like "ilities/moba_ability_library.gd:53)". Drop that
+          # partial line -- but only when the cap actually cut something.
+          #
+          # Gating on truncation rather than on line count is the whole
+          # point: a log shorter than the cap has a *complete* first line,
+          # and the shortest logs are the ones where it matters most.
+          # `validate-godot.sh` failing to find Godot prints three lines, the
+          # first of which is the only one that says what went wrong.
+          #
+          # Never empties the block: if dropping the line would leave
+          # nothing (a single line longer than the cap), keep the fragment.
+          if len(raw) > 4000:
+              trimmed = tail.split("\n", 1)[1] if "\n" in tail else ""
+
+              if trimmed.strip():
+                  tail = trimmed
 
           # Godot output is arbitrary text and can contain a ``` sequence
           # (a GDScript doc comment quoting one is enough). Fence the block
@@ -1329,7 +1348,7 @@ jobs:
           REVIEW_FILE: ${{ steps.review-verdict.outputs.review-file }}
           REVIEWER_MODEL: ${{ steps.review-session.outputs.resolved-model }}
           FIX_APPLIED: ${{ steps.fix-eval.outputs.fix_applied }}
-          FIX_TEXT_FILE: ${{ steps.fix-session.outputs.assistant-text-file }}
+          FIX_TEXT_FILE: ${{ steps.fix-session.outputs.final-text-file }}
           FIXER_MODEL: ${{ steps.fix-session.outputs.resolved-model }}
         run: |
           import os

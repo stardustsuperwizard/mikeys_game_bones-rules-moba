@@ -44,6 +44,17 @@ outputs:
       Path to a file holding the joined text of the session's assistant
       messages. Written even on a failed run if any text survived.
     value: copilot-assistant-text.txt
+  final-text-file:
+    description: >-
+      Path to a file holding only the session's *last* assistant message --
+      its Completion Report, for the roles that end with one. Prefer this
+      over assistant-text-file anywhere the text is rendered to a human as
+      the session's report: a session that narrates while it works ("Now
+      the doc.") puts every one of those lines into the joined file, and
+      they end up in the pull request body verbatim. Falls back to the
+      joined text when no single final message could be isolated, so it is
+      never empty where assistant-text-file would not be.
+    value: copilot-final-text.txt
   outcome-file:
     description: >-
       Path to the classify-copilot-outcome.py verdict for the attempt that
@@ -252,3 +263,20 @@ runs:
 
         text = "\n".join(parts).strip()
         pathlib.Path("copilot-assistant-text.txt").write_text(text + "\n")
+
+        # The last assistant message is the Completion Report for the roles
+        # that end with one. Everything before it is the session thinking out
+        # loud, which is useful in a log and noise in a pull request body.
+        #
+        # Falls back to the joined text rather than emitting nothing: a
+        # budget-capped session can be cut off mid-stream, and partial text
+        # is still better than a blank report -- the same reasoning as the
+        # `if: always()` on this step.
+        final = ""
+
+        for part in reversed(parts):
+            if part.strip():
+                final = part.strip()
+                break
+
+        pathlib.Path("copilot-final-text.txt").write_text((final or text) + "\n")
