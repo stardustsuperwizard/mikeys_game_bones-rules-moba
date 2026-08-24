@@ -1,0 +1,193 @@
+name: Godot Validation
+
+# The one job definition that runs `.github/scripts/validate-godot.sh` in CI.
+#
+# Extracted from `godot-ci-validation.yml` so that every caller -- the
+# human-authored `pull_request` gate, and the agent workflows that push
+# commits of their own -- runs the *same* job rather than three drifting
+# copies of it. The script stays the single source of truth for pass/fail;
+# this file is only the CI wrapper around it.
+#
+# Why the agent workflows need to call it at all, rather than relying on
+# `godot-ci-validation.yml` firing on their pushes: a `pull_request` run
+# created by an agent push has repeatedly landed in `action_required` and
+# never executed, so nothing independent ever measured those commits (see
+# the table in Issue #167). A caller that invokes this workflow as a job of
+# its own run needs no second trigger, so there is no gate to sit behind and
+# nothing to work around.
+#
+# `head-sha` is what makes that useful. A job in an `issues`-triggered run
+# attaches its own check run to *that* run's head SHA -- the default branch,
+# not the pull request -- so the result would never appear on the pull
+# request it is about. Passing `head-sha` publishes an explicit check run
+# against the pushed commit instead. Creating a check run is an API call, not
+# a workflow trigger, so it needs no token beyond the automatic
+# `GITHUB_TOKEN` with `checks: write`.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Git ref or SHA to check out. Empty means the caller's default
+          checkout -- which is what the pull_request gate wants, and what an
+          agent caller must NOT rely on: its run's default ref is the branch
+          the workflow was triggered on, not the commit it just pushed.
+        required: false
+        type: string
+        default: ""
+
+      godot-version:
+        description: Godot release tag to install.
+        required: false
+        type: string
+        default: 4.7.1-stable
+
+      head-sha:
+        description: >-
+          Commit SHA to publish a check run against. Empty means publish
+          nothing and let the job's own pass/fail be the only signal.
+        required: false
+        type: string
+        default: ""
+
+      check-name:
+        description: Name the published check run appears under.
+        required: false
+        type: string
+        default: Godot Validation (agent push)
+
+    outputs:
+      result:
+        description: '"success" or "failure" -- the script''s own verdict.'
+        value: ${{ jobs.godot-headless-validation.outputs.result }}
+
+jobs:
+  godot-headless-validation:
+    name: Godot Headless Validation
+    runs-on: ubuntu-latest
+
+    # No `permissions:` block, deliberately -- this job takes exactly the
+    # token its caller granted.
+    #
+    # Two automated reviews disagreed about what to declare here, in opposite
+    # directions: one required `checks: write` be added (or a caller's grant
+    # would be reduced away and the check-run POST would 403), the other
+    # required it be removed (or the called job would request a scope the
+    # `pull_request` gate lacks and refuse to start). Both readings are
+    # plausible from the docs and neither reviewer could run a workflow to
+    # settle it.
+    #
+    # Declaring nothing makes the question moot. There is no grant to reduce
+    # and no request to refuse: `godot-ci-validation.yml` passes
+    # `contents: read` and an empty `head-sha`, so the check-run step is
+    # skipped and no scope is needed; the agent callers pass
+    # `contents: read` plus `checks: write` and the step has exactly what the
+    # API call requires. Whichever reading is right, this behaves correctly
+    # under it.
+    #
+    # Keep it that way. Adding a block here re-opens the question and gains
+    # nothing -- callers already declare the narrowest scope each one needs.
+
+    outputs:
+      result: ${{ steps.validate.outputs.result }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # An empty string here is the same as omitting `ref:` -- the
+          # caller's default checkout -- so one step covers both callers.
+          ref: ${{ inputs.ref }}
+
+      - uses: ./.github/actions/setup-godot
+        with:
+          godot-version: ${{ inputs.godot-version }}
+
+      # Captures the status instead of letting the step abort on it. The
+      # check run below has to be published on the failure path -- that is
+      # the entire point of publishing one -- and a step that dies here would
+      # skip it. "Fail The Job" at the end restores the failure afterwards,
+      # so a red check and a red job still travel together.
+      - name: Validate Godot project loads headlessly
+        id: validate
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          # GitHub Actions runs `shell: bash` steps with `-e` already active,
+          # regardless of this script's own `set` line, so the `|| status=$?`
+          # is load-bearing rather than defensive: without it a non-zero exit
+          # ends the step before `status` is ever written.
+          status=0
+          .github/scripts/validate-godot.sh "$GITHUB_WORKSPACE" \
+            > "$RUNNER_TEMP/validate-output.txt" 2>&1 || status=$?
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+          if [ "$status" -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+          cat "$RUNNER_TEMP/validate-output.txt"
+
+      - name: Publish Check Run
+        if: always() && inputs.head-sha != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+          CHECK_NAME: ${{ inputs.check-name }}
+          RESULT: ${{ steps.validate.outputs.result }}
+        run: |
+          set -euo pipefail
+
+          conclusion="${RESULT:-failure}"
+
+          if [ "$conclusion" = "success" ]; then
+            title="Godot headless validation passed"
+          else
+            title="Godot headless validation failed"
+          fi
+
+          # 4000 chars, not the whole log: the Checks API caps `output.text`
+          # at 65535 bytes and a Godot import pass can exceed that on its own.
+          {
+            echo '```'
+            tail -c 4000 "$RUNNER_TEMP/validate-output.txt" 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } > "$RUNNER_TEMP/check-summary.txt"
+
+          jq -n \
+            --arg name "$CHECK_NAME" \
+            --arg sha "$HEAD_SHA" \
+            --arg conclusion "$conclusion" \
+            --arg title "$title" \
+            --rawfile text "$RUNNER_TEMP/check-summary.txt" \
+            '{
+               name: $name,
+               head_sha: $sha,
+               status: "completed",
+               conclusion: $conclusion,
+               output: {title: $title, summary: $title, text: $text}
+             }' > "$RUNNER_TEMP/check-run.json"
+
+          gh api "repos/$GITHUB_REPOSITORY/check-runs" \
+            --method POST \
+            --input "$RUNNER_TEMP/check-run.json" \
+            > /dev/null
+
+          echo "Published '$CHECK_NAME' ($conclusion) on $HEAD_SHA."
+
+      # Restores the failure that "Validate Godot project loads headlessly"
+      # deliberately swallowed so the check run could be published first.
+      # Without this a failing validation would leave a red check run behind
+      # on a green job, which is worse than either signal alone.
+      - name: Fail The Job On A Failed Validation
+        if: steps.validate.outputs.status != '0'
+        shell: bash
+        run: |
+          echo "::error::validate-godot.sh failed with exit" \
+               "${{ steps.validate.outputs.status }}."
+          exit 1
