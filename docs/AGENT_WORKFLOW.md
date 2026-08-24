@@ -317,7 +317,7 @@ Intake Issue        [plan] in title, `plan` + type label
 └────────────────────────────────────────────────┘
         │  validated plan JSON
         │  → [impl] sub-issues, blocked-by wired
-        │  → plan comment on the Feature
+        │  → plan comment on the intake Issue
         ▼
 Implementation Task
         │
@@ -410,15 +410,15 @@ points, two different products* above.
 | `agent:execute` label | You | `agent-02-execute.yml` | Implement this Task via the scripted CLI executor — no live picker; walks a preference list, opens the PR, then self-reviews and self-fixes against it |
 | `agent:review` label | You | `agent-04-review.yml` | Re-review this PR |
 | `agent:fix` label | You | `agent-05-fix.yml` | Apply the bounded correction the last `FIX` verdict asked for |
-| `planned` label | Planner | — | Feature has been decomposed |
+| `planned` label | Planner | — | Intake Issue has been decomposed |
 | `review:*` label | Reviewer | — | Last verdict on a PR |
 | `dashboard:update` label | You | `agent-00-dashboard.yml` | Re-render the control plane |
 | `dashboard` label | `agent-00` | `agent-00-dashboard.yml` | This Issue is the generated control plane |
 
 `plan` is the one row that is not a trigger — nothing fires on it. It is a
 state marker: every intake template applies it, and the planner consumes it
-on success, so a Feature carries it from the moment it is filed until it has
-actually been decomposed, and never afterwards. `plan` and `planned` are
+on success, so an intake Issue carries it from the moment it is filed until
+it has actually been decomposed, and never afterwards. `plan` and `planned` are
 mutually exclusive by construction, which is what makes
 `is:issue is:open label:plan` an exact awaiting-planning queue rather than an
 approximate one. See *Issue views* below.
@@ -524,7 +524,7 @@ gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/sword-and-planet
   dangling `depends_on`, non-empty acceptance criteria;
 - creates one `[impl]` sub-issue per task with native `--parent` and
   `--add-blocked-by` relationships;
-- posts the plan as a comment on the Feature;
+- posts the plan as a comment on the intake Issue;
 - adds `planned` and consumes both `agent:plan` and `plan`.
 
 Comments are read as amendments to the body, and later comments win over the
@@ -537,14 +537,61 @@ the stale sub-issues yourself first, because nothing removes them for you.
 
 If the run **fails**, it removes `agent:plan`, leaves `plan` in place, and
 comments with a link to the failed run. That is deliberate: `agent:plan` is
-what puts a Feature in the planning view, so leaving it on a failed run would
-park the Feature there forever. Giving the label back returns the Feature to
+what puts an Issue in the planning view, so leaving it on a failed run would
+park the Issue there forever. Giving the label back returns the Issue to
 the awaiting-planning view — which is true, because `plan` never came off —
 and re-adding `agent:plan` is the same clean retry as always. Check for
 partial sub-issues before you do.
 
-`plan` comes off in one place only, the success path, so a Feature can never
+`plan` comes off in one place only, the success path, so an Issue can never
 fall out of the intake queue without a plan to show for it.
+
+#### Every intake type is plannable
+
+All five intake templates decompose through the same planner. Nothing in
+`agent-01-planner.yml` gates on the type label: the only trigger is
+`agent:plan`, and the only other gate is the already-planned marker.
+
+| Type label | Template | What its `Acceptance Criteria` ships |
+| --- | --- | --- |
+| `enhancement` | `01-feature.md` | three generic lines + commented examples |
+| `task` | `02-task.md` | heading only — every line commented out |
+| `bug` | `03-bug.md` | five generic lines |
+| `infrastructure` | `04-infrastructure_tooling.md` | two generic lines |
+| `dependency` | `05-dependency.md` | five generic lines |
+
+Every template has the section. What varies is how much of it is boilerplate,
+which is why the type matters: the prompt reports it to the planner as
+`Type labels:` in the `# INTAKE ISSUE` section, so the planner knows how much
+it has to specialise rather than inferring the body's shape from prose.
+
+The planner **specialises** that boilerplate into observations specific to the
+Issue, and derives outright whatever the template left empty. Passing a generic
+line through is the failure mode — "Expected behavior is restored"
+(`03-bug.md:66`) is no more checkable than "the bug is fixed". Where the author
+replaced the boilerplate with real criteria, those are authoritative.
+
+The five type labels are ensured in `Ensure Orchestration Labels Exist`
+alongside `plan`, and for the same reason: a template silently drops a label
+the repository does not define. That guard heals the vocabulary for the *next*
+Issue, not the one being planned — an Issue already filed without its type
+label cannot be relabelled from inside the run — so `Type labels: (none)`
+stays reachable, and the prompt tells the planner to infer the type from the
+body's headings rather than stop.
+
+Structural validation rejects a plan whose `acceptance_criteria` list is
+empty. Note the limit of that guarantee: validation runs in
+`Extract and Validate Planner JSON`, an earlier step than the render, and the
+render then drops any criterion identical to the two appended automatically.
+A task whose criteria were *all* standing ones therefore passes validation and
+renders with only those two lines. That is a contentless contract the reviewer
+should call as a planning failure; it is not something the render papers over.
+
+A defect is scoped to the fix and the test that pins it. The refactor it hints
+at and the neighbouring defects noticed while reading belong in `out_of_scope`.
+A one-task plan is the normal answer for a defect, and the fix and its test are
+never split into separate tasks — that leaves an intermediate state nobody can
+ship.
 
 ### Step 2 — Execution
 
@@ -1279,7 +1326,7 @@ by `implementation_model` in the output, not a credits figure.
 | File | Purpose |
 | --- | --- |
 | `.github/workflows/agent-00-dashboard.yml` | Rewrites the pinned control plane Issue from derived state, on `dashboard:update` or dispatch |
-| `.github/workflows/agent-01-planner.yml` | Decomposes a Feature into `[impl]` sub-issues |
+| `.github/workflows/agent-01-planner.yml` | Decomposes an intake Issue of any type into `[impl]` sub-issues |
 | `.github/workflows/agent-02-execute.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:execute`; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
