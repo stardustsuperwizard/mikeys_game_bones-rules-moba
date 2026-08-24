@@ -63,6 +63,8 @@ planner-prompt.txt
 reviewer-prompt.txt
 fixer-prompt.txt
 issue.json
+issue-body.md
+task-scope.json
 task.json
 parent.json
 plan.json

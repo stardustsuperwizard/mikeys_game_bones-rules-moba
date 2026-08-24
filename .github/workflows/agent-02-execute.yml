@@ -225,6 +225,47 @@ jobs:
             exit 0
           fi
 
+          # The one guard here that is about *this workflow's credentials*
+          # rather than the Issue's readiness.
+          #
+          # GITHUB_TOKEN cannot write `.github/workflows/**` or
+          # `.github/actions/**`. There is no `permissions:` key that grants
+          # it -- GitHub reserves workflow edits for credentials carrying the
+          # `workflow` OAuth scope, deliberately, so that a compromised
+          # workflow cannot rewrite its own CI. Without this check the run
+          # gets all the way to `Push Branch and Open Pull Request` before
+          # the remote rejects it, having already paid for a full executor
+          # session that produced a complete implementation. That happened
+          # three times on #167's decomposition (#168, #169, #170); the work
+          # was hand-authored afterwards as #172, #173 and #174.
+          #
+          # Checked against the Issue's own declared expected files, not
+          # against a guess from its title. Uncertain means eligible: an
+          # Issue with no parseable expected-files section dispatches exactly
+          # as it did before this guard existed, because a false positive
+          # blocks real work while a false negative costs one session and
+          # says why.
+          jq -r '.body // ""' issue.json > issue-body.md
+
+          if ! python3 .github/scripts/task_scope.py \
+              --body-file issue-body.md > task-scope.json
+          then
+            echo "::warning::task_scope.py did not run; treating this Issue" \
+              "as executor-eligible."
+            echo '{"executor_eligible": true, "restricted_paths": []}' \
+              > task-scope.json
+          fi
+
+          if [ "$(jq -r '.executor_eligible' task-scope.json)" = "false" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=workflow_scope" >> "$GITHUB_OUTPUT"
+            echo "restricted_paths=$(
+              jq -r '[.restricted_paths[] | "`\(.)`"] | join(", ")' \
+                task-scope.json
+            )" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           EXISTING=$(
             gh pr list \
               --repo "$GITHUB_REPOSITORY" \
@@ -247,6 +288,16 @@ jobs:
       - name: Report Guard Failure
         if: steps.context.outputs.ok != 'true'
         shell: bash
+        # Read through the environment rather than interpolated straight into
+        # the script below. Every other value in this step is derived from
+        # repository state -- `blockers` is a list of issue numbers, and the
+        # URL comes from `gh` -- but `restricted_paths` is quoted out of an
+        # Issue body, which anyone who can file an Issue controls, and it
+        # carries backticks by construction. `${{ }}` would paste those into
+        # a double-quoted bash string, where a backtick is command
+        # substitution; a variable expansion is not re-evaluated, so this is.
+        env:
+          RESTRICTED_PATHS: ${{ steps.context.outputs.restricted_paths }}
         run: |
           set -euo pipefail
 
@@ -264,6 +315,18 @@ jobs:
               ;;
             pr_exists)
               MSG="A pull request already exists for this Issue: ${{ steps.context.outputs.existing_pr_url }}. \`agent:execute\` is for starting fresh implementation, not correcting existing work -- use the \`agent:fix\` label on that pull request instead."
+              ;;
+            workflow_scope)
+              # Built by appending rather than written as one multi-line
+              # string: a continuation line at column 0 would terminate this
+              # step's YAML block scalar, and indenting it to stay inside the
+              # block would put ten leading spaces into the comment, which
+              # GitHub renders as a code block.
+              MSG="This task expects to change $RESTRICTED_PATHS, and the scripted executor cannot push those paths."
+              MSG="$MSG"$'\n\n'"\`GITHUB_TOKEN\` is not allowed to create or update files under \`.github/workflows/\` or \`.github/actions/\`. No \`permissions:\` key grants it: GitHub reserves workflow edits for credentials carrying the \`workflow\` OAuth scope, so that a compromised workflow cannot rewrite its own CI. The restriction is deliberate and this workflow respects it rather than working around it."
+              MSG="$MSG"$'\n\n'"Refused before any session starts, because the push is the *last* step of an execution run. Without this check the run implements the task in full and then loses all of it at the push, having spent the credits either way."
+              MSG="$MSG"$'\n\n'"**Run this task from a human-credentialed session instead.** A Claude Code session -- terminal, desktop, web, or Remote Control -- pushes with your own credentials and can write these paths. It reads the same contract this Issue encodes: see *Claude Code as an additional environment* in \`docs/AGENT_WORKFLOW.md\`, and \`CLAUDE.md\` at the repository root. Open the pull request with \`Closes #$ISSUE_NUMBER\`, and add \`agent:review\` to it by hand so it goes through the same review gate everything else does."
+              MSG="$MSG"$'\n\n'"Assigning this Issue to the Copilot cloud agent will not help -- that path is subject to the same restriction."
               ;;
             *)
               MSG="Guard check failed for an unrecognised reason: \`$REASON\`."

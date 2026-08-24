@@ -444,6 +444,7 @@ depends on the color. Checked live against the repository on 2026-08-22:
 | `planned` | `#0E8A16` | `agent-01-planner.yml` |
 | `implementation` | `#1D76DB` | `agent-01-planner.yml` |
 | `machine` | `#70A8BD` | `agent-01-planner.yml` |
+| `human-credentials` | `#D4C5F9` | `agent-01-planner.yml` |
 | `review:pass` | `#0E8A16` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
 | `review:fix` | `#D93F0B` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
 | `review:planning-failure` | `#B60205` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
@@ -549,8 +550,9 @@ fall out of the intake queue without a plan to show for it.
 
 Work tasks in dependency order. The **Agent Control Plane** Issue lists what
 is ready right now, grouped by Feature, with a ⚠️ against any task expected to
-touch `.tscn`, `.tres`, `project.godot`, or `addons/`. It renders on demand,
-so add `dashboard:update` first if it looks stale — see *The control plane*.
+touch `.tscn`, `.tres`, `project.godot`, or `addons/`, and a 🔑 against any
+task neither automated path can run at all. It renders on demand, so add
+`dashboard:update` first if it looks stale — see *The control plane*.
 
 Two products can execute a task, trading a live model choice for automation
 in opposite directions — see *Four entry points, two different products*
@@ -569,9 +571,10 @@ label instead (works from GitHub Mobile) and the workflow does the rest with
 no picker involved:
 
 1. Checks the Issue is open, labeled `implementation`, has no open
-   `blocked-by` Issue, and has no pull request already open for it — any
-   failure gets a comment explaining which, and the label removed, not a red
-   run.
+   `blocked-by` Issue, expects to change no path this workflow's token cannot
+   push (see *Tasks the scripted executor cannot run*), and has no pull
+   request already open for it — any failure gets a comment explaining which,
+   and the label removed, not a red run.
 2. Runs a Copilot CLI session (`EXECUTOR_MODELS`) against the Issue body plus
    `AGENTS.md` and `.github/copilot-instructions.md`.
 3. Requires an actual commit to exist afterward — not just a session that
@@ -605,6 +608,66 @@ pull request exists — no commit, an uncommitted session, `gh pr create`
 itself failing — comments on the Issue and removes `agent:execute` rather
 than opening a broken PR, so re-adding the label is a clean retry in that
 case.
+
+#### Tasks the scripted executor cannot run
+
+`GITHUB_TOKEN` cannot create or update files under `.github/workflows/` or
+`.github/actions/`. There is no `permissions:` key that grants it: GitHub
+reserves workflow edits for credentials carrying the `workflow` OAuth scope,
+deliberately, so that a compromised workflow cannot rewrite its own CI. The
+push is rejected at the remote:
+
+```
+! [remote rejected] HEAD -> agent-exec/168
+  (refusing to allow a GitHub App to create or update workflow
+   `.github/workflows/godot-ci-validation.yml` without `workflows` permission)
+```
+
+That rejection lands at the *last* step of an execution run. Before this
+check existed, a task expecting those paths ran a full executor session on
+`claude-opus-5`, produced a complete implementation, and lost all of it at
+`Push Branch and Open Pull Request` — diagnosable only by reading the run
+log, and priced at a whole session either way. #167's decomposition did it
+three times: the planner labelled all four of its tasks `machine`, three of
+them (#168, #169, #170) edited workflow files, and the work had to be
+hand-authored afterwards as #172, #173 and #174.
+
+So the restriction is now stated in three places, all reading the same rule
+out of `.github/scripts/task_scope.py`:
+
+- **The planner** marks such a task when it generates it — `human-credentials`
+  alongside `implementation` and `machine`, and a **Run This Task** block
+  that says the task is not runnable by the Copilot executor and what to do
+  instead, in place of the usual paste-this-into-a-session instructions.
+- **The executor** refuses it. The `workflow_scope` guard sits with the other
+  pre-flight checks in `Resolve Implementation Task Issue`, so a hand-written
+  `[impl]` Issue the planner never saw is caught too. Adding `agent:execute`
+  gets a comment naming the restriction and the alternative, and the label
+  removed — no session, no credits.
+- **The control plane** prints 🔑 against it, because *Ready to dispatch*
+  otherwise tells you to paste it into a Copilot session.
+
+Detection keys on the task's declared expected files, never on its title.
+`task_scope.py` reads the `## Files or Subsystems Expected to Change` section
+and takes both backticked paths (how a hand-written Issue writes one) and
+bare tokens on bullet lines (how the planner writes one — its `expected_files`
+are plain JSON strings rendered straight into a `- ` list, so a generated
+task's paths carry no backticks at all). The same module supplies the
+delicate-paths rule behind the control plane's ⚠️.
+
+**Uncertain means eligible.** An Issue with no expected-files section, an
+empty one, or one naming no recognisable path dispatches exactly as it did
+before the guard existed, and so does one whose parse fails outright. A false
+positive blocks real work; a false negative costs one session and comments
+why.
+
+None of this is a workaround for the scope restriction, and adding a
+credential that could write these paths is not on the table — see
+`.github/ISSUE_TEMPLATE/04-infrastructure_tooling.md`, which forbids storing
+long-lived credentials. **Run these tasks from a human-credentialed session
+instead** — Claude Code pushes with your own credentials. See *Claude Code as
+an additional environment*. Assigning the Copilot cloud agent does not help:
+that path is subject to the same restriction.
 
 #### Why the draft state carries the validation result
 
@@ -790,7 +853,9 @@ Each implementation sub-issue:
 
 - follows `.github/ISSUE_TEMPLATE/99-execute_task.md`;
 - has the same milestone as its parent Feature;
-- carries `implementation` and `machine`, and nothing else — the planner
+- carries `implementation` and `machine`, plus `human-credentials` when its
+  expected files land in `.github/workflows/` or `.github/actions/` (see
+  *Tasks the scripted executor cannot run*), and nothing else — the planner
   applies no `agent:*` label, because those are dispatch triggers a human
   adds and a pre-applied trigger is a spent one;
 - records sibling ordering with GitHub issue dependencies;
@@ -878,6 +943,16 @@ the moment it runs, and stored nowhere:
 | No sub-issues | Awaiting planning |
 | Sub-issues, some open | In progress |
 | Sub-issues, all closed | **Awaiting your sign-off** |
+
+*Ready to dispatch* also carries two per-task markers, both read out of the
+task's expected-files section by `.github/scripts/task_scope.py` rather than
+from any label: ⚠️ for a task expected to touch `.tscn`, `.tres`,
+`project.godot` or `addons/`, where Auto is a bad bet; and 🔑 for one
+expected to touch `.github/workflows/` or `.github/actions/`, which no
+automated path can push at all — see *Tasks the scripted executor cannot
+run*. The 🔑 matters here specifically because the bucket's own instruction
+is to paste the task into a Copilot session, and for those tasks that
+instruction is wrong.
 
 Order matters in the task table: a draft PR reads as *Implementing* even when
 a `review:fix` label is still present, because that label persists through the
@@ -1179,6 +1254,7 @@ by `implementation_model` in the output, not a credits figure.
 | `.github/actions/extract-review-verdict` | Turns a review session's text into a machine-readable `VERDICT` |
 | `.github/actions/lint-gdscript` | Diff-scoped `gdformat` check/fix, used by `agent-02-execute.yml` and `gdscript-lint.yml` |
 | `.github/scripts/render-dashboard.py` | Derives every task and Feature state from the repository graph |
+| `.github/scripts/task_scope.py` | Reads a task's expected-files section: the ⚠️ delicate-paths rule, and the executor-eligibility rule `agent-01-planner.yml`, `agent-02-execute.yml` and the control plane all share |
 | `.github/agents/01-planner.agent.md` | Planner role, Issue promotion criteria |
 | `.github/agents/02-executor.agent.md` | Executor role, scope boundaries |
 | `.github/agents/03-reviewer.agent.md` | Reviewer role, verdict classification |
