@@ -60,6 +60,16 @@ jobs:
     name: Agent - PR Fix
     runs-on: ubuntu-latest
 
+    # Consumed only by `validate-pushed-commit` below. Every value is read
+    # back out of a step that already computed it -- `Resolve Pull Request`
+    # and `Push Commit If One Was Made` -- so no step's behaviour, gating or
+    # own outputs change to produce them.
+    outputs:
+      head-ref: ${{ steps.pr.outputs.head_ref }}
+      pushed: ${{ steps.push.outputs.pushed }}
+      pushed-sha: ${{ steps.push.outputs.sha }}
+      pr-number: ${{ env.PR_NUMBER }}
+
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
@@ -430,3 +440,40 @@ jobs:
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("\n" + body + "\n")
+
+  # The independent check on a fix commit. See the equivalent job in
+  # agent-02-execute.yml for the full reasoning; the short form is that the
+  # `pull_request`-triggered gate has repeatedly failed to fire for agent
+  # pushes, landing in `action_required` and never executing (Issue #167), so
+  # nothing outside the fixer's own session ever measured the commit it
+  # pushed. A job in this run needs no second trigger.
+  #
+  # This matters more here than anywhere else in the pipeline. A fix session
+  # edits code in response to a review and pushes it with nobody looking, and
+  # its own re-validation runs in the tree it just edited. This is the only
+  # reading of that commit taken from a clean checkout.
+  #
+  # `steps.push` already distinguishes pushed / no-commit / uncommitted-
+  # changes, so this gates on its `pushed` output rather than recomputing the
+  # state: no commit means the job is skipped, not failed.
+  #
+  # Reports only -- no branch deletion, no reset, no label change. In
+  # particular a failing check here does not touch `review:fix`; whether the
+  # fix stands is a decision for the reviewer and the author.
+  validate-pushed-commit:
+    name: Independent Validation (agent fix)
+    needs: fix
+    if: always() && needs.fix.outputs.pushed == 'true'
+
+    # Narrower than the workflow default on purpose. The called workflow
+    # inherits what this job holds, and it only reads the tree and writes one
+    # check run; the `fix` job's own permissions are untouched.
+    permissions:
+      contents: read
+      checks: write
+
+    uses: ./.github/workflows/godot-validation.yml
+    with:
+      ref: ${{ needs.fix.outputs.pushed-sha }}
+      head-sha: ${{ needs.fix.outputs.pushed-sha }}
+      check-name: Godot Validation (agent-05 fix)
