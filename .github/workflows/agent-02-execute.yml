@@ -115,6 +115,16 @@ jobs:
     name: Agent - AW02 Execute Task
     runs-on: ubuntu-latest
 
+    # Consumed only by `validate-pushed-commit` below. Everything here is
+    # read back out of a step that already knew the value -- no step's
+    # behaviour, `if:` condition or `continue-on-error` setting changes to
+    # produce them.
+    outputs:
+      branch: ${{ env.BRANCH }}
+      pushed: ${{ steps.pushed.outputs.pushed }}
+      pushed-sha: ${{ steps.pushed.outputs.sha }}
+      pr-url: ${{ steps.pr.outputs.pr_url }}
+
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
@@ -1236,6 +1246,46 @@ jobs:
           if ready.returncode != 0:
               print(ready.stderr)
 
+      # Last word on what this run actually pushed, for the independent
+      # validation job below.
+      #
+      # Read from the remote rather than `git rev-parse HEAD`, and read here
+      # rather than earlier, because the branch moves up to three times in
+      # this job: the executor's commit, a gdformat commit, and a pre-PR fix
+      # commit. Two of those can also be rolled back locally (`git reset
+      # --hard`) after a failed re-validation, so the runner's HEAD and the
+      # remote tip are not reliably the same thing. The commit a reviewer
+      # will see is the one on the remote, so that is the one to validate.
+      #
+      # `always()` because the steps above it are best-effort: a soft-failed
+      # review or fix pass still leaves a real pushed commit that deserves
+      # validating. `continue-on-error` because failing to *describe* the
+      # push must not fail a run whose work already landed.
+      - name: Resolve Pushed Head For Validation
+        if: >-
+          always() &&
+          steps.context.outputs.ok == 'true' &&
+          steps.commit.outputs.made == 'true' &&
+          steps.pr.outcome == 'success'
+        id: pushed
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          remote_sha=$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)
+
+          if [ -z "$remote_sha" ]; then
+            echo "::warning::No remote tip found for $BRANCH; the" \
+                 "independent validation job will be skipped."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Pushed head for $BRANCH is $remote_sha."
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$remote_sha" >> "$GITHUB_OUTPUT"
+
       # Best-effort: the pull request is already open by this point (it
       # opened right after the executor's commit, well before this step),
       # so anything failing here must never turn into a job failure -- the
@@ -1609,3 +1659,44 @@ jobs:
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("\n" + body + "\n")
+
+  # The independent check. Everything the `execute` job says about
+  # validation, it says about its own work: it runs `validate-godot.sh` in
+  # the same working tree the session just mutated, and writes the result
+  # into a pull request body it also wrote. This job is the one measurement
+  # in the pipeline that no session touches -- a fresh clone of the commit
+  # the remote branch actually points at, validated by the same job
+  # definition the human-authored `pull_request` gate uses, reported as a
+  # check run on that commit.
+  #
+  # It exists because the `pull_request`-triggered gate has repeatedly failed
+  # to fire for agent pushes, landing in `action_required` and never
+  # executing (Issue #167). A job in this run needs no second trigger, so
+  # there is nothing to sit behind and nothing to work around.
+  #
+  # `always()` because the tail of `execute` is deliberately best-effort: a
+  # soft-failed review or fix pass, or an outright job failure after the
+  # push, still leaves a real commit on the branch that a reviewer will read.
+  # Those are exactly the runs where an unvalidated commit would otherwise
+  # slip through unmeasured.
+  #
+  # It reports and nothing else. No branch deletion, no reset, no label
+  # change, no pull request state change on failure -- a red check next to a
+  # green pull request is a decision for a human, not for this job.
+  validate-pushed-commit:
+    name: Independent Validation (agent push)
+    needs: execute
+    if: always() && needs.execute.outputs.pushed == 'true'
+
+    # Narrower than the workflow default on purpose. The called workflow
+    # inherits what this job holds, and it only ever reads the tree and
+    # writes one check run; `execute`'s own permissions are untouched.
+    permissions:
+      contents: read
+      checks: write
+
+    uses: ./.github/workflows/godot-validation.yml
+    with:
+      ref: ${{ needs.execute.outputs.pushed-sha }}
+      head-sha: ${{ needs.execute.outputs.pushed-sha }}
+      check-name: Godot Validation (agent-02 execute)
