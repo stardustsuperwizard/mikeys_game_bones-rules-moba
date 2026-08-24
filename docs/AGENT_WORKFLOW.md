@@ -624,9 +624,19 @@ commit exists" signal the next step says it trusts, so an unvalidated
 session's work can and does reach a pull request. Draft-until-verified is
 what keeps that from being indistinguishable from finished work.
 
-It costs nothing elsewhere: the saved views and the control plane already
-read draft as *Implementing* and ready as *Awaiting review*, which is
-exactly the distinction being drawn.
+Draft alone would not have been enough, though. The saved views and the
+control plane already read draft as *Implementing* and ready as *Awaiting
+review*, which is most of the distinction being drawn for free — but
+*Implementing* means "a session is working on it", and a pull request whose
+validation failed is not being worked on by anyone. So step 6 also applies a
+`validation:failed` label when its run does not pass, and removes it when a
+later run does. The control plane tests that label ahead of draft-ness (see
+**The control plane**), which is what stops a broken branch from parking
+itself under *Implementing* indefinitely.
+
+Two states, then, and they are not the same thing: **draft** means no
+verified validation stands behind this pull request *yet*; **draft plus
+`validation:failed`** means one ran and did not pass.
 
 Run it by hand against any Issue number to re-check:
 
@@ -747,7 +757,7 @@ The views worth having, and the queries behind them:
 | Planned Features | `is:issue is:open label:planned` |
 | Open tasks | `is:issue is:open label:implementation` |
 | Awaiting review | `is:pr is:open draft:false -label:"review:pass","review:fix","review:planning-failure","review:design-ambiguity"` |
-| Needs your attention | `is:pr is:open label:"review:fix","review:planning-failure","review:design-ambiguity"` |
+| Needs your attention | `is:pr is:open label:"review:fix","review:planning-failure","review:design-ambiguity","validation:failed"` |
 | Ready to merge | `is:pr is:open label:"review:pass"` |
 
 Quote any label containing a colon. `label:agent:plan` is parsed as a label
@@ -791,6 +801,7 @@ the moment it runs, and stored nowhere:
 | Issue closed | Done |
 | Open `blocked-by` issues | Blocked — dependencies |
 | No linked PR | **Ready to dispatch** |
+| `validation:failed` | **Needs your attention** |
 | Draft PR open | Implementing |
 | PR ready, no `review:*` | Awaiting review |
 | `review:fix` / `-planning-failure` / `-design-ambiguity` | **Needs your attention** |
@@ -809,11 +820,20 @@ a `review:fix` label is still present, because that label persists through the
 bounded correction that answers it. Testing draft-ness first is what stops
 every in-flight fix from showing as waiting on you.
 
-*Implementing* now also covers an executor PR whose validation never came
-back green: `agent-02-execute.yml` marks its pull requests ready only after
-its own `validate-godot.sh` run passes (see **Why the draft state carries the
-validation result**). Either way the reading is the same — a draft is not
-finished work — which is why the table needed no new row.
+`validation:failed` is tested *ahead* of draft-ness, and that ordering is the
+whole reason the label exists. `agent-02-execute.yml` marks a pull request
+ready only after its own `validate-godot.sh` run passes, so draft is no
+longer only a transient "a session is mid-flight" state — a branch that fails
+validation stays draft until a human intervenes. Left to the draft rule alone
+it would file itself under *Implementing* forever, which is precisely the
+kind of quietly-hidden failure this dashboard exists to prevent. The label is
+what separates *not finished yet* from *finished and broken*.
+
+It is also deliberately independent of the `review:*` vocabulary: those
+record a judgment about the code, this records that the build is broken. A
+`review:pass` sitting on a branch that no longer validates is exactly the
+combination worth surfacing rather than averaging away, so `validation:failed`
+wins over all of them.
 
 #### Rendering it
 

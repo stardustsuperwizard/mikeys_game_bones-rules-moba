@@ -48,6 +48,14 @@ VERDICT_ADVERSE = {
     "review:design-ambiguity": "DESIGN AMBIGUITY",
 }
 
+# Applied by agent-02-execute.yml when its own validate-godot.sh run does not
+# pass, and removed by the same step when a later run does. Distinct from the
+# review:* vocabulary on purpose: those record a judgment about the code, this
+# records that the build is broken, and the two are independent -- a PASS
+# verdict on a branch that no longer validates is exactly the combination
+# worth surfacing rather than averaging away.
+VALIDATION_FAILED = "validation:failed"
+
 # Paths where a weak or unknown model is a bad bet. Godot scene and resource
 # serialization is unforgiving of small mistakes, so a task touching these is
 # flagged for a strong model rather than whatever Auto happens to draw.
@@ -174,6 +182,18 @@ def classify_task(issue: dict, prs: dict[int, dict]) -> tuple[str, dict]:
 
     detail["pr"] = pr["number"]
     names = label_names(pr)
+
+    # Checked before the draft short-circuit below, and deliberately so.
+    # Draft used to mean only "a session is mid-flight" -- a state that
+    # always resolved on its own. Since agent-02-execute.yml started holding
+    # a pull request in draft until its own validation passes, draft is also
+    # a *terminal* state: one that failed validation stays draft until a
+    # human intervenes. Letting the draft rule win there would file a broken
+    # branch under "Implementing" indefinitely, which is the failure this
+    # dashboard exists to prevent.
+    if VALIDATION_FAILED in names:
+        detail["verdict"] = "VALIDATION FAILED"
+        return NEEDS_ATTENTION, detail
 
     # A draft PR means a session is actively working, whatever the last
     # verdict said — a `review:fix` label persists through the bounded
