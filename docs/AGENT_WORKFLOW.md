@@ -552,25 +552,40 @@ All five intake templates decompose through the same planner. Nothing in
 `agent-01-planner.yml` gates on the type label: the only trigger is
 `agent:plan`, and the only other gate is the already-planned marker.
 
-| Type label | Template | Carries `Acceptance Criteria`? |
+| Type label | Template | What its `Acceptance Criteria` ships |
 | --- | --- | --- |
-| `enhancement` | `01-feature.md` | yes |
-| `task` | `02-task.md` | yes |
-| `bug` | `03-bug.md` | **no** |
-| `infrastructure` | `04-infrastructure_tooling.md` | **no** |
-| `dependency` | `05-dependency.md` | **no** |
+| `enhancement` | `01-feature.md` | three generic lines + commented examples |
+| `task` | `02-task.md` | heading only — every line commented out |
+| `bug` | `03-bug.md` | five generic lines |
+| `infrastructure` | `04-infrastructure_tooling.md` | two generic lines |
+| `dependency` | `05-dependency.md` | five generic lines |
 
-The prompt reports the type label to the planner as `Type labels:` in its
-`# INTAKE ISSUE` section, because the templates differ in which sections they
-carry and the planner would otherwise have to infer the shape from prose.
+Every template has the section. What varies is how much of it is boilerplate,
+which is why the type matters: the prompt reports it to the planner as
+`Type labels:` in the `# INTAKE ISSUE` section, so the planner knows how much
+it has to specialise rather than inferring the body's shape from prose.
 
-Where a template carries no `Acceptance Criteria`, the planner **derives**
-them rather than emitting vague ones — for a defect, from `Expected Behavior`
-(what to assert), `Actual Behavior` (what must stop being true), and each
-`Reproduction Steps` entry (a check that the repro no longer reproduces).
-Structural validation already rejects a plan with empty acceptance criteria,
-so a planner that skipped this fails the run rather than producing an
-unreviewable task.
+The planner **specialises** that boilerplate into observations specific to the
+Issue, and derives outright whatever the template left empty. Passing a generic
+line through is the failure mode — "Expected behavior is restored"
+(`03-bug.md:66`) is no more checkable than "the bug is fixed". Where the author
+replaced the boilerplate with real criteria, those are authoritative.
+
+The five type labels are ensured in `Ensure Orchestration Labels Exist`
+alongside `plan`, and for the same reason: a template silently drops a label
+the repository does not define. That guard heals the vocabulary for the *next*
+Issue, not the one being planned — an Issue already filed without its type
+label cannot be relabelled from inside the run — so `Type labels: (none)`
+stays reachable, and the prompt tells the planner to infer the type from the
+body's headings rather than stop.
+
+Structural validation rejects a plan whose `acceptance_criteria` list is
+empty. Note the limit of that guarantee: validation runs in
+`Extract and Validate Planner JSON`, an earlier step than the render, and the
+render then drops any criterion identical to the two appended automatically.
+A task whose criteria were *all* standing ones therefore passes validation and
+renders with only those two lines. That is a contentless contract the reviewer
+should call as a planning failure; it is not something the render papers over.
 
 A defect is scoped to the fix and the test that pins it. The refactor it hints
 at and the neighbouring defects noticed while reading belong in `out_of_scope`.

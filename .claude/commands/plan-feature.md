@@ -27,9 +27,10 @@ Stop and say so, rather than proceeding, if the Issue:
 
 **All five intake types are plannable** — `enhancement`, `task`, `bug`,
 `infrastructure`, and `dependency`. A defect report is not a reason to stop,
-and must never be sent back to be refiled as a Feature. Where a Bug,
-Infrastructure, or Dependency Issue carries no `Acceptance Criteria` section,
-the planner derives the criteria; that is expected, not a blocker.
+and must never be sent back to be refiled as a Feature. All five templates
+carry an `Acceptance Criteria` section, but most of what they ship is generic
+boilerplate; the planner specialises it against the Issue body rather than
+copying it through. That is expected, not a blocker.
 
 Otherwise, delegate the decomposition to the `planner` subagent, giving it
 the Issue number and the fetched content above as context.

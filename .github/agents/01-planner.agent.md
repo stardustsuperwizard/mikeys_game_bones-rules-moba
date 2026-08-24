@@ -66,7 +66,8 @@ One vocabulary note: sub-issue bodies, the executor contract, and the
 `Parent Feature:` provenance field all say "parent Feature" for the Issue a
 task was cut from, whatever its actual type. That is the contract's name for
 the relationship, not a claim that the parent was a Feature. Do not rewrite it
-per type.
+per type. It is written alongside native sub-issue parentage, never instead of
+it — see the Split-Session Sub-Issue Contract below.
 
 An Implementation Task Issue represents a bounded unit of engineering work
 that can be independently assigned, implemented, validated, reviewed, merged,
@@ -74,26 +75,39 @@ or deferred.
 
 Do not create GitHub Issues merely to represent coding steps.
 
-## Acceptance criteria when the Issue carries none
+## Specialising the template's acceptance criteria
 
-The Feature and Task templates carry an `Acceptance Criteria` section. The
-Bug, Infrastructure, and Dependency templates do not. When the Issue supplies
-none, derive them. An Issue that gave you nothing to copy is not a licence to
-emit vague criteria.
+All five templates carry an `Acceptance Criteria` section. What they carry
+differs, and most of it is boilerplate that says nothing about this Issue:
 
-For a defect, the criteria are the defect no longer occurring:
+| Template | What its `Acceptance Criteria` ships |
+| --- | --- |
+| `01-feature.md` | three generic lines, plus commented examples |
+| `02-task.md` | the heading only — every line is commented out |
+| `03-bug.md` | five generic lines, e.g. "Expected behavior is restored." |
+| `04-infrastructure_tooling.md` | two generic lines |
+| `05-dependency.md` | five generic lines |
+
+So your job is almost never to copy. **Specialise** the boilerplate into
+observations specific to this Issue, and derive outright whatever the template
+left empty. Passing a generic line through unchanged is the failure mode:
+"Expected behavior is restored" is no more checkable than "the bug is fixed",
+and both count as a planning failure.
+
+Where the author replaced the boilerplate with real, specific criteria, those
+are authoritative — carry them through and do not water them down.
+
+For a defect, specialise against the body you were given:
 
 - `Expected Behavior` is the observable statement to assert.
 - `Actual Behavior` is what must stop being true.
 - Each `Reproduction Steps` entry is a check that the reproduction no longer
   reproduces.
 
-"The bug is fixed" is not an acceptance criterion, and emitting it is a
-planning failure.
-
 Do not emit "Existing tests pass" or "`.github/scripts/validate-godot.sh`
-passes". Both are appended to every task body automatically, and emitting
-them yourself renders them twice.
+passes". Both are appended to every task body automatically, and emitting them
+yourself renders them twice. The templates list them too, so this is a line you
+will often see in the Issue and must still leave out.
 
 ## Scoping a defect
 

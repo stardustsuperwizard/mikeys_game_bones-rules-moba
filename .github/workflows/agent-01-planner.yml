@@ -207,20 +207,40 @@ jobs:
           issue_body = issue.get("body") or ""
 
           # The type label is how the planner tells a Bug Report from a
-          # Feature. The five intake templates differ in which sections they
-          # carry -- a Bug Report has no Acceptance Criteria to copy -- and
-          # without this the planner sees a body and has to infer its shape
-          # from prose. `plan` and `agent:plan` are dispatch state, not type,
-          # so they are filtered out rather than offered as an answer.
-          DISPATCH_LABELS = {"plan", "agent:plan", "planned", "machine"}
+          # Feature. All five intake templates carry an `Acceptance Criteria`
+          # section, but they carry different boilerplate in it and different
+          # sections around it, so the type decides how much the planner has
+          # to specialise. Without this the planner sees a body and has to
+          # infer its shape from prose.
+          #
+          # An allowlist, not a denylist: the prompt promises that this field
+          # names one of five known types, so an unrelated label a human
+          # added -- `documentation`, a priority, `good first issue` -- must
+          # not be presented as if it were the type.
+          #
+          # These five are also ensured in `Ensure Orchestration Labels
+          # Exist`, for the same reason `plan` is: a template silently drops
+          # a label the repository does not define. That guard cannot help
+          # THIS run -- an Issue filed without the label cannot be relabelled
+          # retroactively -- so `(none)` stays a reachable value and the
+          # prompt tells the planner what to do when it sees one.
+          INTAKE_TYPE_LABELS = (
+              "enhancement",
+              "task",
+              "bug",
+              "infrastructure",
+              "dependency",
+          )
+
+          present = {
+              (label or {}).get("name", "")
+              for label in (issue.get("labels") or [])
+          }
 
           type_labels = [
               name
-              for name in (
-                  (label or {}).get("name", "")
-                  for label in (issue.get("labels") or [])
-              )
-              if name and name not in DISPATCH_LABELS
+              for name in INTAKE_TYPE_LABELS
+              if name in present
           ]
 
           sections.append(
@@ -480,6 +500,12 @@ jobs:
           - `infrastructure` repository mechanics: workflows, scripts, CI.
           - `dependency`     integrating an external plugin, pack, or model.
 
+          If `Type labels:` reads `(none)`, the label was dropped at filing
+          time rather than the Issue being typeless. Infer the type from the
+          body's section headings -- `Reproduction Steps` means a defect,
+          `Primary Criteria`/`Goal` a Feature -- and carry on. Do not stop,
+          and do not ask for the Issue to be relabelled.
+
           All five decompose the same way and produce the same
           Implementation Tasks. What differs is which sections the body
           carries, and therefore what you must derive rather than copy.
@@ -527,21 +553,39 @@ jobs:
 
           ACCEPTANCE CRITERIA:
 
-          The Feature and Task templates carry an `Acceptance Criteria`
-          section. The Bug, Infrastructure, and Dependency templates do
-          NOT. When the Issue supplies none, derive them. An Issue that
-          gave you nothing to copy is not a licence to emit vague criteria.
+          All five templates carry an `Acceptance Criteria` section, but
+          what they carry differs, and most of it is boilerplate that says
+          nothing about this particular Issue:
 
-          For a defect, the criteria are the defect no longer occurring.
+          - Feature ships three generic lines plus commented examples.
+          - Task ships the heading with every line commented out, so in
+            practice it arrives empty.
+          - Bug, Infrastructure and Dependency ship generic boilerplate
+            only -- "Expected behavior is restored", "Failure path has been
+            verified", and the like.
+
+          So your job is almost never to copy. SPECIALISE the boilerplate
+          into observations specific to this Issue, and derive outright
+          whatever the template left empty. Passing a generic line through
+          unchanged is the failure mode to avoid: "Expected behavior is
+          restored" is no more checkable than "the bug is fixed", and both
+          count as a planning failure.
+
+          Where the Issue's author replaced the boilerplate with real,
+          specific criteria, those are authoritative -- carry them through
+          and do not water them down.
+
+          For a defect, specialise against the body you were given.
           `Expected Behavior` is the observable statement to assert.
           `Actual Behavior` is what must stop being true. Each entry under
           `Reproduction Steps` is a check that the reproduction no longer
-          reproduces. "The bug is fixed" is not an acceptance criterion and
-          counts as a planning failure.
+          reproduces.
 
           Two criteria are appended to every task automatically -- existing
           tests passing, and `.github/scripts/validate-godot.sh` passing.
-          Do not emit either one yourself.
+          Do not emit either one yourself. The templates list them too, so
+          this is a line you will often see in the Issue and must still
+          leave out.
 
           SCOPE FOR A DEFECT:
 
@@ -1282,6 +1326,23 @@ jobs:
             "plan" \
             "0E8A16" \
             "Intake ticket awaiting planning"
+
+          # The five intake type labels, for exactly the reason above: each is
+          # applied by a template, and a template silently drops a label the
+          # repository does not define. `Build Planner Request` reports the
+          # type to the planner, so a dropped one costs the planner the single
+          # fact that tells it which sections the body carries.
+          #
+          # This heals the vocabulary for the NEXT Issue, not this one -- an
+          # Issue already filed without the label cannot be relabelled from
+          # here, which is why the prompt also handles `(none)`. Colors match
+          # the live repository as of 2026-08-24; `ensure_label` only checks
+          # that the name exists, so these never overwrite an existing label.
+          ensure_label "enhancement"    "a2eeef" "New feature or request"
+          ensure_label "task"           "e7fbdb" "General task that is not necessarily a feature request."
+          ensure_label "bug"            "d73a4a" "Something isn't working"
+          ensure_label "infrastructure" "1f3e3a" "Work related to the repository infrastructure"
+          ensure_label "dependency"     "646fda" "External dependency or asset integration"
 
       - name: Create Implementation Task Sub-Issues
         if: steps.duplicate_check.outputs.already_planned != 'true'
