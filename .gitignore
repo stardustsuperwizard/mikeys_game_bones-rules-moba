@@ -70,6 +70,8 @@ parent.json
 plan.json
 pr.json
 pr-meta.json
+pr-files.txt
+pr-scope.json
 comments.json
 created-issues.json
 closing-issues.json

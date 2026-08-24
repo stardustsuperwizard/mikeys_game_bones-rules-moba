@@ -9,10 +9,14 @@ of that list, and both are string matching rather than judgment:
   mistakes, so a task touching `.tscn`, `.tres`, `project.godot` or `addons/`
   wants a strong model rather than whatever Auto draws. The control plane
   flags it; nothing is blocked.
-- *Can the scripted executor run this at all?* A task expecting to change
+- *Can a workflow-token push carry this?* Anything under
   `.github/workflows/**` or `.github/actions/**` cannot be pushed by
-  `GITHUB_TOKEN`, so `agent-02-execute.yml` must refuse it before paying for
-  a session. That is what RESTRICTED_PREFIXES below is for.
+  `GITHUB_TOKEN`, so the two workflows that push must refuse before paying
+  for a session. That is what RESTRICTED_PREFIXES below is for. It is asked
+  from two directions: `agent-02-execute.yml` asks it of an Issue's declared
+  expected files, before there is any diff to look at (`evaluate`), and
+  `agent-05-fix.yml` asks it of a pull request's actual changed files
+  (`evaluate_paths`). Intent versus fact -- same prefix list either way.
 
 The second restriction is GitHub's, it is deliberate, and there is no
 `permissions:` key that lifts it. Workflow edits require a credential carrying
@@ -49,6 +53,15 @@ Usage:
       "reason": "workflow_scope",
       "expected_paths": [".github/workflows/agent-02-execute.yml"],
       "restricted_paths": [".github/workflows/agent-02-execute.yml"]
+    }
+
+    task_scope.py --paths-file pr-files.txt      # one path per line
+
+    {
+      "pushable": false,
+      "reason": "workflow_scope",
+      "paths": [".github/workflows/agent-05-fix.yml"],
+      "restricted_paths": [".github/workflows/agent-05-fix.yml"]
     }
 
 No third-party dependencies, no network, no `gh`.
@@ -210,26 +223,66 @@ def evaluate(body: str) -> dict:
     }
 
 
+def evaluate_paths(paths) -> dict:
+    """Decide whether a workflow-token push can carry these paths.
+
+    The companion to `evaluate()`, for the caller that has a *diff* rather
+    than an Issue. `agent-02-execute.yml` asks about a task's declared
+    expected files, which are a statement of intent and can be wrong or
+    missing; `agent-05-fix.yml` asks about a pull request's actual changed
+    files, which are exactly what its push will carry. Same restriction, same
+    prefix list, different question -- hence `pushable` rather than
+    `executor_eligible`.
+
+    No parsing here: these arrive as literal paths from the pull request's
+    file list, not quoted out of prose. They are still normalized, so a
+    leading `./` from any other caller cannot slip a restricted path past the
+    prefix test.
+    """
+    normalized = {normalize(path) for path in paths if path.strip()}
+    restricted = restricted_paths(normalized)
+    return {
+        "pushable": not restricted,
+        "reason": "workflow_scope" if restricted else "",
+        "paths": sorted(normalized),
+        "restricted_paths": restricted,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Report an Implementation Task Issue's expected paths and "
-            "whether the scripted executor can run it."
+            "Report which declared or changed paths a workflow token "
+            "cannot push: an Implementation Task Issue's expected files "
+            "with --body-file, or a pull request's changed files with "
+            "--paths-file."
         )
     )
-    parser.add_argument(
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
         "--body-file",
         help="File holding the Issue body. Defaults to reading stdin.",
     )
+    source.add_argument(
+        "--paths-file",
+        help=(
+            "File holding one changed path per line, as from "
+            "`gh api .../pulls/N/files --jq '.[].filename'`. Reports "
+            "pushability instead of executor eligibility."
+        ),
+    )
     args = parser.parse_args()
 
-    if args.body_file:
+    if args.paths_file:
+        with open(args.paths_file, encoding="utf-8") as handle:
+            result = evaluate_paths(handle.read().splitlines())
+    elif args.body_file:
         with open(args.body_file, encoding="utf-8") as handle:
-            body = handle.read()
+            result = evaluate(handle.read())
     else:
-        body = sys.stdin.read()
+        result = evaluate(sys.stdin.read())
 
-    json.dump(evaluate(body), sys.stdout, indent=2, sort_keys=True)
+    json.dump(result, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
 

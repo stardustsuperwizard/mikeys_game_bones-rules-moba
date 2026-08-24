@@ -572,7 +572,7 @@ no picker involved:
 
 1. Checks the Issue is open, labeled `implementation`, has no open
    `blocked-by` Issue, expects to change no path this workflow's token cannot
-   push (see *Tasks the scripted executor cannot run*), and has no pull
+   push (see *Paths the agent workflows cannot push*), and has no pull
    request already open for it — any failure gets a comment explaining which,
    and the label removed, not a red run.
 2. Runs a Copilot CLI session (`EXECUTOR_MODELS`) against the Issue body plus
@@ -609,7 +609,7 @@ itself failing — comments on the Issue and removes `agent:execute` rather
 than opening a broken PR, so re-adding the label is a clean retry in that
 case.
 
-#### Tasks the scripted executor cannot run
+#### Paths the agent workflows cannot push
 
 `GITHUB_TOKEN` cannot create or update files under `.github/workflows/` or
 `.github/actions/`. There is no `permissions:` key that grants it: GitHub
@@ -632,7 +632,7 @@ three times: the planner labelled all four of its tasks `machine`, three of
 them (#168, #169, #170) edited workflow files, and the work had to be
 hand-authored afterwards as #172, #173 and #174.
 
-So the restriction is now stated in three places, all reading the same rule
+So the restriction is now stated in four places, all reading the same rule
 out of `.github/scripts/task_scope.py`:
 
 - **The planner** marks such a task when it generates it — `human-credentials`
@@ -644,20 +644,49 @@ out of `.github/scripts/task_scope.py`:
   `[impl]` Issue the planner never saw is caught too. Adding `agent:execute`
   gets a comment naming the restriction and the alternative, and the label
   removed — no session, no credits.
+- **The fixer** refuses it too, in `Resolve Pull Request`, before
+  `Build Fix Request` reads the verdict. Same comment-and-drop-the-label
+  shape, same reason.
 - **The control plane** prints 🔑 against it, because *Ready to dispatch*
   otherwise tells you to paste it into a Copilot session.
 
-Detection keys on the task's declared expected files, never on its title.
+The executor and the fixer ask the same question from opposite directions,
+and the difference matters. The executor runs before any diff exists, so it
+asks about the Issue's *declared expected files* — a statement of intent,
+which can be wrong, vague, or absent. The fixer has a pull request in hand,
+so it asks about its *actual changed files*, which are exactly what the push
+will carry. `evaluate()` answers the first, `evaluate_paths()` the second,
+and both test one prefix list.
+
+Detection keys on those file lists, never on a title. For the Issue side,
 `task_scope.py` reads the `## Files or Subsystems Expected to Change` section
 and takes both backticked paths (how a hand-written Issue writes one) and
 bare tokens on bullet lines (how the planner writes one — its `expected_files`
 are plain JSON strings rendered straight into a `- ` list, so a generated
-task's paths carry no backticks at all). The same module supplies the
+task's paths carry no backticks at all). For the pull request side there is
+nothing to parse — the API returns literal paths — but there is a ceiling to
+respect: the fixer reads them from `gh api --paginate .../pulls/N/files`,
+not from `gh pr view --json files`, because the latter is GraphQL and stops
+at the first 100 changed files. A restricted path past that boundary would
+read as absent and cost exactly the session the guard exists to save. Note
+also that the REST key is `filename` where GraphQL's is `path`; the wrong
+one yields an empty list rather than an error. The same module supplies the
 delicate-paths rule behind the control plane's ⚠️.
+
+The fixer's exposure is the one the executor guard could not close. Since
+the executor now refuses a workflow-scoped Issue outright, no `agent-exec/*`
+branch touching those paths is ever produced by automation — but a pull
+request authored by a human-credentialed session carries exactly those edits,
+goes through the same reviewer, and can collect a `FIX` verdict like any
+other. Its failure was also the worse of the two: the executor's rejected
+push left no branch behind, whereas the fixer commits onto an existing
+branch that already carries work, so the correction lived only on the runner
+and the pull request was left untouched.
 
 **Uncertain means eligible.** An Issue with no expected-files section, an
 empty one, or one naming no recognisable path dispatches exactly as it did
-before the guard existed, and so does one whose parse fails outright. A false
+before the guard existed, and so does one whose parse fails outright. A pull
+request whose file list cannot be read is treated the same way. A false
 positive blocks real work; a false negative costs one session and comments
 why.
 
@@ -809,7 +838,17 @@ no-op, not a wasted session — and applies one bounded correction against its
 **Required Before Merge** list on the same branch. `PLANNING FAILURE` and
 `DESIGN AMBIGUITY` verdicts get a comment explaining why the fixer won't
 touch them instead of a session — re-plan the former, decide the latter
-yourself. The equivalent local path is `/fix-review <pr-number>` or the
+yourself.
+
+Two refusals come before the verdict is even read, because they are about
+what this workflow can *push* rather than what the pull request deserves: a
+pull request from a fork, whose head branch this token cannot write, and one
+whose diff touches `.github/workflows/` or `.github/actions/`, which it also
+cannot write — see *Paths the agent workflows cannot push*. Both comment
+and drop `agent:fix` without starting a session. Neither is a red run: a
+refusal is not a malfunction.
+
+The equivalent local path is `/fix-review <pr-number>` or the
 `fixer` Claude Code agent; commenting `@copilot` on the PR still works too,
 outside this repository's scripted path. A fix push gets the same
 independent check run an executor push does — see *The independent
@@ -855,7 +894,7 @@ Each implementation sub-issue:
 - has the same milestone as its parent Feature;
 - carries `implementation` and `machine`, plus `human-credentials` when its
   expected files land in `.github/workflows/` or `.github/actions/` (see
-  *Tasks the scripted executor cannot run*), and nothing else — the planner
+  *Paths the agent workflows cannot push*), and nothing else — the planner
   applies no `agent:*` label, because those are dispatch triggers a human
   adds and a pre-applied trigger is a spent one;
 - records sibling ordering with GitHub issue dependencies;
@@ -1244,7 +1283,7 @@ by `implementation_model` in the output, not a credits figure.
 | `.github/workflows/agent-02-execute.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:execute`; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
-| `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix`; ends with an independent validation job on the pushed SHA |
+| `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix`; refuses fork PRs and diffs it cannot push before spending a session; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/agent-06-metrics.yml` | Posts an `agent-metrics.py` report as an Issue comment, on `metrics:update` or dispatch |
 | `.github/workflows/godot-validation.yml` | The one reusable validation job (`workflow_call`); called by `godot-ci-validation.yml`, `agent-02-execute.yml`, and `agent-05-fix.yml` |
 | `.github/workflows/godot-ci-validation.yml` | Human-authored `pull_request` validation gate (`paths-ignore` deny-list) plus a manual dispatch; calls `godot-validation.yml` |
@@ -1254,7 +1293,7 @@ by `implementation_model` in the output, not a credits figure.
 | `.github/actions/extract-review-verdict` | Turns a review session's text into a machine-readable `VERDICT` |
 | `.github/actions/lint-gdscript` | Diff-scoped `gdformat` check/fix, used by `agent-02-execute.yml` and `gdscript-lint.yml` |
 | `.github/scripts/render-dashboard.py` | Derives every task and Feature state from the repository graph |
-| `.github/scripts/task_scope.py` | Reads a task's expected-files section: the ⚠️ delicate-paths rule, and the executor-eligibility rule `agent-01-planner.yml`, `agent-02-execute.yml` and the control plane all share |
+| `.github/scripts/task_scope.py` | The one path rule the pushing workflows share: the ⚠️ delicate-paths flag, executor eligibility from an Issue's expected files (`agent-01-planner.yml`, `agent-02-execute.yml`, the control plane), and pushability from a pull request's changed files (`agent-05-fix.yml`) |
 | `.github/agents/01-planner.agent.md` | Planner role, Issue promotion criteria |
 | `.github/agents/02-executor.agent.md` | Executor role, scope boundaries |
 | `.github/agents/03-reviewer.agent.md` | Reviewer role, verdict classification |

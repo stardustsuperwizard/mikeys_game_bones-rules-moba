@@ -129,25 +129,143 @@ jobs:
             --json number,url,headRefName,isCrossRepository \
             > pr-meta.json
 
-          # A fork PR's branch cannot be pushed to with this token. Fail
-          # fast and say why, rather than discovering it after paying for a
-          # Copilot session.
-          if [ "$(jq -r '.isCrossRepository' pr-meta.json)" = "true" ]; then
-            echo "::error::PR #$PR_NUMBER is from a fork. This workflow" \
-                 "pushes to the head branch directly and cannot do that" \
-                 "across repositories. Fix it by hand or from a branch in" \
-                 "this repository instead."
-            exit 1
-          fi
-
           echo "head_ref=$(jq -r '.headRefName' pr-meta.json)" >> "$GITHUB_OUTPUT"
           echo "pr_url=$(jq -r '.url' pr-meta.json)" >> "$GITHUB_OUTPUT"
+
+          # Both checks below are about *this workflow's credentials*, not
+          # about whether the pull request deserves a fix. Both are cheap,
+          # both are certain, and both are answered before "Build Fix
+          # Request" so a refusal costs no Copilot session -- which is the
+          # whole point: this workflow's push is the last thing it does, so
+          # anything it cannot push is discovered after the session is paid
+          # for unless it is caught here.
+          #
+          # Neither is a red run. A refusal is not a malfunction, and
+          # "Report Refusal" below says which one applies -- the same
+          # comment-and-drop-the-label shape "Require a FIX Verdict" already
+          # uses, and that agent-02-execute.yml's "Report Guard Failure"
+          # uses for the identical restriction on the Issue side.
+
+          # A fork PR's branch cannot be pushed to with this token.
+          if [ "$(jq -r '.isCrossRepository' pr-meta.json)" = "true" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=fork" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # GITHUB_TOKEN cannot write `.github/workflows/**` or
+          # `.github/actions/**`. There is no `permissions:` key that grants
+          # it -- GitHub reserves workflow edits for credentials carrying the
+          # `workflow` OAuth scope, deliberately, so that a compromised
+          # workflow cannot rewrite its own CI.
+          #
+          # Read from the pull request's *changed files*, not from the
+          # originating Issue's expected files. An Issue declares intent and
+          # can be wrong or absent; the diff is exactly what the push will
+          # carry, and by this point it exists. (agent-02-execute.yml asks
+          # the same question of an Issue because it runs before any diff
+          # does.)
+          #
+          # Uncertain means eligible: if the file list cannot be read, this
+          # dispatches exactly as it did before the check existed. A false
+          # positive blocks a real fix cycle; a false negative costs one
+          # session and comments why.
+          #
+          # Read from the paginated REST endpoint, not from
+          # `gh pr view --json files`. That one is GraphQL and returns only
+          # the first 100 files, so on a large pull request a restricted
+          # path past the boundary would read as absent -- costing exactly
+          # the session this check exists to save, silently. `--paginate`
+          # has no such ceiling.
+          #
+          # The REST key is `filename`; GraphQL's is `path`. Using the wrong
+          # one yields an empty list rather than an error, which this guard
+          # would read as "nothing restricted" -- the failure that hides.
+          if ! gh api --paginate \
+                 "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+                 --jq '.[].filename' > pr-files.txt \
+              || ! python3 .github/scripts/task_scope.py \
+                   --paths-file pr-files.txt > pr-scope.json
+          then
+            echo "::warning::Could not read this pull request's changed" \
+              "files; treating it as pushable."
+            echo '{"pushable": true, "restricted_paths": []}' > pr-scope.json
+          fi
+
+          if [ "$(jq -r '.pushable' pr-scope.json)" = "false" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=workflow_scope" >> "$GITHUB_OUTPUT"
+            echo "restricted_paths=$(
+              jq -r '[.restricted_paths[] | "`\(.)`"] | join(", ")' \
+                pr-scope.json
+            )" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Report Refusal
+        if: steps.pr.outputs.ok != 'true'
+        shell: bash
+        # Both values reach the script through the environment rather than
+        # `${{ }}`. For `restricted_paths` that is load-bearing: it is quoted
+        # out of a pull request's file list and carries backticks by
+        # construction, and `${{ }}` would paste those into a double-quoted
+        # bash string, where a backtick is command substitution. A variable
+        # expansion is not re-evaluated. `reason` is workflow-authored from a
+        # fixed set and safe either way -- it is here so the step has one
+        # rule rather than two, and so it stays safe if it ever stops being
+        # workflow-authored.
+        env:
+          REASON: ${{ steps.pr.outputs.reason }}
+          RESTRICTED_PATHS: ${{ steps.pr.outputs.restricted_paths }}
+        run: |
+          set -euo pipefail
+
+          case "$REASON" in
+            fork)
+              MSG="This pull request is from a fork. This workflow pushes to the head branch directly and cannot do that across repositories. Fix it by hand, or from a branch in this repository."
+              ;;
+            workflow_scope)
+              MSG="This pull request changes $RESTRICTED_PATHS, and this workflow cannot push a correction to it."
+              MSG="$MSG"$'\n\n'"\`GITHUB_TOKEN\` is not allowed to create or update files under \`.github/workflows/\` or \`.github/actions/\`. No \`permissions:\` key grants it: GitHub reserves workflow edits for credentials carrying the \`workflow\` OAuth scope, so that a compromised workflow cannot rewrite its own CI. The restriction is deliberate and this workflow respects it rather than working around it."
+              MSG="$MSG"$'\n\n'"Refused before the fixer session starts, because pushing is the *last* thing this workflow does. Without this check the session runs, produces a correction, and loses it at the push -- leaving this pull request untouched and the reason visible only in the run log."
+              MSG="$MSG"$'\n\n'"**Apply the fix from a human-credentialed session instead.** Whoever authored this branch can already write these paths; Claude Code -- terminal, desktop, web, or Remote Control -- pushes with your own credentials. Read the review verdict comment above, apply the correction it asks for, and push to this branch. Re-running the reviewer afterwards works normally: \`agent:review\` has nothing to push and is not affected by this."
+              ;;
+            *)
+              MSG="Refused for an unrecognised reason: \`$REASON\`."
+              ;;
+          esac
+
+          {
+            echo "<!-- agent-fix-skipped -->"
+            echo ""
+            echo "## Fix cycle not started"
+            echo ""
+            echo "$MSG"
+          } > skip-comment.md
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file skip-comment.md
+
+          gh pr edit "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "agent:fix" || true
+
+          cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
       # No model call -- pure gh/jq/python -- so it is cheap to run
       # unconditionally just to learn the current verdict, before deciding
       # whether a Copilot session is warranted at all.
+      #
+      # "Unconditionally" now means "whenever this workflow could actually
+      # push the result". Cheap or not, running it after a refusal would
+      # leave a verdict output behind for "Require a FIX Verdict" to comment
+      # on a second time, under the wrong reason.
       - name: Build Fix Request
         id: build
+        if: steps.pr.outputs.ok == 'true'
         uses: ./.github/actions/build-fix-request
         with:
           mode: pr
@@ -158,7 +276,9 @@ jobs:
       # Every other outcome -- including "no verdict comment at all" -- gets
       # a comment explaining why nothing happened, not a Copilot session.
       - name: Require a FIX Verdict
-        if: steps.build.outputs.verdict != 'FIX'
+        if: >-
+          steps.pr.outputs.ok == 'true' &&
+          steps.build.outputs.verdict != 'FIX'
         shell: bash
         run: |
           set -euo pipefail
