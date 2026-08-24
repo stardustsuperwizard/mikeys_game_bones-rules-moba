@@ -64,14 +64,18 @@ on:
 
 jobs:
   godot-headless-validation:
+    name: Godot Headless Validation
     runs-on: ubuntu-latest
 
-    # `checks: write` is requested by the caller, not here: a reusable
-    # workflow cannot widen the permissions it is called with, and the
-    # pull_request gate has no reason to hold it. When a caller does not
-    # grant it, `head-sha` is empty too, so nothing tries to use it.
+    # Both permissions are declared here so callers that grant `checks: write`
+    # can pass it through -- a reusable workflow's job can only maintain or
+    # reduce the permissions it receives, never add new ones. Callers that
+    # omit `checks: write` (e.g. the pull_request gate) reduce it away; they
+    # also pass an empty `head-sha`, so the Publish Check Run step is skipped
+    # and the reduced scope causes no 403.
     permissions:
       contents: read
+      checks: write
 
     outputs:
       result: ${{ steps.validate.outputs.result }}
@@ -104,7 +108,7 @@ jobs:
           # ends the step before `status` is ever written.
           status=0
           .github/scripts/validate-godot.sh "$GITHUB_WORKSPACE" \
-            > validate-output.txt 2>&1 || status=$?
+            > "$RUNNER_TEMP/validate-output.txt" 2>&1 || status=$?
 
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
@@ -114,7 +118,7 @@ jobs:
             echo "result=failure" >> "$GITHUB_OUTPUT"
           fi
 
-          cat validate-output.txt
+          cat "$RUNNER_TEMP/validate-output.txt"
 
       - name: Publish Check Run
         if: always() && inputs.head-sha != ''
@@ -139,27 +143,27 @@ jobs:
           # at 65535 bytes and a Godot import pass can exceed that on its own.
           {
             echo '```'
-            tail -c 4000 validate-output.txt 2>/dev/null || echo "(no output captured)"
+            tail -c 4000 "$RUNNER_TEMP/validate-output.txt" 2>/dev/null || echo "(no output captured)"
             echo '```'
-          } > check-summary.txt
+          } > "$RUNNER_TEMP/check-summary.txt"
 
           jq -n \
             --arg name "$CHECK_NAME" \
             --arg sha "$HEAD_SHA" \
             --arg conclusion "$conclusion" \
             --arg title "$title" \
-            --rawfile text check-summary.txt \
+            --rawfile text "$RUNNER_TEMP/check-summary.txt" \
             '{
                name: $name,
                head_sha: $sha,
                status: "completed",
                conclusion: $conclusion,
                output: {title: $title, summary: $title, text: $text}
-             }' > check-run.json
+             }' > "$RUNNER_TEMP/check-run.json"
 
           gh api "repos/$GITHUB_REPOSITORY/check-runs" \
             --method POST \
-            --input check-run.json \
+            --input "$RUNNER_TEMP/check-run.json" \
             > /dev/null
 
           echo "Published '$CHECK_NAME' ($conclusion) on $HEAD_SHA."
