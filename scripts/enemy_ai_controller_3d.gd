@@ -18,9 +18,9 @@ extends SimpleAIController
 # becomes invalid or leaves range.
 var _basic_attack_pending := false
 
-# The target of the pending basic attack. get_attack_target() cancels/updates
-# the inherited movement order so this keeps a separate reference alive across
-# frames for the attack cycle to actually run against.
+# The target of the pending basic attack. Held separately from SimpleAIController's
+# `target`, which the inherited aggro/leash logic is free to drop or repoint
+# between frames, so the attack cycle always has something to run against.
 var _pending_attack_target: Actor = null
 
 
@@ -37,61 +37,73 @@ func _physics_process(delta: float) -> void:
 		combatant.tick(delta)
 
 		# Fire the basic attack when a target is pending and the combatant is ready.
-		# _basic_attack_pending is set by get_attack_target() when the enemy enters
-		# range; _pending_attack_target survives any movement order changes so the
-		# attack cycle has something to run against. Cleared here after the combatant
-		# accepts the call, or if the target becomes invalid.
-		if _basic_attack_pending and is_instance_valid(_pending_attack_target):
-			var target_combatant := (
-				_pending_attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
-			)
-			if target_combatant:
-				if combatant.basic_attack(target_combatant):
-					_basic_attack_pending = false
-					_pending_attack_target = null
-			else:
-				# Target has no MobaCombatant; clear pending so it doesn't remain
-				# latched indefinitely.
-				_basic_attack_pending = false
-				_pending_attack_target = null
-		elif _basic_attack_pending:
-			_basic_attack_pending = false
-			_pending_attack_target = null
+		# _basic_attack_pending is set by get_attack_target() once the inherited
+		# chase has closed to attack_range. basic_attack() returns false while the
+		# cycle is still winding up or recovering, so the pending target is held
+		# across those frames and only dropped once the swing is accepted.
+		if not _basic_attack_pending:
+			return
+
+		if not is_instance_valid(_pending_attack_target):
+			# Target despawned or was freed mid-cycle.
+			_clear_pending_attack()
+			return
+
+		var target_combatant := (
+			_pending_attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
+		)
+		if target_combatant == null:
+			# Target runs on the framework attack path, not the ruleset; nothing
+			# for basic_attack() to resolve against, so don't latch it.
+			_clear_pending_attack()
+			return
+
+		if combatant.basic_attack(target_combatant):
+			_clear_pending_attack()
 
 
 # Overrides SimpleAIController's get_attack_target to route basic attacks through
 # the ruleset when a MobaCombatant is present.
 #
-# When this actor has a MobaCombatant:
-# - Record the would-be target and schedule the attack cycle in _physics_process.
-# - Return null so the framework's Actor._resolve_attack() does NOT fire for the
-#   same input (architecture constraint: ruleset path wins).
-# Gate the flag-set on the flag not already being live so that standing still in
-# range does not repeatedly call get_attack_target().
+# When this actor has a MobaCombatant this never returns a target: the ruleset
+# path (MobaCombatant.basic_attack, driven from _physics_process) owns combat
+# resolution, and returning a target would make ActorBody3D additionally fire
+# Actor.try_attack() for the same swing (architecture constraint: ruleset path
+# wins). Instead the would-be target is recorded for the attack cycle.
 #
-# When this actor has no MobaCombatant:
-# - Fall through to SimpleAIController's inherited get_attack_target() behavior,
-#   using the flat Actor.attack_cooldown and Actor.try_attack() path.
+# When this actor has no MobaCombatant it falls through entirely to
+# SimpleAIController's inherited behavior -- the flat Actor.attack_cooldown and
+# Actor.try_attack() path -- which stays intact for actors without a combatant.
 func get_attack_target() -> Actor:
+	var combatant := _combatant()
+	if combatant == null:
+		return super.get_attack_target()
+
+	# Deaggroed, leashed home, or chased out of range: drop the pending cycle
+	# rather than latching a stale target the enemy would keep swinging at.
+	# MobaCombatant.basic_attack() range-gates on the weapon independently, so
+	# this is about not holding the reference, not about landing hits.
 	if target == null:
+		_clear_pending_attack()
 		return null
 
 	if actor.global_position.distance_to(target.global_position) > attack_range:
+		_clear_pending_attack()
 		return null
 
-	# When this actor has a MobaCombatant the ruleset basic-attack path
-	# (MobaCombatant.basic_attack) handles combat resolution, driven in
-	# _physics_process once the enemy closes range.
-	# Gate the flag-set on the flag not already being live so that standing
-	# still in range does not repeatedly call get_attack_target().
-	if _combatant() != null:
-		if not _basic_attack_pending:
-			_pending_attack_target = target
-			_basic_attack_pending = true
-		return null
+	# Assigned unconditionally so a re-target while the previous cycle is still
+	# pending re-points at the current target instead of latching the old one.
+	# PlayerController3D gates this on the flag purely to avoid repeat
+	# cancel_order() calls; there is no movement order to cancel here.
+	_pending_attack_target = target
+	_basic_attack_pending = true
+	return null
 
-	# No MobaCombatant; use the inherited framework path.
-	return target
+
+# Drops any pending basic-attack cycle.
+func _clear_pending_attack() -> void:
+	_basic_attack_pending = false
+	_pending_attack_target = null
 
 
 # Returns the MobaCombatant child of the actor, or null if there isn't one.
