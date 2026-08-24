@@ -545,7 +545,7 @@ jobs:
         id: pr
         shell: python
         env:
-          EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.assistant-text-file }}
+          EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.final-text-file }}
           EXECUTOR_MODEL: ${{ steps.exec-session.outputs.resolved-model }}
           BRANCH_RESUMED: ${{ steps.branch-check.outputs.exists }}
         run: |
@@ -1128,6 +1128,12 @@ jobs:
 
           tail = log.read_text(errors="replace")[-4000:] if log.exists() else ""
 
+          # A byte-count tail lands mid-line, so the block opens on a
+          # fragment like "ilities/moba_ability_library.gd:53)". Drop the
+          # partial first line -- unless that is the only line there is.
+          if "\n" in tail.strip():
+              tail = tail.split("\n", 1)[1]
+
           # Godot output is arbitrary text and can contain a ``` sequence
           # (a GDScript doc comment quoting one is enough). Fence the block
           # with a run of backticks longer than anything inside it, per
@@ -1329,7 +1335,7 @@ jobs:
           REVIEW_FILE: ${{ steps.review-verdict.outputs.review-file }}
           REVIEWER_MODEL: ${{ steps.review-session.outputs.resolved-model }}
           FIX_APPLIED: ${{ steps.fix-eval.outputs.fix_applied }}
-          FIX_TEXT_FILE: ${{ steps.fix-session.outputs.assistant-text-file }}
+          FIX_TEXT_FILE: ${{ steps.fix-session.outputs.final-text-file }}
           FIXER_MODEL: ${{ steps.fix-session.outputs.resolved-model }}
         run: |
           import os

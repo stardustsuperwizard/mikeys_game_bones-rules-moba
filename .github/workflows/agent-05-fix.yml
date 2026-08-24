@@ -287,7 +287,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          REPORT="${{ steps.session.outputs.assistant-text-file }}"
+          REPORT="${{ steps.session.outputs.final-text-file }}"
 
           {
             echo "<!-- agent-fix-applied -->"

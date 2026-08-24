@@ -153,9 +153,24 @@ jobs:
 
           # 4000 chars, not the whole log: the Checks API caps `output.text`
           # at 65535 bytes and a Godot import pass can exceed that on its own.
+          #
+          # `tail -c` cuts mid-line, so the block would open on a fragment.
+          # `sed 1d` drops that partial first line; the `wc -l` guard keeps a
+          # log short enough to have only one line from being emptied by it.
+          if [ -s "$RUNNER_TEMP/validate-output.txt" ]; then
+            tail -c 4000 "$RUNNER_TEMP/validate-output.txt" \
+              > "$RUNNER_TEMP/check-tail.txt"
+
+            if [ "$(wc -l < "$RUNNER_TEMP/check-tail.txt")" -gt 1 ]; then
+              sed -i 1d "$RUNNER_TEMP/check-tail.txt"
+            fi
+          else
+            echo "(no output captured)" > "$RUNNER_TEMP/check-tail.txt"
+          fi
+
           {
             echo '```'
-            tail -c 4000 "$RUNNER_TEMP/validate-output.txt" 2>/dev/null || echo "(no output captured)"
+            cat "$RUNNER_TEMP/check-tail.txt"
             echo '```'
           } > "$RUNNER_TEMP/check-summary.txt"
 
