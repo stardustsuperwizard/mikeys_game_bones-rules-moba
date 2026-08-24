@@ -231,6 +231,23 @@ func _run() -> void:
 	else:
 		print("PASS unreachable order abandoned by the stall guard")
 
+	# --- stuck capture recovery (AC #6) --------------------------------
+	# Simulate stuck capture by forcing Input.mouse_mode without button down.
+	# The camera reconciliation should auto-release it.
+	var initial_mode := Input.mouse_mode
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+	# Wait for recovery (camera's reconciliation in _process)
+	var recovered := await _wait_until(
+		func() -> bool: return Input.mouse_mode != Input.MOUSE_MODE_CAPTURED,
+		120
+	)
+
+	if recovered:
+		print("PASS stuck capture recovered automatically")
+	else:
+		_fail("stuck capture: capture did not recover (still in mode %d after 120 frames)" % Input.mouse_mode)
+
 	_finish()
 
 

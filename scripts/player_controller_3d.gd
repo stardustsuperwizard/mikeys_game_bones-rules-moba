@@ -132,6 +132,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		# happens to be under the crosshair rather than what the player aimed at.
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			_issue_order_from_click(get_viewport().get_mouse_position())
+		else:
+			print("Left click ignored: mouse is captured by camera look")
 	# Ability slots: keys 1-4 / gamepad A/B/X/Y.
 	elif event.is_action_pressed("ability_1"):
 		_activate_slot(1)
@@ -256,6 +258,7 @@ func _issue_order_from_click(screen_position: Vector2) -> void:
 
 	cancel_order()
 	if hit.is_empty():
+		print("Left click hit nothing (no order issued)")
 		return
 
 	var collider := hit["collider"] as Node

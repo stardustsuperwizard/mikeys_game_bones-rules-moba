@@ -108,6 +108,12 @@ func recenter() -> void:
 
 
 func _process(delta: float) -> void:
+	# Recover from stuck mouse capture: if the mouse is captured but the right
+	# button is not pressed, release capture. This handles cases where the
+	# release event was lost (focus change, dropped OS event, trackpad gesture).
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
 	_update_transform(delta)
 
 
