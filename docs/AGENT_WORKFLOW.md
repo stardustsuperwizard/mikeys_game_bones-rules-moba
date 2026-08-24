@@ -334,9 +334,11 @@ Implementation Task
 │ agent-02-execute.yml        │       │
 │ Copilot CLI, spends AI      │       ▼
 │ credits: implements,        │  draft PR
-│ opens the PR, then          │
+│ opens a draft PR, then      │
 │ validates, formats, self-   │
-│ reviews, self-fixes         │
+│ reviews, self-fixes, and    │
+│ marks it ready only if      │
+│ its own validation passes   │
 └─────────────────────────────┘
         │                             │
         └──────────────┬──────────────┘
@@ -574,8 +576,8 @@ no picker involved:
    `AGENTS.md` and `.github/copilot-instructions.md`.
 3. Requires an actual commit to exist afterward — not just a session that
    talked as if it finished — then immediately opens the pull request
-   itself, on branch `agent-exec/<issue#>`, with `Closes #n` already in the
-   body.
+   itself, on branch `agent-exec/<issue#>`, as a **draft**, with `Closes #n`
+   already in the body.
 4. Re-runs `validate-godot.sh` and applies `gdformat` to any changed
    GDScript, pushing any formatting fix onto that already-open pull
    request.
@@ -583,6 +585,10 @@ no picker involved:
    `agent-04-review.yml` uses) against the already-open pull request. If
    that verdict is `FIX`, runs one bounded self-fix pass (`FIXER_MODELS`)
    and pushes it too.
+6. Runs `validate-godot.sh` one last time against whatever commit the
+   branch ends up pointing at, writes the exit status into the pull
+   request body, and marks it ready for review if — and only if — that run
+   passed.
 
 A `PASS` (or an unfixed `FIX`) is posted to the pull request as the real
 verdict, `review:*` label included — so adding `agent:review` to it is a
@@ -595,6 +601,42 @@ pull request exists — no commit, an uncommitted session, `gh pr create`
 itself failing — comments on the Issue and removes `agent:execute` rather
 than opening a broken PR, so re-adding the label is a clean retry in that
 case.
+
+#### Why the draft state carries the validation result
+
+Step 6 is the only statement about validation on an executor pull request
+that is not a session talking about itself. The completion report becomes
+the body verbatim; the pre-PR review and fix comments are written by
+sessions too. None of that is checked against anything, and the prose looks
+the same whether a session validated, skipped validation and said so, or
+merely claimed a run it never made — all three have happened.
+
+So the body leads with a `## Workflow-verified validation` section that only
+`agent-02-execute.yml` writes, and the pull request stays a draft until that
+run passes. **A draft executor PR is one no verified validation stands
+behind.** Read the section, not the report.
+
+This is load-bearing on one specific path. An executor is told not to commit
+work it has not validated, and one that follows that rule leaves the tree
+dirty; `Commit Leftover Changes` then commits it anyway, so the work is not
+thrown away. That is the right trade — but it manufactures the very "a
+commit exists" signal the next step says it trusts, so an unvalidated
+session's work can and does reach a pull request. Draft-until-verified is
+what keeps that from being indistinguishable from finished work.
+
+Draft alone would not have been enough, though. The saved views and the
+control plane already read draft as *Implementing* and ready as *Awaiting
+review*, which is most of the distinction being drawn for free — but
+*Implementing* means "a session is working on it", and a pull request whose
+validation failed is not being worked on by anyone. So step 6 also applies a
+`validation:failed` label when its run does not pass, and removes it when a
+later run does. The control plane tests that label ahead of draft-ness (see
+**The control plane**), which is what stops a broken branch from parking
+itself under *Implementing* indefinitely.
+
+Two states, then, and they are not the same thing: **draft** means no
+verified validation stands behind this pull request *yet*; **draft plus
+`validation:failed`** means one ran and did not pass.
 
 Run it by hand against any Issue number to re-check:
 
@@ -715,7 +757,7 @@ The views worth having, and the queries behind them:
 | Planned Features | `is:issue is:open label:planned` |
 | Open tasks | `is:issue is:open label:implementation` |
 | Awaiting review | `is:pr is:open draft:false -label:"review:pass","review:fix","review:planning-failure","review:design-ambiguity"` |
-| Needs your attention | `is:pr is:open label:"review:fix","review:planning-failure","review:design-ambiguity"` |
+| Needs your attention | `is:pr is:open label:"review:fix","review:planning-failure","review:design-ambiguity","validation:failed"` |
 | Ready to merge | `is:pr is:open label:"review:pass"` |
 
 Quote any label containing a colon. `label:agent:plan` is parsed as a label
@@ -759,6 +801,7 @@ the moment it runs, and stored nowhere:
 | Issue closed | Done |
 | Open `blocked-by` issues | Blocked — dependencies |
 | No linked PR | **Ready to dispatch** |
+| `validation:failed` | **Needs your attention** |
 | Draft PR open | Implementing |
 | PR ready, no `review:*` | Awaiting review |
 | `review:fix` / `-planning-failure` / `-design-ambiguity` | **Needs your attention** |
@@ -776,6 +819,21 @@ Order matters in the task table: a draft PR reads as *Implementing* even when
 a `review:fix` label is still present, because that label persists through the
 bounded correction that answers it. Testing draft-ness first is what stops
 every in-flight fix from showing as waiting on you.
+
+`validation:failed` is tested *ahead* of draft-ness, and that ordering is the
+whole reason the label exists. `agent-02-execute.yml` marks a pull request
+ready only after its own `validate-godot.sh` run passes, so draft is no
+longer only a transient "a session is mid-flight" state — a branch that fails
+validation stays draft until a human intervenes. Left to the draft rule alone
+it would file itself under *Implementing* forever, which is precisely the
+kind of quietly-hidden failure this dashboard exists to prevent. The label is
+what separates *not finished yet* from *finished and broken*.
+
+It is also deliberately independent of the `review:*` vocabulary: those
+record a judgment about the code, this records that the build is broken. A
+`review:pass` sitting on a branch that no longer validates is exactly the
+combination worth surfacing rather than averaging away, so `validation:failed`
+wins over all of them.
 
 #### Rendering it
 

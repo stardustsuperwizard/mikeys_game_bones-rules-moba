@@ -91,7 +91,14 @@ jobs:
       # this session also edits files and re-runs validation, not just
       # reads. The Copilot CLI rejects any value below 30 before it starts
       # work, so 30 is the floor, not a tuning choice.
-      FIXER_MAX_AI_CREDITS: "100"
+      #
+      # Raised from 100 after the pre-PR fix pass on #165 stopped mid-task
+      # with `budget_exhausted` at that cap. A fix session that runs out
+      # of budget is the expensive failure here: it has already paid for
+      # the review that found the problem, and it leaves a partial edit
+      # for a human to finish. Kept in lockstep with the same variable in
+      # agent-02-execute.yml's pre-PR pass.
+      FIXER_MAX_AI_CREDITS: "150"
 
       # Context only -- the checked-out repository is the source of truth
       # for editing. Past this the diff shown to the model is truncated.
