@@ -252,8 +252,10 @@ def evaluate_paths(paths) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Report an Implementation Task Issue's expected paths and "
-            "whether the scripted executor can run it."
+            "Report which declared or changed paths a workflow token "
+            "cannot push: an Implementation Task Issue's expected files "
+            "with --body-file, or a pull request's changed files with "
+            "--paths-file."
         )
     )
     source = parser.add_mutually_exclusive_group()

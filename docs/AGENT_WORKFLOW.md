@@ -664,9 +664,14 @@ and takes both backticked paths (how a hand-written Issue writes one) and
 bare tokens on bullet lines (how the planner writes one — its `expected_files`
 are plain JSON strings rendered straight into a `- ` list, so a generated
 task's paths carry no backticks at all). For the pull request side there is
-nothing to parse: `gh pr view --json files` already returns literal paths.
-The same module supplies the delicate-paths rule behind the control plane's
-⚠️.
+nothing to parse — the API returns literal paths — but there is a ceiling to
+respect: the fixer reads them from `gh api --paginate .../pulls/N/files`,
+not from `gh pr view --json files`, because the latter is GraphQL and stops
+at the first 100 changed files. A restricted path past that boundary would
+read as absent and cost exactly the session the guard exists to save. Note
+also that the REST key is `filename` where GraphQL's is `path`; the wrong
+one yields an empty list rather than an error. The same module supplies the
+delicate-paths rule behind the control plane's ⚠️.
 
 The fixer's exposure is the one the executor guard could not close. Since
 the executor now refuses a workflow-scoped Issue outright, no `agent-exec/*`
