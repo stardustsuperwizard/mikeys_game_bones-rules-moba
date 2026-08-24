@@ -234,10 +234,10 @@ def evaluate_paths(paths) -> dict:
     prefix list, different question -- hence `pushable` rather than
     `executor_eligible`.
 
-    No parsing here: these arrive as literal paths from
-    `gh pr view --json files`, not quoted out of prose. They are still
-    normalized, so a leading `./` from any other caller cannot slip a
-    restricted path past the prefix test.
+    No parsing here: these arrive as literal paths from the pull request's
+    file list, not quoted out of prose. They are still normalized, so a
+    leading `./` from any other caller cannot slip a restricted path past the
+    prefix test.
     """
     normalized = {normalize(path) for path in paths if path.strip()}
     restricted = restricted_paths(normalized)
@@ -265,8 +265,8 @@ def main() -> int:
         "--paths-file",
         help=(
             "File holding one changed path per line, as from "
-            "`gh pr view --json files`. Reports pushability instead of "
-            "executor eligibility."
+            "`gh api .../pulls/N/files --jq '.[].filename'`. Reports "
+            "pushability instead of executor eligibility."
         ),
     )
     args = parser.parse_args()

@@ -124,11 +124,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # `files` costs nothing extra here -- one `gh pr view` either way --
-          # and is what the workflow-scope check below reads.
           gh pr view "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --json number,url,headRefName,isCrossRepository,files \
+            --json number,url,headRefName,isCrossRepository \
             > pr-meta.json
 
           echo "head_ref=$(jq -r '.headRefName' pr-meta.json)" >> "$GITHUB_OUTPUT"
@@ -173,11 +171,19 @@ jobs:
           # positive blocks a real fix cycle; a false negative costs one
           # session and comments why.
           #
-          # `-r`, not `-e -r`: a genuinely empty file list is rc 4 under
-          # `-e` and would raise a misleading warning, while a missing or
-          # null `files` key -- the case actually worth catching -- is rc 5
-          # either way.
-          if ! jq -r '.files[].path' pr-meta.json > pr-files.txt \
+          # Read from the paginated REST endpoint, not from
+          # `gh pr view --json files`. That one is GraphQL and returns only
+          # the first 100 files, so on a large pull request a restricted
+          # path past the boundary would read as absent -- costing exactly
+          # the session this check exists to save, silently. `--paginate`
+          # has no such ceiling.
+          #
+          # The REST key is `filename`; GraphQL's is `path`. Using the wrong
+          # one yields an empty list rather than an error, which this guard
+          # would read as "nothing restricted" -- the failure that hides.
+          if ! gh api --paginate \
+                 "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+                 --jq '.[].filename' > pr-files.txt \
               || ! python3 .github/scripts/task_scope.py \
                    --paths-file pr-files.txt > pr-scope.json
           then
@@ -201,17 +207,20 @@ jobs:
       - name: Report Refusal
         if: steps.pr.outputs.ok != 'true'
         shell: bash
-        # `restricted_paths` reaches the script through the environment
-        # rather than `${{ }}`. It is quoted out of a pull request's file
-        # list and carries backticks by construction, and `${{ }}` would
-        # paste those into a double-quoted bash string, where a backtick is
-        # command substitution. A variable expansion is not re-evaluated.
+        # Both values reach the script through the environment rather than
+        # `${{ }}`. For `restricted_paths` that is load-bearing: it is quoted
+        # out of a pull request's file list and carries backticks by
+        # construction, and `${{ }}` would paste those into a double-quoted
+        # bash string, where a backtick is command substitution. A variable
+        # expansion is not re-evaluated. `reason` is workflow-authored from a
+        # fixed set and safe either way -- it is here so the step has one
+        # rule rather than two, and so it stays safe if it ever stops being
+        # workflow-authored.
         env:
+          REASON: ${{ steps.pr.outputs.reason }}
           RESTRICTED_PATHS: ${{ steps.pr.outputs.restricted_paths }}
         run: |
           set -euo pipefail
-
-          REASON="${{ steps.pr.outputs.reason }}"
 
           case "$REASON" in
             fork)
