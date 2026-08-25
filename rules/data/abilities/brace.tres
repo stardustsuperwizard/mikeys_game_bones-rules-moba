@@ -1,0 +1,57 @@
+[gd_resource type="Resource" script_class="MobaAbility" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://rules/abilities/moba_ability.gd" id="1"]
+[ext_resource type="Script" path="res://rules/effects/moba_stat_modifier.gd" id="2"]
+
+[sub_resource type="Resource" script_class="MobaStatModifier" id="3"]
+script = ExtResource("2")
+stat = "armor"
+amount = 40.0
+is_percentage = false
+duration = 4.0
+stacking = 0
+max_stacks = 1
+
+[sub_resource type="Resource" script_class="MobaStatModifier" id="4"]
+script = ExtResource("2")
+stat = "magic_resistance"
+amount = 30.0
+is_percentage = false
+duration = 4.0
+stacking = 0
+max_stacks = 1
+
+[resource]
+script = ExtResource("1")
+id = "brace"
+name = "Brace"
+discipline = 0
+targeting_type = 0
+aim_assist = 0
+aim_cone_degrees = 0.0
+magnetism = 0.0
+acquisition_range = 0.0
+damage_type = 0
+base_damage = 0.0
+scaling = {}
+resource_cost = 0.0
+cooldown = 0.0
+cast_time = 0.0
+channel_duration = 0.0
+channel_tick_interval = 0.0
+range = 0.0
+projectile_speed = 0.0
+area_radius = 0.0
+duration = 0.0
+charges = 1
+usable_in_air = false
+touch_viable = true
+crowd_control = null
+buffs = [SubResource("3"), SubResource("4")]
+debuffs = []
+max_stacks = 1
+cancellable_by_movement = false
+cancellable_by_hard_cc = true
+refund_resource_on_cancel = 0.0
+on_cancel = 2
+on_channel_break = 0
