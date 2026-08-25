@@ -22,6 +22,17 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# --- stuck mouse capture recovers without a right-button release ---
+	# Runs before the scene work below because the rule under test is pure and
+	# needs none of it. Like every other check here, its result reaches you
+	# through _finish().
+	#
+	# Asserted through the predicate rather than by driving Input.mouse_mode,
+	# because the headless DisplayServer silently ignores writes to it -- a
+	# test that set MOUSE_MODE_CAPTURED and waited for the camera to clear it
+	# would pass against unfixed code, having never entered the stuck state.
+	_check_capture_recovery_rule()
+
 	var scene := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(scene)
 	await physics_frame
@@ -47,7 +58,7 @@ func _run() -> void:
 
 	if not await _run_movement_scenarios(camera, controller, body):
 		return _finish()
-	if not await _run_interaction_scenarios(scene, camera, controller, body):
+	if not await _run_interaction_scenarios(scene, camera, controller, body, player):
 		return _finish()
 
 	_finish()
@@ -242,7 +253,11 @@ func _run_movement_scenarios(
 # Orders that need something to act on: a hostile, a door, a cancelled walk,
 # and an unreachable destination. Same bail-out contract as the movement half.
 func _run_interaction_scenarios(
-	scene: Node, camera: Camera3D, controller: PlayerController3D, body: CharacterBody3D
+	scene: Node,
+	camera: Camera3D,
+	controller: PlayerController3D,
+	body: CharacterBody3D,
+	player: Actor
 ) -> bool:
 	# --- click a hostile actor -> approach and attack ------------------
 	if _actors_lost("attack click", [body, controller]):
@@ -271,6 +286,83 @@ func _run_interaction_scenarios(
 		)
 	else:
 		print("PASS attack click -> closed to melee and dealt damage")
+
+	# --- a click order gives a TARGETED ability its target -------------
+	if _actors_lost("ability target", [body, controller]):
+		return false
+	# The other half of the defect: `_ability_target()` resolves a TARGETED
+	# ability against the click order's target and nothing else, so while no
+	# order can be issued, slot 1 fails `invalid_target` on every press.
+	#
+	# The dummy is freed and the order cancelled afterwards so the scenarios
+	# around it start from the state they expect.
+	# Six metres out, toward the arena centre so it always lands on open floor.
+	# Far enough that the order has to actually close the distance: spawning it
+	# inside the melee threshold would satisfy the wait below on its first call,
+	# leaving the guard unable to fire and the walk never exercised.
+	var toward_centre := Vector3.ZERO - body.global_position
+	toward_centre.y = 0.0
+	var ability_spawn := body.global_position + toward_centre.normalized() * 6.0
+	var ability_dummy := _make_dummy(scene, ability_spawn)
+	await physics_frame
+	await _click_world_point(controller, camera, ability_dummy.global_position + Vector3(0, 1, 0))
+	var ability_target_set := await _wait_until(
+		func() -> bool: return controller._ability_target() != null, 240
+	)
+
+	# Wait for the walk to actually arrive, so slot 1 is judged on a target the
+	# order really closed on. Proximity rather than damage deliberately: a dummy
+	# that dies to the basic attack is freed, and a freed target fails
+	# `invalid_target` for a reason that has nothing to do with this defect.
+	#
+	# The half-metre of slack is deliberate. Waiting for the controller's exact
+	# halt at attack_range would race it, and the assertion would flake on which
+	# side of 2.0 a float landed. So slot 1 fires from about 2.5m, outside
+	# power_strike's 2.0 range, and reports `out_of_range` every run.
+	#
+	# That is the expected result, not a failure: what is asserted below is only
+	# the criterion #185 names -- that the click order supplied a target at all.
+	# Whether the ability then reaches it is a question about range, which this
+	# scenario deliberately does not pin down.
+	var ability_dummy_body := ability_dummy.get_node("Body") as Node3D
+	var closed_to_melee := await _wait_until(
+		func() -> bool:
+			return (
+				_flat_distance(body.global_position, ability_dummy_body.global_position)
+				<= controller.attack_range + 0.5
+			),
+		360
+	)
+
+	if not ability_target_set:
+		_fail("ability target: clicking a hostile actor established no target for slot 1")
+	elif not closed_to_melee:
+		_fail("ability target: attack order never closed to melee, so slot 1 cannot be judged")
+	else:
+		var caster := player.get_node_or_null("MobaAbilityCaster") as MobaAbilityCaster
+		if caster == null:
+			_fail("ability target: player has no MobaAbilityCaster")
+		else:
+			var context := MobaCastContext.new(player, controller._ability_target())
+			var result := caster.activate_slot(1, context)
+			if result.reason == MobaAbilityAction.FAILURE_INVALID_TARGET:
+				_fail(
+					(
+						"ability slot 1: still failed invalid_target with an attack order on %s"
+						% ability_dummy
+					)
+				)
+			else:
+				print(
+					(
+						"PASS ability slot 1 resolved the click order's target (success=%s reason='%s')"
+						% [result.success, result.reason]
+					)
+				)
+
+	controller.cancel_order()
+	ability_dummy.queue_free()
+	await physics_frame
 
 	# --- click a door -> approach and open -----------------------------
 	if _actors_lost("door click", [body, controller]):
@@ -391,6 +483,31 @@ func _make_door(parent: Node, position: Vector3) -> Door:
 	parent.add_child(door)
 	door.global_position = position
 	return door
+
+
+# The reconciliation rule that keeps mouse capture from sticking: release only
+# when the mouse is captured and the right button is not actually down.
+func _check_capture_recovery_rule() -> void:
+	var captured := Input.MOUSE_MODE_CAPTURED
+	var visible_mode := Input.MOUSE_MODE_VISIBLE
+	var before := _failures.size()
+
+	# The stuck state: captured, but the button that captured it is not held.
+	if not ThirdPersonCamera3D.should_release_capture(captured, false):
+		_fail("capture recovery: captured with the right button up must release")
+
+	# Right-drag look in progress -- releasing here would break the camera.
+	if ThirdPersonCamera3D.should_release_capture(captured, true):
+		_fail("capture recovery: captured with the right button held must not release")
+
+	# Not captured: nothing to recover, whatever the button is doing.
+	if ThirdPersonCamera3D.should_release_capture(visible_mode, false):
+		_fail("capture recovery: an uncaptured mouse must not be released")
+	if ThirdPersonCamera3D.should_release_capture(visible_mode, true):
+		_fail("capture recovery: an uncaptured mouse must not be released while held")
+
+	if _failures.size() == before:
+		print("PASS stuck capture releases only when the right button is up")
 
 
 # Stops the run when an actor a scenario needs has been freed.
