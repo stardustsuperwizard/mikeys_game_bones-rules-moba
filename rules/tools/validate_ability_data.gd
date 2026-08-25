@@ -12,6 +12,7 @@ const MobaAbility = preload("res://rules/abilities/moba_ability.gd")
 const MobaPassive = preload("res://rules/abilities/moba_passive.gd")
 const MobaStatModifier = preload("res://rules/effects/moba_stat_modifier.gd")
 const MobaCrowdControlSpec = preload("res://rules/effects/moba_crowd_control_spec.gd")
+const MobaStatBlock = preload("res://rules/core/moba_stat_block.gd")
 
 
 ## Validates a MobaAbility resource.
@@ -117,6 +118,26 @@ static func _validate_stat_modifier(
 	resource_path: String, modifier: MobaStatModifier, context: String
 ) -> Array[String]:
 	var violations: Array[String] = []
+
+	# Check that stat is not empty
+	if modifier.stat.is_empty():
+		violations.append(
+			(
+				"%s: %s stat is empty"
+				% [resource_path, context]
+			)
+		)
+	else:
+		# Check that stat is in valid stats list
+		var valid_stats = MobaStatBlock.get_valid_stats()
+		var stat_as_stringname = StringName(modifier.stat)
+		if not stat_as_stringname in valid_stats:
+			violations.append(
+				(
+					"%s: %s stat is unknown (%s)"
+					% [resource_path, context, modifier.stat]
+				)
+			)
 
 	# Check that if stacking is STACK, max_stacks is set
 	if modifier.stacking == MobaStatModifier.Stacking.STACK:

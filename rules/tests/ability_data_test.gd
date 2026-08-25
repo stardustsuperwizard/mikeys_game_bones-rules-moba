@@ -11,12 +11,14 @@ const MobaPassive = preload("res://rules/abilities/moba_passive.gd")
 
 const ABILITIES_DIR := "res://rules/data/abilities/"
 const PASSIVES_DIR := "res://rules/data/passives/"
+const FIXTURES_ABILITIES_DIR := "res://rules/tests/fixtures/abilities/"
 
 
 ## Run the ability data validation test.
 ## Returns true if all checks pass, false if any violations found.
 static func run() -> bool:
 	var all_violations: Array[String] = []
+	var test_results: Array[bool] = []
 
 	# Validate abilities
 	var abilities = _load_resources(ABILITIES_DIR, "MobaAbility")
@@ -32,7 +34,13 @@ static func run() -> bool:
 		var violations = ValidateAbilityData.validate_passive(resource_path, passive)
 		all_violations.append_array(violations)
 
-	if all_violations.is_empty():
+	# Test fixture with bad stat modifier
+	test_results.append(_test_bad_stat_modifier())
+
+	# Test that sample_complete has no stat-name violations
+	test_results.append(_test_sample_complete_no_violations())
+
+	if all_violations.is_empty() and test_results.all(func(x): return x):
 		return true
 
 	# Print violations
@@ -41,6 +49,57 @@ static func run() -> bool:
 		printerr("FAIL " + violation)
 
 	return false
+
+
+## Test that bad_stat_modifier.tres produces the expected violation.
+static func _test_bad_stat_modifier() -> bool:
+	var fixture_path = FIXTURES_ABILITIES_DIR.path_join("bad_stat_modifier.tres")
+	var ability = ResourceLoader.load(fixture_path) as MobaAbility
+
+	if ability == null:
+		printerr("ERROR: Failed to load fixture %s" % [fixture_path])
+		return false
+
+	var violations = ValidateAbilityData.validate_ability(fixture_path, ability)
+
+	# Should have exactly one violation about the unknown stat "attak_damage"
+	var expected_violation_found = false
+	for violation in violations:
+		if violation.contains("attak_damage") and violation.contains("buff"):
+			expected_violation_found = true
+			break
+
+	if not expected_violation_found:
+		printerr(
+			"ERROR: bad_stat_modifier.tres did not produce expected violation for stat 'attak_damage'. Got violations: %s"
+			% [violations]
+		)
+		return false
+
+	return true
+
+
+## Test that sample_complete.tres produces no stat-name violations.
+static func _test_sample_complete_no_violations() -> bool:
+	var fixture_path = ABILITIES_DIR.path_join("sample_complete.tres")
+	var ability = ResourceLoader.load(fixture_path) as MobaAbility
+
+	if ability == null:
+		printerr("ERROR: Failed to load fixture %s" % [fixture_path])
+		return false
+
+	var violations = ValidateAbilityData.validate_ability(fixture_path, ability)
+
+	# Check that there are no stat-name violations (lines containing "stat is")
+	for violation in violations:
+		if violation.contains("stat is"):
+			printerr(
+				"ERROR: sample_complete.tres should not have stat-name violations. Got: %s"
+				% [violation]
+			)
+			return false
+
+	return true
 
 
 ## Load all .tres resources of a specific type from a directory.
