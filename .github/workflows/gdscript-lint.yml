@@ -312,8 +312,22 @@ jobs:
                  "targeted list. Discarding all changes -- this needs a" \
                  "human, not another automated attempt."
             comm -23 <(sort all-changes-after-fix.txt) <(sort changed-gd-files.txt)
-            git checkout -- .
-            git clean -fd
+
+            # Undo only the session's own changes -- the tracked files it
+            # modified and the untracked files it created -- not the whole
+            # work tree. Handled as two separate, exactly-typed pathspecs
+            # rather than one combined list: `git checkout --` only accepts
+            # tracked paths and `git clean -fd --` only acts on untracked
+            # ones, so mixing them makes the whole command fail closed
+            # instead of restoring anything.
+            if [ -s changed-after-fix.txt ]; then
+              mapfile -t TRACKED_CHANGES < changed-after-fix.txt
+              git checkout -- "${TRACKED_CHANGES[@]}"
+            fi
+            if [ -s untracked-after-fix.txt ]; then
+              mapfile -t UNTRACKED_CHANGES < untracked-after-fix.txt
+              git clean -fd -- "${UNTRACKED_CHANGES[@]}"
+            fi
             echo "in_scope=false" >> "$GITHUB_OUTPUT"
           else
             echo "in_scope=true" >> "$GITHUB_OUTPUT"
@@ -358,8 +372,13 @@ jobs:
             echo "::error::Validation failed after the lint-fix session." \
                  "Discarding its changes."
             tail -c 4000 lint-fix-validate-output.txt
-            git reset --hard
-            git clean -fd
+
+            # Undo only the targeted files just staged above -- the scope
+            # check already guarantees nothing else in the work tree was
+            # touched, so a plain `git checkout --` on that exact list is
+            # enough. No `git reset --hard` / `git clean -fd` sweep of the
+            # whole tree needed.
+            git checkout -- "${FILES[@]}"
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
