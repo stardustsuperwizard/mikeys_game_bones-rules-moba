@@ -402,7 +402,8 @@ jobs:
       # The session was told not to touch anything outside the targeted
       # files. Enforce that instead of trusting it: anything else changed
       # means the session went out of scope, and nothing here gets
-      # committed on that basis.
+      # committed on that basis. Check both modified tracked files and any
+      # new untracked files created by the session.
       - name: Verify Fix Stayed In Scope
         if: >-
           steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
@@ -412,15 +413,44 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Collect all modified tracked files
           git diff --name-only > changed-after-fix.txt
 
-          if [ -s changed-after-fix.txt ] && \
-             comm -23 <(sort changed-after-fix.txt) <(sort changed-gd-files.txt) | grep -q .; then
+          # Collect any untracked files created by the session.
+          # --exclude-standard is what keeps this workflow's own scratch
+          # files (lint-fix-prompt.txt and the lists written right here) out
+          # of the comparison -- they live at repo root and are .gitignored
+          # for exactly that reason. A new scratch file added to this job
+          # must be added to .gitignore too, or every run reports itself
+          # out of scope.
+          git ls-files --others --exclude-standard > untracked-after-fix.txt || true
+
+          # Combine tracked and untracked changes
+          cat changed-after-fix.txt untracked-after-fix.txt | sort -u > all-changes-after-fix.txt || true
+
+          # Check if any changes are outside the targeted list
+          if [ -s all-changes-after-fix.txt ] && \
+             comm -23 <(sort all-changes-after-fix.txt) <(sort changed-gd-files.txt) | grep -q .; then
             echo "::error::The lint-fix session changed files outside the" \
                  "targeted list. Discarding all changes -- this needs a" \
                  "human, not another automated attempt."
-            comm -23 <(sort changed-after-fix.txt) <(sort changed-gd-files.txt)
-            git checkout -- .
+            comm -23 <(sort all-changes-after-fix.txt) <(sort changed-gd-files.txt)
+
+            # Undo only the session's own changes -- the tracked files it
+            # modified and the untracked files it created -- not the whole
+            # work tree. Handled as two separate, exactly-typed pathspecs
+            # rather than one combined list: `git checkout --` only accepts
+            # tracked paths and `git clean -fd --` only acts on untracked
+            # ones, so mixing them makes the whole command fail closed
+            # instead of restoring anything.
+            if [ -s changed-after-fix.txt ]; then
+              mapfile -t TRACKED_CHANGES < changed-after-fix.txt
+              git checkout -- "${TRACKED_CHANGES[@]}"
+            fi
+            if [ -s untracked-after-fix.txt ]; then
+              mapfile -t UNTRACKED_CHANGES < untracked-after-fix.txt
+              git clean -fd -- "${UNTRACKED_CHANGES[@]}"
+            fi
             echo "in_scope=false" >> "$GITHUB_OUTPUT"
           else
             echo "in_scope=true" >> "$GITHUB_OUTPUT"
@@ -514,17 +544,51 @@ jobs:
             exit 0
           fi
 
-          if ! .github/scripts/validate-godot.sh > lint-fix-validate-output.txt 2>&1; then
-            echo "::error::Validation failed after the lint-fix session." \
-                 "Discarding its changes."
-            tail -c 4000 lint-fix-validate-output.txt
-            git checkout -- .
+          # Stage the targeted changes first, then validate that exact set.
+          # This ensures the tree that gets validated is the tree that gets
+          # committed -- nothing slips in or drops out between the two.
+          mapfile -t FILES < changed-gd-files.txt
+
+          # An empty pathspec would make `git add -u` stage the whole work
+          # tree -- the exact "committed more than was validated" failure
+          # this step exists to prevent. Unreachable today (the job only
+          # runs when gdlint reported findings in these files), so treat it
+          # as a broken precondition rather than something to work around.
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::changed-gd-files.txt is empty but the tree is" \
+                 "dirty. Refusing to stage an unbounded set."
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          mapfile -t FILES < changed-gd-files.txt
-          git add -- "${FILES[@]}"
+          git add -u -- "${FILES[@]}"
+
+          if ! .github/scripts/validate-godot.sh > lint-fix-validate-output.txt 2>&1; then
+            echo "::error::Validation failed after the lint-fix session." \
+                 "Discarding its changes."
+            tail -c 4000 lint-fix-validate-output.txt
+
+            # Undo only the targeted files just staged above -- the scope
+            # check already guarantees nothing else in the work tree was
+            # touched, so no `git reset --hard` / `git clean -fd` sweep of
+            # the whole tree is needed.
+            #
+            # `HEAD --`, not a bare `--`: without a tree-ish, `git checkout`
+            # restores the work tree *from the index*, and `git add -u` just
+            # put the session's changes there -- so it would discard nothing
+            # at all. Naming HEAD resets index and work tree together, and
+            # also handles a targeted file the session deleted, which a bare
+            # `--` cannot: that path is no longer in the index, so it fails
+            # with "did not match any file(s) known to git" and takes the
+            # whole step down under `set -e`.
+            git checkout HEAD -- "${FILES[@]}"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Commit the already-staged index directly. Do not call git add again
+          # after validation runs -- that would be the exact point at which the
+          # committed tree could silently diverge from what was validated.
           git commit -m "style: auto-fix gdlint findings (${{ steps.fix-session.outputs.resolved-model }})"
           git push origin "HEAD:${{ steps.pr.outputs.head_ref }}"
 
