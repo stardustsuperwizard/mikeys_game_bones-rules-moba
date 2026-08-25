@@ -102,12 +102,7 @@ The body MUST:
 - copy the Issue's acceptance criteria and mark each one met or not, under
   **Acceptance Criteria**;
 - list discovered out-of-scope work, or `None`;
-- list required human validation in the Godot editor, or `None`;
-- fill in **Agent Session Metadata** with
-  `Implementation model: Claude Haiku 4.5 (Claude Code)` (leave Review
-  model, Rework cycles, and Steering messages for whoever runs
-  `/review-task` next) so `.github/scripts/agent-metrics.py` can still
-  attribute this row.
+- list required human validation in the Godot editor, or `None`.
 
 Leave the **Review** section's `VERDICT:` block empty — that is the
 reviewer's to fill.

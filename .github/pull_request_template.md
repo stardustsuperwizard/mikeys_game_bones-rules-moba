@@ -52,18 +52,3 @@ Closes #<issue-number>
 ```
 VERDICT:
 ```
-
-## Agent Session Metadata
-
-<!--
-Recorded so model routing can be evaluated against outcomes over time.
-Read by .github/scripts/agent-metrics.py — keep the labels exactly as written.
-Leave a field blank or as "none" if it does not apply.
--->
-
-- Implementation model: <e.g. Claude Haiku 4.5>
-- Review model: <e.g. Claude Opus 5>
-- Reasoning level: <default | high — drives credit consumption independently of model>
-- Rework cycles: <number of FIX verdicts before PASS>
-- Steering messages: <mid-session corrections sent; each one costs credits and signals under-specification>
-- Session wall-clock: <e.g. 12m — rough token proxy, no per-session cost is exposed>
