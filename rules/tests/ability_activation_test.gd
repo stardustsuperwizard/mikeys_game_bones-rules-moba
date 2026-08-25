@@ -816,7 +816,6 @@ static func _test_brace_buff_application() -> Array[String]:
 
 	# Setup
 	MobaAbilityLibrary._reset()
-	MobaAbilityLibrary._load_single_ability("res://rules/data/abilities/brace.tres")
 
 	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS, false)
 	var caster = caster_data["actor"]
@@ -824,8 +823,12 @@ static func _test_brace_buff_application() -> Array[String]:
 
 	# Register brace ability with the combatant
 	var brace_ability = MobaAbilityLibrary.get_ability(&"brace")
-	if brace_ability != null:
-		caster_combatant.register_ability(brace_ability)
+	if brace_ability == null:
+		violations.append(
+			"brace_buff_application: brace.tres did not load as a MobaAbility with id 'brace'"
+		)
+		return violations
+	caster_combatant.register_ability(brace_ability)
 
 	# Manually set armor to 30 base value for predictable testing
 	caster_combatant._runtime_stat_block.armor = 30.0
@@ -902,7 +905,6 @@ static func _test_brace_buff_expiry() -> Array[String]:
 
 	# Setup
 	MobaAbilityLibrary._reset()
-	MobaAbilityLibrary._load_single_ability("res://rules/data/abilities/brace.tres")
 
 	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS, false)
 	var caster = caster_data["actor"]
@@ -910,8 +912,12 @@ static func _test_brace_buff_expiry() -> Array[String]:
 
 	# Register brace ability with the combatant
 	var brace_ability = MobaAbilityLibrary.get_ability(&"brace")
-	if brace_ability != null:
-		caster_combatant.register_ability(brace_ability)
+	if brace_ability == null:
+		violations.append(
+			"brace_buff_expiry: brace.tres did not load as a MobaAbility with id 'brace'"
+		)
+		return violations
+	caster_combatant.register_ability(brace_ability)
 
 	# Manually set armor and magic resistance to known values
 	caster_combatant._runtime_stat_block.armor = 30.0
