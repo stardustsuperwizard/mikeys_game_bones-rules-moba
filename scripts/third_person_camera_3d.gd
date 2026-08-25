@@ -124,9 +124,7 @@ static func should_release_capture(mouse_mode: int, right_button_pressed: bool) 
 
 
 func _process(delta: float) -> void:
-	if should_release_capture(
-		Input.mouse_mode, Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	):
+	if should_release_capture(Input.mouse_mode, Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	_update_transform(delta)
