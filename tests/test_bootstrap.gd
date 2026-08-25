@@ -24,13 +24,6 @@ func _ready() -> void:
 	if DisplayServer.get_name() != "headless":
 		return
 
-	# Skip running tests if a custom SceneTree script is running (--script parameter).
-	# This allows standalone test scripts to run without being hijacked by this bootstrap.
-	# When --script is used with a SceneTree, that script is attached to the SceneTree.
-	var tree_script: Script = get_tree().get_script()
-	if tree_script != null:
-		return
-
 	_check("Extraction Contract Test", ExtractionContractTest.run())
 	_check("Ability Data Test", AbilityDataTest.run())
 	_check("Combatant Test", CombatantTest.run())
