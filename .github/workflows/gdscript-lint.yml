@@ -80,6 +80,22 @@ env:
   # choice. A single-file lint fix doesn't need more.
   LINT_FIXER_MAX_AI_CREDITS: "30"
 
+  # gdlint rules that cannot be resolved by editing the file the finding is
+  # reported in. The fix session is bounded to exactly that file and
+  # forbidden from changing behavior (see the prompt below), so handing it
+  # one of these asks for something its own rules forbid: `max-file-lines`
+  # is fixable only by moving code elsewhere or by changing gdlint's
+  # configuration. That is how run 32890337600 came to push a commit
+  # preloading a file that has never existed in this repository. Findings on
+  # this list are kept away from the session entirely and fail the check for
+  # a human instead.
+  #
+  # Deliberately an explicit, reviewable list rather than something derived
+  # from gdlint's output: whether a rule has an in-file fix is a judgment
+  # about the prompt below, not a property gdlint reports. Add a rule id
+  # only when a run has actually shown it has no in-file fix.
+  LINT_NO_IN_FILE_FIX_RULES: max-file-lines
+
 jobs:
   lint:
     name: GDScript Lint
@@ -206,32 +222,135 @@ jobs:
       # tightly: only the gdlint output and the files it names, not the PR
       # diff or task context -- this is a mechanical correction, not a
       # review-driven one.
+      #
+      # Findings are partitioned before any of that: anything whose rule is
+      # on LINT_NO_IN_FILE_FIX_RULES is withheld from the session entirely
+      # and reported for a human instead, and a file whose only findings are
+      # withheld is not handed over at all. What is left builds the prompt
+      # as before; if nothing is left, no session is started.
       - name: Build Lint Fix Prompt
         if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true'
         id: build-prompt
         shell: python
         run: |
+          import os
           import pathlib
+          import re
+
+          # `path:line: Error: message (rule-name)`, as gdlint emits it. The
+          # rule group is optional on purpose: a finding whose shape this
+          # does not recognize stays fixable and reaches the session exactly
+          # as it does today. Only rules named explicitly are withheld.
+          FINDING = re.compile(
+              r"^(?P<path>.+?):(?P<line>\d+): Error: "
+              r"(?P<message>.*?)(?: \((?P<rule>[A-Za-z0-9_-]+)\))?$"
+          )
+
+          no_fix_rules = {
+              rule.strip()
+              for rule in os.environ["LINT_NO_IN_FILE_FIX_RULES"].split(",")
+              if rule.strip()
+          }
+
+
+          def set_output(name, value):
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+                  if "\n" in value:
+                      handle.write(f"{name}<<GDLINT_PARTITION_EOF\n{value}\nGDLINT_PARTITION_EOF\n")
+                  else:
+                      handle.write(f"{name}={value}\n")
+
+
+          def add_summary(text):
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+                  handle.write(text + "\n")
+
 
           gdlint_output = pathlib.Path("gdlint-output.txt")
-          findings = gdlint_output.read_text(errors="replace") if gdlint_output.exists() else "(gdlint output unavailable)"
+          raw = gdlint_output.read_text(errors="replace") if gdlint_output.exists() else ""
+
+          fixable = {}
+          unfixable = []
+
+          for raw_line in raw.splitlines():
+              line = raw_line.strip()
+              match = FINDING.match(line)
+
+              # Non-finding output (gdlint's own summary line, a parse-error
+              # dump) is not something a session can be pointed at, so it is
+              # not treated as a finding. It is still in the report printed
+              # by `Show Report`, and it still keeps the check red below.
+              if not match:
+                  continue
+
+              if match["rule"] in no_fix_rules:
+                  unfixable.append((match["path"], match["line"], match["rule"]))
+              else:
+                  fixable.setdefault(match["path"], []).append(line)
 
           files_list = pathlib.Path("changed-gd-files.txt")
-          paths = [
+          changed = [
               line.strip()
               for line in files_list.read_text().splitlines()
               if line.strip()
           ]
 
+          # Only files with a finding the session is allowed to fix. A file
+          # whose findings were all withheld must not appear here either:
+          # handing over its full contents with no finding named is the same
+          # invitation to restructure it that withholding exists to prevent.
+          paths = [path for path in changed if path in fixable]
+          paths += [path for path in fixable if path not in changed]
+          paths = [path for path in paths if pathlib.Path(path).exists()]
+
+          unfixable_report = "\n".join(
+              f"{path}:{line} ({rule})" for path, line, rule in unfixable
+          )
+
+          set_output("has-fixable", "true" if paths else "false")
+          set_output("has-unfixable", "true" if unfixable else "false")
+          set_output("unfixable", unfixable_report)
+
+          if unfixable:
+              add_summary(
+                  "### gdlint findings with no in-file fix\n\n"
+                  "Withheld from the auto-fix session: these rules cannot be"
+                  " resolved by editing the file the finding is reported in,"
+                  " only by moving code to another file or by changing gdlint"
+                  " configuration -- both of which the session's prompt"
+                  " forbids. They need a human, not another automated"
+                  " attempt.\n\n"
+                  + "\n".join(
+                      f"- `{path}:{line}` (`{rule}`)"
+                      for path, line, rule in unfixable
+                  )
+              )
+
+          print(f"Findings withheld as unfixable: {len(unfixable)}")
+
+          if not paths:
+              add_summary(
+                  "\nNo remaining gdlint finding can be fixed in the file it"
+                  " was reported in, so no lint-fix session was started."
+                  if unfixable
+                  else "\nNo gdlint finding could be read out of the output"
+                  " above, so there was nothing to point a lint-fix session"
+                  " at and none was started."
+              )
+              print("Nothing left for a lint-fix session to fix; skipping it.")
+              raise SystemExit(0)
+
           sections = [
-              f"Findings ({len(paths)} file(s) targeted):\n\n```\n{findings}\n```"
+              "Findings ({} file(s) targeted):\n\n```\n{}\n```".format(
+                  len(paths),
+                  "\n".join(
+                      finding for path in paths for finding in fixable[path]
+                  ),
+              )
           ]
 
           for path in paths:
               file_path = pathlib.Path(path)
-
-              if not file_path.exists():
-                  continue
 
               sections.append(
                   f"## File: {path}\n\n```gdscript\n{file_path.read_text(errors='replace')}\n```"
@@ -269,7 +388,9 @@ jobs:
           print(f"Prompt built: {len(prompt)} chars, {len(paths)} file(s)")
 
       - name: Run Lint Fix Session
-        if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true'
+        if: >-
+          steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
+          steps.build-prompt.outputs.has-fixable == 'true'
         id: fix-session
         uses: ./.github/actions/run-copilot-session
         with:
@@ -283,7 +404,9 @@ jobs:
       # means the session went out of scope, and nothing here gets
       # committed on that basis.
       - name: Verify Fix Stayed In Scope
-        if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true'
+        if: >-
+          steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
+          steps.build-prompt.outputs.has-fixable == 'true'
         id: scope-check
         shell: bash
         run: |
@@ -309,6 +432,7 @@ jobs:
       - name: Re-check After Fix
         if: >-
           steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
+          steps.build-prompt.outputs.has-fixable == 'true' &&
           steps.scope-check.outputs.in_scope == 'true'
         id: recheck
         uses: ./.github/actions/lint-gdscript
@@ -316,10 +440,68 @@ jobs:
           mode: fix
           files-list-file: changed-gd-files.txt
 
+      # The re-check reports every finding gdlint still sees, withheld ones
+      # included -- so its `clean` output is false for exactly the findings
+      # the session was never asked to fix, and gating the commit on it
+      # would let one withheld finding suppress a real fix in another file.
+      # Partition its output the same way, and ask the narrower question the
+      # commit actually depends on: is anything the session *was* asked to
+      # fix still outstanding? Anything unrecognized counts as outstanding.
+      - name: Partition Remaining Findings
+        if: >-
+          steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
+          steps.build-prompt.outputs.has-fixable == 'true' &&
+          steps.scope-check.outputs.in_scope == 'true'
+        id: recheck-partition
+        shell: python
+        run: |
+          import os
+          import pathlib
+          import re
+
+          # Same shape as `Build Lint Fix Prompt` above; kept in step with it.
+          FINDING = re.compile(
+              r"^(?P<path>.+?):(?P<line>\d+): Error: "
+              r"(?P<message>.*?)(?: \((?P<rule>[A-Za-z0-9_-]+)\))?$"
+          )
+
+          no_fix_rules = {
+              rule.strip()
+              for rule in os.environ["LINT_NO_IN_FILE_FIX_RULES"].split(",")
+              if rule.strip()
+          }
+
+          gdlint_output = pathlib.Path("gdlint-output.txt")
+          raw = gdlint_output.read_text(errors="replace") if gdlint_output.exists() else ""
+
+          outstanding = []
+
+          for raw_line in raw.splitlines():
+              line = raw_line.strip()
+
+              # gdlint's own tallies say nothing about what is left.
+              if not line or line.startswith(("Success:", "Failure:")):
+                  continue
+
+              match = FINDING.match(line)
+
+              if match and match["rule"] in no_fix_rules:
+                  continue
+
+              outstanding.append(line)
+
+          for line in outstanding:
+              print(f"Still outstanding after the fix: {line}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"resolved={'false' if outstanding else 'true'}\n")
+
       - name: Commit Lint Fix
         if: >-
           steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
-          steps.scope-check.outputs.in_scope == 'true' && steps.recheck.outputs.clean == 'true'
+          steps.build-prompt.outputs.has-fixable == 'true' &&
+          steps.scope-check.outputs.in_scope == 'true' &&
+          steps.recheck-partition.outputs.resolved == 'true'
         id: commit-fix
         shell: bash
         run: |
@@ -348,21 +530,49 @@ jobs:
 
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
+      # Only meaningful when a session ran: this re-prints the report as it
+      # stands after `Re-check After Fix`. With no session there is nothing
+      # to re-check, and this would just duplicate `Show Report` above.
       - name: Show Final Report
-        if: steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true'
+        if: >-
+          steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
+          steps.build-prompt.outputs.has-fixable == 'true'
         shell: bash
         run: |
           cat gdscript-lint-report.md >> "$GITHUB_STEP_SUMMARY"
           cat gdscript-lint-report.md
 
+      # A withheld finding is never resolved by anything this job does, so
+      # it fails the check on its own terms -- independent of whether an
+      # auto-fix was pushed for the other findings alongside it. A pushed
+      # fix used to be treated as resolving everything `clean` was false
+      # for; that is exactly the green-on-unfixed outcome #198 traces.
       - name: Fail on Remaining Findings
         if: >-
           steps.lint.outputs.clean != 'true' &&
-          !(steps.pr.outputs.fork != 'true' && steps.commit-fix.outputs.pushed == 'true')
+          (steps.build-prompt.outputs.has-unfixable == 'true' ||
+           !(steps.pr.outputs.fork != 'true' && steps.commit-fix.outputs.pushed == 'true'))
         shell: bash
+        env:
+          UNFIXABLE: ${{ steps.build-prompt.outputs.unfixable }}
+          PUSHED: ${{ steps.commit-fix.outputs.pushed }}
         run: |
-          echo "::error::gdformat/gdlint found issues that could not be" \
-               "resolved automatically. See the step summary for the" \
-               "report and, if one ran, the lint-fix session's log above." \
-               "Run \`gdformat\` and fix \`gdlint\` findings by hand."
+          set -euo pipefail
+
+          if [ -n "$UNFIXABLE" ]; then
+            echo "::error::gdlint reported finding(s) with no in-file fix." \
+                 "They were withheld from the auto-fix session -- resolving" \
+                 "them means moving code to another file or changing gdlint" \
+                 "configuration, both of which its prompt forbids -- so they" \
+                 "need a human, not another automated attempt:"
+            printf '%s\n' "$UNFIXABLE" | sed 's/^/  /'
+          fi
+
+          if [ "$PUSHED" != "true" ]; then
+            echo "::error::gdformat/gdlint found issues that could not be" \
+                 "resolved automatically. See the step summary for the" \
+                 "report and, if one ran, the lint-fix session's log above." \
+                 "Run \`gdformat\` and fix \`gdlint\` findings by hand."
+          fi
+
           exit 1
