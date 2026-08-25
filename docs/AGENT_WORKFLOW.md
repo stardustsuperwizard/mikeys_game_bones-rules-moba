@@ -270,9 +270,10 @@ Two consequences:
 
 ### Auto is a measurement problem, not just a cost one
 
-Auto picks one of four models per session and does not tell you which. That
-makes per-model cost attribution unanswerable for any task dispatched that
-way. If you care about the routing experiment, pick the model.
+Auto picks one of four models per session and does not tell you which. A task
+dispatched that way cannot be attributed to a model at all, so when a run goes
+badly there is no telling whether the model or the task was at fault. Pick the
+model explicitly when that distinction matters.
 
 ### Models retiring 2026-09-01
 
@@ -289,9 +290,9 @@ The agent profiles previously pinned Sonnet 4.5 and have been updated.
 MAI-Code-1.1-Flash and GPT-5.6 Luna are 5× cheaper than Haiku 4.5 and are
 both cloud-agent selectable. Neither is validated against GDScript and Godot
 4 scene and resource serialization, which is unforgiving of small mistakes.
-Trial them on one or two mechanical tasks and compare rework cycles before
-switching. The PR template records the model used and the rework count so
-this comparison is possible.
+Trial them on one or two mechanical tasks and compare how much rework each
+needs before switching. Nothing records that for you — read the pull requests
+and their review verdicts.
 
 ## The workflow
 
