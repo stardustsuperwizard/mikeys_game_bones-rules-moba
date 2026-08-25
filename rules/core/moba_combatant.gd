@@ -403,13 +403,12 @@ func can_activate(ability_id: StringName) -> int:
 	# still running does not block activation; only being out of charges does.
 	var available_charges: int = _cooldowns.charges(ability_id)
 	if available_charges <= 0 and _cooldowns.remaining(ability_id) > 0.0:
-		# Distinguish single-charge from multi-charge: single-charge (max_charges <= 1)
-		# reports ON_COOLDOWN, while multi-charge (max_charges > 1) reports NO_CHARGES.
-		var max_charges: int = _cooldowns.maximum_charges(ability_id)
-		if max_charges <= 1:
+		# A single-charge ability (max_charges <= 1) that is out of charges is
+		# simply on cooldown; NO_CHARGES is reserved for a multi-charge ability
+		# that has spent every charge while its recharge timer is still running.
+		if _cooldowns.maximum_charges(ability_id) <= 1:
 			return ActivationFailure.ON_COOLDOWN
-		else:
-			return ActivationFailure.NO_CHARGES
+		return ActivationFailure.NO_CHARGES
 
 	return ActivationFailure.OK
 

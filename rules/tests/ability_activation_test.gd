@@ -56,7 +56,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_unknown_ability())
 	all_violations.append_array(_test_illegal_state())
 	all_violations.append_array(_test_insufficient_resource())
-	all_violations.append_array(_test_no_charges())
+	all_violations.append_array(_test_single_charge_on_cooldown())
 	all_violations.append_array(_test_targeting_not_implemented_variants())
 	all_violations.append_array(_test_target_freed_before_activation())
 	all_violations.append_array(_test_target_freed_after_commit())
@@ -404,7 +404,7 @@ static func _test_insufficient_resource() -> Array[String]:
 ## and having an active recharge timer surfaces via
 ## MobaCombatant.can_activate() as ON_COOLDOWN (the correct failure reason
 ## for single-charge abilities).
-static func _test_no_charges() -> Array[String]:
+static func _test_single_charge_on_cooldown() -> Array[String]:
 	var violations: Array[String] = []
 
 	# Setup
@@ -423,7 +423,7 @@ static func _test_no_charges() -> Array[String]:
 	var result1 = action.execute()
 
 	if not result1.success:
-		violations.append("no_charges: first activation should succeed")
+		violations.append("single_charge_on_cooldown: first activation should succeed")
 		return violations
 
 	var resource_after_first = caster_combatant._current_resource
@@ -434,16 +434,18 @@ static func _test_no_charges() -> Array[String]:
 	var result2 = action2.execute()
 
 	if result2.success:
-		violations.append("no_charges: second activation should fail")
+		violations.append("single_charge_on_cooldown: second activation should fail")
 
 	if result2.reason != MobaAbilityAction.FAILURE_ON_COOLDOWN:
-		violations.append("no_charges: reason should be 'on_cooldown', got '%s'" % result2.reason)
+		violations.append(
+			"single_charge_on_cooldown: reason should be 'on_cooldown', got '%s'" % result2.reason
+		)
 
 	if caster_combatant._current_resource != resource_after_first:
-		violations.append("no_charges: resource should not change again on failure")
+		violations.append("single_charge_on_cooldown: resource should not change again on failure")
 
 	if caster_combatant._cooldowns.remaining(&"power_strike") != cooldown_after_first:
-		violations.append("no_charges: cooldown should not change again on failure")
+		violations.append("single_charge_on_cooldown: cooldown should not change again on failure")
 
 	# Cleanup
 	MobaAbilityLibrary._reset()
