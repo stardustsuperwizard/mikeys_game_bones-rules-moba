@@ -1364,6 +1364,8 @@ func _step_339() -> void:
 	pass
 
 
-# a demonstration comment that is deliberately far longer than the hundred character limit gdlint enforces a demonstration comment that is deliberately far longer than the hundred character limit gdlint enforces
+# a demonstration comment that is deliberately far longer than the hundred
+# character limit gdlint enforces a demonstration comment that is deliberately
+# far longer than the hundred character limit gdlint enforces
 func _step_last() -> void:
 	pass
