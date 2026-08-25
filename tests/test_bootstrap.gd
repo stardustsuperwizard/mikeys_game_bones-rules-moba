@@ -24,6 +24,10 @@ func _ready() -> void:
 	if DisplayServer.get_name() != "headless":
 		return
 
+	var tree_script: Script = get_tree().get_script()
+	if tree_script != null:
+		return
+
 	_check("Extraction Contract Test", ExtractionContractTest.run())
 	_check("Ability Data Test", AbilityDataTest.run())
 	_check("Combatant Test", CombatantTest.run())
