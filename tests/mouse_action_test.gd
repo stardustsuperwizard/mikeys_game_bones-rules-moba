@@ -27,6 +27,12 @@ func _run() -> void:
 	await physics_frame
 	await physics_frame
 
+	# Neutralize the spawned enemy so it doesn't kill the player during test scenarios
+	var enemy := scene.get_node_or_null("WorldManager/Enemy")
+	if enemy != null:
+		enemy.queue_free()
+	await physics_frame
+
 	var player := scene.get_node_or_null("WorldManager/Player") as Actor
 	var camera := scene.get_node_or_null("ThirdPersonCamera") as Camera3D
 	if player == null or camera == null:
@@ -44,8 +50,11 @@ func _run() -> void:
 	await _click_world_point(controller, camera, goal + Vector3(0, 0.01, 0))
 	var arrived := await _wait_until(
 		func() -> bool:
+			if not is_instance_valid(body) or not is_instance_valid(controller):
+				return false
 			return _flat_distance(body.global_position, goal) <= controller.arrival_distance,
-		240
+		240,
+		"ground click"
 	)
 	for i in 40:
 		await physics_frame
@@ -70,10 +79,13 @@ func _run() -> void:
 	await _click_world_point(controller, camera, behind + Vector3(0, 0.01, 0))
 	var faced := await _wait_until(
 		func() -> bool:
+			if not is_instance_valid(body):
+				return false
 			var to_goal := behind - body.global_position
 			var want := atan2(-to_goal.x, -to_goal.z)
 			return absf(rad_to_deg(wrapf(want - body.global_rotation.y, -PI, PI))) <= 15.0,
-		180
+		180,
+		"turn toward order"
 	)
 	if not faced:
 		_fail(
@@ -85,7 +97,12 @@ func _run() -> void:
 	else:
 		print("PASS click behind -> body turned to face the destination")
 	await _wait_until(
-		func() -> bool: return _flat_distance(body.global_position, behind) <= 0.5, 240
+		func() -> bool:
+			if not is_instance_valid(body):
+				return false
+			return _flat_distance(body.global_position, behind) <= 0.5,
+		240,
+		"turn toward order - arrival"
 	)
 
 	# --- click a wall -> walk up to it and stop flush ------------------
@@ -96,49 +113,67 @@ func _run() -> void:
 	const WALL_FACE_Z := -9.9
 	const BODY_RADIUS := 0.4
 	await _click_world_point(controller, camera, Vector3(1, 3, WALL_FACE_Z))
-	var touched := await _wait_until(func() -> bool: return body.is_on_wall(), 600)
-	var frames_to_stop := 0
-	while controller._has_destination and frames_to_stop < 120:
-		frames_to_stop += 1
-		await physics_frame
-	var wall_resting := body.global_position
-	for i in 60:
-		await physics_frame
-
-	var gap := body.global_position.z - WALL_FACE_Z
-	if not touched:
-		_fail("wall click: player never reached the wall (at %v)" % body.global_position)
-	elif absf(gap - BODY_RADIUS) > 0.05:
-		_fail(
-			(
-				"wall click: player settled %.2fm from the wall face, wanted flush at %.2f"
-				% [gap, BODY_RADIUS]
-			)
-		)
-	elif frames_to_stop > 5:
-		_fail(
-			(
-				(
-					"wall click: order held for %d frames after contact --"
-					+ " stopped by the stall guard, not by the wall"
-				)
-				% frames_to_stop
-			)
-		)
-	elif _flat_distance(wall_resting, body.global_position) > 0.02:
-		_fail(
-			(
-				"wall click: player kept moving after the order cleared (%v -> %v)"
-				% [wall_resting, body.global_position]
-			)
-		)
+	var touched := await _wait_until(
+		func() -> bool:
+			if not is_instance_valid(body):
+				return false
+			return body.is_on_wall(),
+		600,
+		"wall click - contact"
+	)
+	if not is_instance_valid(body) or not is_instance_valid(controller):
+		_fail("wall click: player was freed during test")
 	else:
-		print(
-			(
-				"PASS wall click -> walked to the wall, stopped flush (%.2fm from face) %d frames after contact"
-				% [gap, frames_to_stop]
-			)
-		)
+		var frames_to_stop := 0
+		while controller._has_destination and frames_to_stop < 120:
+			frames_to_stop += 1
+			await physics_frame
+		if not is_instance_valid(body):
+			_fail("wall click: player was freed after contact")
+		else:
+			var wall_resting := body.global_position
+			for i in 60:
+				await physics_frame
+
+			if not is_instance_valid(body):
+				_fail("wall click: player was freed during rest")
+			else:
+				var gap := body.global_position.z - WALL_FACE_Z
+				if not touched:
+					_fail(
+						"wall click: player never reached the wall (at %v)" % body.global_position
+					)
+				elif absf(gap - BODY_RADIUS) > 0.05:
+					_fail(
+						(
+							"wall click: player settled %.2fm from the wall face, wanted flush at %.2f"
+							% [gap, BODY_RADIUS]
+						)
+					)
+				elif frames_to_stop > 5:
+					_fail(
+						(
+							(
+								"wall click: order held for %d frames after contact --"
+								+ " stopped by the stall guard, not by the wall"
+							)
+							% frames_to_stop
+						)
+					)
+				elif _flat_distance(wall_resting, body.global_position) > 0.02:
+					_fail(
+						(
+							"wall click: player kept moving after the order cleared (%v -> %v)"
+							% [wall_resting, body.global_position]
+						)
+					)
+				else:
+					print(
+						(
+							"PASS wall click -> walked to the wall, stopped flush "
+							+ "(%.2fm from face) %d frames after contact" % [gap, frames_to_stop]
+						)
+					)
 
 	# --- click along a wall you are already against -> slide, don't stall
 	# Standing flush on the north wall, clicking it far to the west is a
@@ -147,27 +182,40 @@ func _run() -> void:
 	# The contact turns head-on again over the last stride, so the walk ends
 	# within roughly a body-width of the clicked spot rather than exactly on
 	# it -- close enough for an order that just means "over there by the wall".
-	var slide_start := body.global_position
-	var slide_goal_x := -6.0
-	await _click_world_point(controller, camera, Vector3(slide_goal_x, 3, WALL_FACE_Z))
-	var slid := await _wait_until(func() -> bool: return not controller._has_destination, 600)
-	var slide_miss := absf(body.global_position.x - slide_goal_x)
-	if not slid or slide_miss > 0.8:
-		_fail(
-			(
-				"wall slide: player stopped at x=%.2f (from x=%.2f), wanted within 0.8m of x=%.1f"
-				% [body.global_position.x, slide_start.x, slide_goal_x]
-			)
-		)
-	elif absf(body.global_position.z - (WALL_FACE_Z + BODY_RADIUS)) > 0.05:
-		_fail("wall slide: player came off the wall, z=%.2f" % body.global_position.z)
+	if not is_instance_valid(body) or not is_instance_valid(controller):
+		_fail("wall slide: player was freed during test")
 	else:
-		print(
-			(
-				"PASS click along the touched wall -> slid to %.2fm of the spot, still flush"
-				% slide_miss
-			)
+		var slide_start := body.global_position
+		var slide_goal_x := -6.0
+		await _click_world_point(controller, camera, Vector3(slide_goal_x, 3, WALL_FACE_Z))
+		var slid := await _wait_until(
+			func() -> bool:
+				if not is_instance_valid(controller):
+					return false
+				return not controller._has_destination,
+			600,
+			"wall slide"
 		)
+		if not is_instance_valid(body):
+			_fail("wall slide: player was freed during wait")
+		else:
+			var slide_miss := absf(body.global_position.x - slide_goal_x)
+			if not slid or slide_miss > 0.8:
+				_fail(
+					(
+						"wall slide: player stopped at x=%.2f (from x=%.2f), wanted within 0.8m of x=%.1f"
+						% [body.global_position.x, slide_start.x, slide_goal_x]
+					)
+				)
+			elif absf(body.global_position.z - (WALL_FACE_Z + BODY_RADIUS)) > 0.05:
+				_fail("wall slide: player came off the wall, z=%.2f" % body.global_position.z)
+			else:
+				print(
+					(
+						"PASS click along the touched wall -> slid to %.2fm of the spot, still flush"
+						% slide_miss
+					)
+				)
 
 	# --- click a hostile actor -> approach and attack ------------------
 	var dummy := _make_dummy(scene, Vector3(2, 0, -3))
@@ -175,13 +223,18 @@ func _run() -> void:
 	await _click_world_point(controller, camera, dummy.global_position + Vector3(0, 1, 0))
 	var hurt := await _wait_until(
 		func() -> bool:
+			if not is_instance_valid(body) or not is_instance_valid(dummy):
+				return false
 			return (
 				not is_instance_valid(dummy)
 				or dummy.character_sheet.current_hp < dummy.character_sheet.max_hp
 			),
-		360
+		360,
+		"attack click"
 	)
-	if not hurt:
+	if not is_instance_valid(body) or not is_instance_valid(dummy):
+		_fail("attack click: actor was freed during test")
+	elif not hurt:
 		_fail(
 			(
 				"attack click: dummy never took damage (player at %v, dummy at %v)"
@@ -195,8 +248,17 @@ func _run() -> void:
 	var door := _make_door(scene, Vector3(-2, 1, 2))
 	await physics_frame
 	await _click_world_point(controller, camera, door.global_position)
-	var opened := await _wait_until(func() -> bool: return door.is_open(), 360)
-	if not opened:
+	var opened := await _wait_until(
+		func() -> bool:
+			if not is_instance_valid(body) or not is_instance_valid(door):
+				return false
+			return door.is_open(),
+		360,
+		"door click"
+	)
+	if not is_instance_valid(body) or not is_instance_valid(door):
+		_fail("door click: actor was freed during test")
+	elif not opened:
 		_fail(
 			(
 				"door click: door never opened (player at %v, door at %v)"
@@ -213,23 +275,38 @@ func _run() -> void:
 	for i in 20:
 		await physics_frame
 	Input.action_release("move_forward")
-	var resting := body.global_position
-	for i in 40:
-		await physics_frame
-	if _flat_distance(resting, body.global_position) > 0.3:
-		_fail("keyboard cancel: player resumed walking to the click order after WASD input")
+	if not is_instance_valid(body):
+		_fail("keyboard cancel: player was freed during test")
 	else:
-		print("PASS keyboard input cancels the click order")
+		var resting := body.global_position
+		for i in 40:
+			await physics_frame
+		if not is_instance_valid(body):
+			_fail("keyboard cancel: player was freed during wait")
+		elif _flat_distance(resting, body.global_position) > 0.3:
+			_fail("keyboard cancel: player resumed walking to the click order after WASD input")
+		else:
+			print("PASS keyboard input cancels the click order")
 
 	# --- unreachable order gives up instead of shoving forever ---------
-	controller.cancel_order()
-	controller._destination = Vector3(body.global_position.x, 0, -40)  # through the north wall
-	controller._has_destination = true
-	var gave_up := await _wait_until(func() -> bool: return not controller._has_destination, 600)
-	if not gave_up:
-		_fail("stall guard: player never abandoned an unreachable order")
+	if not is_instance_valid(controller):
+		_fail("stall guard: player was freed during test")
 	else:
-		print("PASS unreachable order abandoned by the stall guard")
+		controller.cancel_order()
+		controller._destination = Vector3(body.global_position.x, 0, -40)  # through the north wall
+		controller._has_destination = true
+		var gave_up := await _wait_until(
+			func() -> bool:
+				if not is_instance_valid(controller):
+					return false
+				return not controller._has_destination,
+			600,
+			"unreachable order"
+		)
+		if not gave_up:
+			_fail("stall guard: player never abandoned an unreachable order")
+		else:
+			print("PASS unreachable order abandoned by the stall guard")
 
 	_finish()
 
@@ -245,7 +322,7 @@ func _click_world_point(
 	controller._issue_order_from_click(camera.unproject_position(world_point))
 
 
-func _wait_until(predicate: Callable, max_frames: int) -> bool:
+func _wait_until(predicate: Callable, max_frames: int, _scenario_name: String = "") -> bool:
 	for i in max_frames:
 		if predicate.call():
 			return true
