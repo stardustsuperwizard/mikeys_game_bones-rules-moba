@@ -403,7 +403,13 @@ func can_activate(ability_id: StringName) -> int:
 	# still running does not block activation; only being out of charges does.
 	var available_charges: int = _cooldowns.charges(ability_id)
 	if available_charges <= 0 and _cooldowns.remaining(ability_id) > 0.0:
-		return ActivationFailure.NO_CHARGES
+		# Distinguish single-charge from multi-charge: single-charge (max_charges <= 1)
+		# reports ON_COOLDOWN, while multi-charge (max_charges > 1) reports NO_CHARGES.
+		var max_charges: int = _cooldowns.maximum_charges(ability_id)
+		if max_charges <= 1:
+			return ActivationFailure.ON_COOLDOWN
+		else:
+			return ActivationFailure.NO_CHARGES
 
 	return ActivationFailure.OK
 

@@ -402,10 +402,8 @@ static func _test_insufficient_resource() -> Array[String]:
 ## Test 6: A second activation while the single charge is recharging blocks
 ## activation. Power Strike has charges = 1, so exhausting that one charge
 ## and having an active recharge timer surfaces via
-## MobaCombatant.can_activate() as NO_CHARGES -- the ON_COOLDOWN enum value
-## is never produced by the current charge-based cooldown model (see
-## MobaCombatant.can_activate()), which this test suite must not
-## reimplement or reorder.
+## MobaCombatant.can_activate() as ON_COOLDOWN (the correct failure reason
+## for single-charge abilities).
 static func _test_no_charges() -> Array[String]:
 	var violations: Array[String] = []
 
@@ -438,8 +436,8 @@ static func _test_no_charges() -> Array[String]:
 	if result2.success:
 		violations.append("no_charges: second activation should fail")
 
-	if result2.reason != MobaAbilityAction.FAILURE_NO_CHARGES:
-		violations.append("no_charges: reason should be 'no_charges', got '%s'" % result2.reason)
+	if result2.reason != MobaAbilityAction.FAILURE_ON_COOLDOWN:
+		violations.append("no_charges: reason should be 'on_cooldown', got '%s'" % result2.reason)
 
 	if caster_combatant._current_resource != resource_after_first:
 		violations.append("no_charges: resource should not change again on failure")

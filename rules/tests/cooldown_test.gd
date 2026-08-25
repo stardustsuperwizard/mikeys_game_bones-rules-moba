@@ -25,6 +25,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_haste_scaling())
 	all_violations.append_array(_test_charge_refill_timing())
 	all_violations.append_array(_test_no_timer_reset())
+	all_violations.append_array(_test_multi_charge_no_charges())
 	all_violations.append_array(_test_large_cost_refused())
 	all_violations.append_array(_test_hud_getters())
 
@@ -130,12 +131,13 @@ static func _test_cooldown_vs_no_charges() -> Array[String]:
 	if commit_result != MobaCombatant.ActivationFailure.OK:
 		violations.append("cooldown_vs_no_charges: commit should succeed, got %d" % commit_result)
 
-	# Now cooldown is running and we have 0 charges - should report NO_CHARGES
+	# Now cooldown is running and we have 0 charges. For a single-charge ability
+	# (max_charges <= 1), should report ON_COOLDOWN (not NO_CHARGES).
 	var check_result = combatant.can_activate(&"test_ability")
-	if check_result != MobaCombatant.ActivationFailure.NO_CHARGES:
+	if check_result != MobaCombatant.ActivationFailure.ON_COOLDOWN:
 		violations.append(
 			(
-				"cooldown_vs_no_charges: with no charges, should report NO_CHARGES, got %d"
+				"cooldown_vs_no_charges: single-charge ability should report ON_COOLDOWN, got %d"
 				% check_result
 			)
 		)
@@ -367,6 +369,45 @@ static func _test_no_timer_reset() -> Array[String]:
 	if charges_after_second != 0:
 		violations.append(
 			"no_timer_reset: charges should be 0 after second use, got %d" % charges_after_second
+		)
+
+	return violations
+
+
+static func _test_multi_charge_no_charges() -> Array[String]:
+	var violations: Array[String] = []
+
+	var combatant = MobaCombatant.new()
+	combatant._runtime_stat_block = combatant.stat_block.duplicate()
+	combatant._current_health = 500.0
+	combatant._current_resource = 500.0
+
+	var ability = MobaAbility.new()
+	ability.id = "test_ability"
+	ability.resource_cost = 10.0
+	ability.cooldown = 1.0
+	ability.charges = 2
+
+	combatant.register_ability(ability)
+
+	# Use the ability twice to spend both charges and start cooldown
+	var first_commit = combatant.commit_activate(&"test_ability")
+	if first_commit != MobaCombatant.ActivationFailure.OK:
+		violations.append("multi_charge_no_charges: first commit should succeed")
+
+	var second_commit = combatant.commit_activate(&"test_ability")
+	if second_commit != MobaCombatant.ActivationFailure.OK:
+		violations.append("multi_charge_no_charges: second commit should succeed")
+
+	# Now we have 0 charges and a running timer. For a multi-charge ability
+	# (max_charges > 1), can_activate() should report NO_CHARGES.
+	var check_result = combatant.can_activate(&"test_ability")
+	if check_result != MobaCombatant.ActivationFailure.NO_CHARGES:
+		violations.append(
+			(
+				"multi_charge_no_charges: multi-charge ability should report NO_CHARGES, got %d"
+				% check_result
+			)
 		)
 
 	return violations

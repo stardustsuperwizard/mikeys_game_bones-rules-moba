@@ -293,11 +293,9 @@ static func _test_activate_slot_cooldown_and_mapping_stable() -> bool:
 		print("ERROR: second activate_slot(1) should fail while on cooldown")
 		return false
 	# self_ability has charges = 1, so MobaCombatant.can_activate() reports
-	# no_charges (rather than on_cooldown) once the single charge is spent --
-	# this is existing MobaCombatant/MobaAbilityAction behavior, not something
-	# activate_slot() introduces.
-	if second_result.reason != MobaAbilityAction.FAILURE_NO_CHARGES:
-		print("ERROR: expected no_charges reason, got '%s'" % second_result.reason)
+	# on_cooldown (the correct failure reason for single-charge abilities).
+	if second_result.reason != MobaAbilityAction.FAILURE_ON_COOLDOWN:
+		print("ERROR: expected on_cooldown reason, got '%s'" % second_result.reason)
 		return false
 
 	if combatant.get_action_slot_ability_id(1) != slot1_id_before:
