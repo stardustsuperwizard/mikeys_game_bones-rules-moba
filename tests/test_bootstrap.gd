@@ -38,6 +38,7 @@ func _ready() -> void:
 	_check("Cooldown Test", CooldownTest.run())
 	_check("Ability Library Test", AbilityLibraryTest.run())
 	_check("Ability Activation Test", AbilityActivationTest.run())
+	_check("Brace Ability Test", BraceAbilityTest.run())
 	_check("Loadout Test", LoadoutTest.run())
 	_check("HUD Slot Test", HudSlotTest.run())
 	_check("HUD Test", HudTest.run())

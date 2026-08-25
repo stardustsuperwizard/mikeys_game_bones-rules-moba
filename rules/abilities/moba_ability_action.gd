@@ -261,9 +261,19 @@ func _check_silenced_seam(_combatant: MobaCombatant) -> bool:
 
 ## Seam for applying effects (Batch 2 feature).
 ## Applies crowd control, buffs, and debuffs from the ability to the target.
-## Empty implementation for Batch 1.
-func _apply_effects_seam(_ability: MobaAbility, _target: Node) -> void:
+func _apply_effects_seam(ability: MobaAbility, target: Node) -> void:
 	# TODO Batch 2: Apply crowd control from ability.crowd_control
-	# TODO Batch 2: Apply buffs from ability.buffs
-	# TODO Batch 2: Apply debuffs from ability.debuffs
-	pass
+
+	# Apply buffs to the caster's combatant
+	var caster_combatant := _get_combatant(actor)
+	if caster_combatant != null:
+		var caster_effects := caster_combatant.get_effect_container()
+		for buff in ability.buffs:
+			caster_effects.apply_modifier(buff, StringName(ability.id))
+
+	# Apply debuffs to the resolved target's combatant
+	var target_combatant := _get_combatant(target)
+	if target_combatant != null:
+		var target_effects := target_combatant.get_effect_container()
+		for debuff in ability.debuffs:
+			target_effects.apply_modifier(debuff, StringName(ability.id))
