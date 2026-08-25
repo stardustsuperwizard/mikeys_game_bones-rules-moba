@@ -10,7 +10,7 @@ const MobaAbilityCaster = preload("res://rules/abilities/moba_ability_caster.gd"
 const MobaCastContext = preload("res://rules/abilities/moba_cast_context.gd")
 const MobaAbilityAction = preload("res://rules/abilities/moba_ability_action.gd")
 const MobaAbilityLibrary = preload("res://rules/abilities/moba_ability_library.gd")
-const AbilityActivationTestHelpers = preload("res://rules/tests/ability_activation_test_helpers.gd")
+const _BASELINE_STAT_BLOCK = preload("res://rules/data/stat_blocks/baseline.tres")
 
 ## Fixture files this suite needs, loaded by exact path rather than by scanning the
 ## whole fixtures/abilities/ directory -- that directory also holds
@@ -89,6 +89,81 @@ static func _ensure_all_test_abilities_loaded() -> void:
 		MobaAbilityLibrary._load_single_ability(fixtures_dir.path_join(file_name))
 
 
+## Helper to create a test actor with a real MobaCombatant and MobaStateMachine
+## as child nodes (not test-only metadata), matching how MobaAbilityAction looks
+## them up in production via get_node_or_null().
+##
+## By default every ability in _ALL_ABILITY_IDS is pre-registered on the combatant.
+## Pass register_abilities = false to get a bare combatant with nothing registered,
+## exercising MobaAbilityCaster.activate()'s own idempotent register_ability() step.
+static func _create_test_actor(register_abilities: bool = true) -> Dictionary:
+	var actor = Actor.new()
+	actor.owner_id = 1
+
+	var combatant = MobaCombatant.new()
+	combatant.name = "MobaCombatant"
+	combatant.stat_block = _BASELINE_STAT_BLOCK
+	combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
+	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.RESOURCE
+	)
+
+	if register_abilities:
+		for ability_id in _ALL_ABILITY_IDS:
+			var ability = MobaAbilityLibrary.get_ability(ability_id)
+			if ability != null:
+				combatant.register_ability(ability)
+
+	actor.add_child(combatant)
+
+	var state_machine = MobaStateMachine.new()
+	state_machine.name = "MobaStateMachine"
+	state_machine._load_state_table()
+	actor.add_child(state_machine)
+
+	var wrapper = {
+		"actor": actor,
+		"combatant": combatant,
+		"state_machine": state_machine,
+	}
+
+	return wrapper
+
+
+## A lightweight stand-in for a positioned target node in tests. A plain Node
+## with a real (settable, non-computed) global_position field -- not Node3D,
+## whose global_position getter/setter requires the node to be inside a live
+## SceneTree (Node3D::get_global_transform() errors with "!is_inside_tree()"
+## otherwise), which none of this suite's nodes ever are, matching every
+## other test file's pattern of constructing nodes standalone.
+class _TestTarget:
+	extends Node
+	var global_position: Vector3 = Vector3.ZERO
+
+
+## Helper to create a mock target with a real MobaCombatant child node.
+static func _create_target_with_combatant() -> Node:
+	var target := _TestTarget.new()
+
+	var combatant := MobaCombatant.new()
+	combatant.name = "MobaCombatant"
+	combatant.stat_block = _BASELINE_STAT_BLOCK
+	combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
+	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.RESOURCE
+	)
+	target.add_child(combatant)
+
+	return target
+
+
+## Fetch a target's MobaCombatant child node.
+static func _target_combatant(target: Node) -> MobaCombatant:
+	return target.get_node("MobaCombatant") as MobaCombatant
+
+
 ## Test 1: Targeted damage ability activation
 static func _test_targeted_damage_ability() -> Array[String]:
 	var violations: Array[String] = []
@@ -97,11 +172,11 @@ static func _test_targeted_damage_ability() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)  # Within 2.0 range
 
 	# Disable crit on the CASTER so the damage figure is deterministic: crit is
@@ -112,7 +187,7 @@ static func _test_targeted_damage_ability() -> Array[String]:
 	caster_combatant._runtime_stat_block.crit_chance = 0.0
 	MobaRules.seed_crit_rng(42)
 
-	var initial_health = AbilityActivationTestHelpers.target_combatant(target)._current_health
+	var initial_health = _target_combatant(target)._current_health
 	var initial_resource = caster_combatant._current_resource
 
 	# Activate Power Strike
@@ -127,15 +202,11 @@ static func _test_targeted_damage_ability() -> Array[String]:
 	# dropped -- §19: 100 physical vs 30 armor ≈ 76.9.
 	var power_strike_ability = MobaAbilityLibrary.get_ability(&"power_strike")
 	if power_strike_ability != null:
-		var target_armor: float = AbilityActivationTestHelpers.target_combatant(target).get_stat(
-			MobaStatBlock.ARMOR
-		)
+		var target_armor: float = _target_combatant(target).get_stat(MobaStatBlock.ARMOR)
 		var expected_damage := MobaFormulas.physical_damage(
 			power_strike_ability.base_damage, target_armor
 		)
-		var actual_damage: float = (
-			initial_health - AbilityActivationTestHelpers.target_combatant(target)._current_health
-		)
+		var actual_damage: float = initial_health - _target_combatant(target)._current_health
 		if not is_equal_approx(actual_damage, expected_damage):
 			(
 				violations
@@ -177,7 +248,7 @@ static func _test_self_ability() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
@@ -213,7 +284,7 @@ static func _test_self_ability() -> Array[String]:
 static func _test_unknown_ability() -> Array[String]:
 	var violations: Array[String] = []
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 
 	var context = MobaCastContext.new(caster, null)
@@ -239,12 +310,12 @@ static func _test_illegal_state() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 	var caster_state_machine = caster_data["state_machine"]
 
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)
 
 	# DASHING's "ability" column is "no" in state_transitions.json
@@ -285,7 +356,7 @@ static func _test_insufficient_resource() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
@@ -294,7 +365,7 @@ static func _test_insufficient_resource() -> Array[String]:
 	if power_strike != null:
 		caster_combatant._current_resource = power_strike.resource_cost - 1.0
 
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)
 
 	var initial_resource = caster_combatant._current_resource
@@ -344,10 +415,10 @@ static func _test_no_charges() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)
 
 	# Activate once to spend the only charge and start the recharge timer
@@ -404,10 +475,10 @@ static func _test_targeting_not_implemented_variants() -> Array[String]:
 			MobaAbilityLibrary._reset()
 			continue
 
-		var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+		var caster_data = _create_test_actor()
 		var caster = caster_data["actor"]
 		var caster_combatant = caster_data["combatant"]
-		var target = AbilityActivationTestHelpers.create_target_with_combatant()
+		var target = _create_target_with_combatant()
 		target.global_position = Vector3(1, 0, 0)
 
 		var initial_resource = caster_combatant._current_resource
@@ -456,10 +527,10 @@ static func _test_target_freed_before_activation() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 
 	var initial_resource = caster_combatant._current_resource
 	var initial_cooldown = caster_combatant._cooldowns.remaining(&"power_strike")
@@ -521,10 +592,10 @@ static func _test_target_freed_after_commit() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)
 
 	var initial_resource = caster_combatant._current_resource
@@ -584,11 +655,11 @@ static func _test_out_of_range() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(10, 0, 0)  # Beyond 2.0 range
 
 	var initial_resource = caster_combatant._current_resource
@@ -626,7 +697,7 @@ static func _test_invalid_target_reference() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 	var initial_resource = caster_combatant._current_resource
@@ -666,10 +737,10 @@ static func _test_atomic_resource_commitment() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)
 
 	var initial_resource = caster_combatant._current_resource
@@ -719,10 +790,10 @@ static func _test_ability_caster_activate() -> Array[String]:
 	MobaAbilityLibrary._reset()
 	_ensure_all_test_abilities_loaded()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS)
+	var caster_data = _create_test_actor()
 	var caster = caster_data["actor"]
 
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)
 
 	var caster_node = MobaAbilityCaster.new()
@@ -769,7 +840,7 @@ static func _test_ability_caster_activate_without_preregistration() -> Array[Str
 	_ensure_all_test_abilities_loaded()
 
 	# register_abilities = false: nothing is registered on this combatant yet.
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS, false)
+	var caster_data = _create_test_actor(false)
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
@@ -778,7 +849,7 @@ static func _test_ability_caster_activate_without_preregistration() -> Array[Str
 			"ability_caster_without_preregistration: power_strike should not be pre-registered"
 		)
 
-	var target = AbilityActivationTestHelpers.create_target_with_combatant()
+	var target = _create_target_with_combatant()
 	target.global_position = Vector3(1, 0, 0)
 
 	var caster_node = MobaAbilityCaster.new()
@@ -817,7 +888,7 @@ static func _test_brace_buff_application() -> Array[String]:
 	# Setup
 	MobaAbilityLibrary._reset()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS, false)
+	var caster_data = _create_test_actor(false)
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
@@ -906,7 +977,7 @@ static func _test_brace_buff_expiry() -> Array[String]:
 	# Setup
 	MobaAbilityLibrary._reset()
 
-	var caster_data = AbilityActivationTestHelpers.create_test_actor(_ALL_ABILITY_IDS, false)
+	var caster_data = _create_test_actor(false)
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
