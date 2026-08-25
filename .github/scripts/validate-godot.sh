@@ -48,4 +48,17 @@ run_pass "import pass" "$log_dir/godot-import.log" --import
 # Pass 2: boot and quit — scripts parse and autoloads initialize.
 run_pass "headless validation" "$log_dir/godot-headless.log" --quit
 
+# A zero exit is not by itself proof the suites ran. tests/test_bootstrap.gd
+# makes a truncated run non-zero, but it cannot cover the case where the
+# bootstrap autoload never loads at all -- if that script fails to compile,
+# none of its code runs, Godot still boots and quits cleanly, and this pass
+# returns 0 having executed no suite whatsoever. Require the completion line
+# the bootstrap prints on a full pass before believing the zero.
+if ! grep -Eq 'All [0-9]+ test suites passed\.' "$log_dir/godot-headless.log"; then
+  echo "Godot headless validation exited 0 but ran no test suites." >&2
+  echo "The test bootstrap autoload most likely failed to load. Full log:" >&2
+  cat "$log_dir/godot-headless.log" >&2 || true
+  exit 1
+fi
+
 echo "Godot headless validation passed."
