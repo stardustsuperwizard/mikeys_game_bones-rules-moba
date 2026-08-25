@@ -22,6 +22,16 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# --- stuck mouse capture recovers without a right-button release ---
+	# Runs before the scene work below: the rule under test is pure, and this
+	# way it still reports if a later scenario stalls.
+	#
+	# Asserted through the predicate rather than by driving Input.mouse_mode,
+	# because the headless DisplayServer silently ignores writes to it -- a
+	# test that set MOUSE_MODE_CAPTURED and waited for the camera to clear it
+	# would pass against unfixed code, having never entered the stuck state.
+	_check_capture_recovery_rule()
+
 	var scene := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(scene)
 	await physics_frame
@@ -231,23 +241,6 @@ func _run() -> void:
 	else:
 		print("PASS unreachable order abandoned by the stall guard")
 
-	# --- stuck capture recovery (AC #6) --------------------------------
-	# Simulate stuck capture by forcing Input.mouse_mode without button down.
-	# The camera reconciliation should auto-release it.
-	var initial_mode := Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-
-	# Wait for recovery (camera's reconciliation in _process)
-	var recovered := await _wait_until(
-		func() -> bool: return Input.mouse_mode != Input.MOUSE_MODE_CAPTURED,
-		120
-	)
-
-	if recovered:
-		print("PASS stuck capture recovered automatically")
-	else:
-		_fail("stuck capture: capture did not recover (still in mode %d after 120 frames)" % Input.mouse_mode)
-
 	_finish()
 
 
@@ -297,6 +290,36 @@ func _make_door(parent: Node, position: Vector3) -> Door:
 	parent.add_child(door)
 	door.global_position = position
 	return door
+
+
+# The reconciliation rule that keeps mouse capture from sticking: release only
+# when the mouse is captured and the right button is not actually down.
+func _check_capture_recovery_rule() -> void:
+	var captured := Input.MOUSE_MODE_CAPTURED
+	var visible_mode := Input.MOUSE_MODE_VISIBLE
+	var before := _failures.size()
+
+	# The stuck state: captured, but the button that captured it is not held.
+	if not ThirdPersonCamera3D.should_release_capture(captured, false):
+		_fail("capture recovery: captured with the right button up must release")
+
+	# Right-drag look in progress -- releasing here would break the camera.
+	if ThirdPersonCamera3D.should_release_capture(captured, true):
+		_fail("capture recovery: captured with the right button held must not release")
+
+	# Not captured: nothing to recover, whatever the button is doing.
+	if ThirdPersonCamera3D.should_release_capture(visible_mode, false):
+		_fail("capture recovery: an uncaptured mouse must not be released")
+	if ThirdPersonCamera3D.should_release_capture(visible_mode, true):
+		_fail("capture recovery: an uncaptured mouse must not be released while held")
+
+	# Reported here rather than left to `_finish()`: a later scenario can stall
+	# the run before the closing summary is ever reached.
+	if _failures.size() == before:
+		print("PASS stuck capture releases only when the right button is up")
+	else:
+		for i in range(before, _failures.size()):
+			printerr("FAIL " + _failures[i])
 
 
 func _fail(message: String) -> void:

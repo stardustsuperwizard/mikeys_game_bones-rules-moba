@@ -107,11 +107,26 @@ func recenter() -> void:
 	_spring_length = _target_distance
 
 
+# Whether a capture in `mouse_mode` should be released given the right button's
+# actual pressed state.
+#
+# Capture is entered on right-button press and released on its release, so a
+# release event that never arrives -- a trackpad gesture that generates none, a
+# focus change, a dropped OS event -- otherwise strands the mouse in
+# MOUSE_MODE_CAPTURED for the rest of the session, silently swallowing every
+# left click.
+#
+# Static and pure so the reconciliation rule is testable: `Input.mouse_mode` is
+# a no-op under the headless DisplayServer, which makes the live behavior
+# unobservable in a headless test.
+static func should_release_capture(mouse_mode: int, right_button_pressed: bool) -> bool:
+	return mouse_mode == Input.MOUSE_MODE_CAPTURED and not right_button_pressed
+
+
 func _process(delta: float) -> void:
-	# Recover from stuck mouse capture: if the mouse is captured but the right
-	# button is not pressed, release capture. This handles cases where the
-	# release event was lost (focus change, dropped OS event, trackpad gesture).
-	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+	if should_release_capture(
+		Input.mouse_mode, Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	_update_transform(delta)
