@@ -440,11 +440,68 @@ jobs:
           mode: fix
           files-list-file: changed-gd-files.txt
 
+      # The re-check reports every finding gdlint still sees, withheld ones
+      # included -- so its `clean` output is false for exactly the findings
+      # the session was never asked to fix, and gating the commit on it
+      # would let one withheld finding suppress a real fix in another file.
+      # Partition its output the same way, and ask the narrower question the
+      # commit actually depends on: is anything the session *was* asked to
+      # fix still outstanding? Anything unrecognized counts as outstanding.
+      - name: Partition Remaining Findings
+        if: >-
+          steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
+          steps.build-prompt.outputs.has-fixable == 'true' &&
+          steps.scope-check.outputs.in_scope == 'true'
+        id: recheck-partition
+        shell: python
+        run: |
+          import os
+          import pathlib
+          import re
+
+          # Same shape as `Build Lint Fix Prompt` above; kept in step with it.
+          FINDING = re.compile(
+              r"^(?P<path>.+?):(?P<line>\d+): Error: "
+              r"(?P<message>.*?)(?: \((?P<rule>[A-Za-z0-9_-]+)\))?$"
+          )
+
+          no_fix_rules = {
+              rule.strip()
+              for rule in os.environ["LINT_NO_IN_FILE_FIX_RULES"].split(",")
+              if rule.strip()
+          }
+
+          gdlint_output = pathlib.Path("gdlint-output.txt")
+          raw = gdlint_output.read_text(errors="replace") if gdlint_output.exists() else ""
+
+          outstanding = []
+
+          for raw_line in raw.splitlines():
+              line = raw_line.strip()
+
+              # gdlint's own tallies say nothing about what is left.
+              if not line or line.startswith(("Success:", "Failure:")):
+                  continue
+
+              match = FINDING.match(line)
+
+              if match and match["rule"] in no_fix_rules:
+                  continue
+
+              outstanding.append(line)
+
+          for line in outstanding:
+              print(f"Still outstanding after the fix: {line}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"resolved={'false' if outstanding else 'true'}\n")
+
       - name: Commit Lint Fix
         if: >-
           steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
           steps.build-prompt.outputs.has-fixable == 'true' &&
-          steps.scope-check.outputs.in_scope == 'true' && steps.recheck.outputs.clean == 'true'
+          steps.scope-check.outputs.in_scope == 'true' &&
+          steps.recheck-partition.outputs.resolved == 'true'
         id: commit-fix
         shell: bash
         run: |
