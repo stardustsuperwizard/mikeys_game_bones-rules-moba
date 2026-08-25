@@ -267,13 +267,13 @@ func _apply_effects_seam(ability: MobaAbility, target: Node) -> void:
 	# Apply buffs to the caster's combatant
 	var caster_combatant := _get_combatant(actor)
 	if caster_combatant != null:
+		var caster_effects := caster_combatant.get_effect_container()
 		for buff in ability.buffs:
-			var effect_container := caster_combatant.get_effect_container()
-			effect_container.apply_modifier(buff, StringName(ability.id))
+			caster_effects.apply_modifier(buff, StringName(ability.id))
 
 	# Apply debuffs to the resolved target's combatant
 	var target_combatant := _get_combatant(target)
 	if target_combatant != null:
+		var target_effects := target_combatant.get_effect_container()
 		for debuff in ability.debuffs:
-			var effect_container := target_combatant.get_effect_container()
-			effect_container.apply_modifier(debuff, StringName(ability.id))
+			target_effects.apply_modifier(debuff, StringName(ability.id))
