@@ -592,9 +592,7 @@ jobs:
 
       # Runs immediately after the executor's commit is confirmed, before
       # validation, formatting, or the pre-PR review-and-fix pass -- see the
-      # rationale block at the top of this file. That means "Rework cycles"
-      # below is always 0: no pre-PR fix can have landed yet at the point
-      # this pull request opens.
+      # rationale block at the top of this file.
       #
       # The pull request body only ever carries the executor's own
       # completion report -- the same shape a human-run or cloud-agent
@@ -686,15 +684,6 @@ jobs:
               "```",
               "VERDICT:",
               "```",
-              "",
-              "## Agent Session Metadata",
-              "",
-              f"- Implementation model: {executor_model}",
-              "- Review model: ",
-              "- Reasoning level: default",
-              "- Rework cycles: 0",
-              "- Steering messages: none",
-              "- Session wall-clock: see workflow run duration",
           ]
 
           pathlib.Path("pr-body.md").write_text("\n".join(lines) + "\n")

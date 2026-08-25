@@ -81,8 +81,6 @@ stop and ask the user what to fix instead of guessing.
    (`/review-task <pr-number>` or the `agent:review` label) decides the next
    one; leave the stale `review:fix` label alone unless the user asks you to
    remove it.
-6. If the PR body has an **Agent Session Metadata** block, increment
-   `Rework cycles` by one.
 
 ## Guardrails
 

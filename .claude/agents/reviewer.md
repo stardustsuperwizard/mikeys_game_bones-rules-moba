@@ -142,10 +142,5 @@ gh pr edit <pr-number> --repo stardustsuperwizard/sword-and-planet \
   --add-label review:<pass|fix|planning-failure|design-ambiguity>
 ```
 
-Note in the comment which model produced the review
-(`Claude Opus 5 (Claude Code)`) so `.github/scripts/agent-metrics.py` and
-the PR's **Agent Session Metadata** block stay attributable — if the PR
-body still has an empty `Review model:` field, offer to fill it in.
-
 Never merge the PR, delete its branch, or edit code — those remain human
 decisions.

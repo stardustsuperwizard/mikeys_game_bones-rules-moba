@@ -271,9 +271,8 @@ Two consequences:
 ### Auto is a measurement problem, not just a cost one
 
 Auto picks one of four models per session and does not tell you which. That
-makes `agent-metrics.py`'s whole premise — cost per merged task, attributed
-per model — unanswerable for any task dispatched that way. If you care about
-the routing experiment, pick the model.
+makes per-model cost attribution unanswerable for any task dispatched that
+way. If you care about the routing experiment, pick the model.
 
 ### Models retiring 2026-09-01
 
@@ -296,12 +295,12 @@ this comparison is possible.
 
 ## The workflow
 
-Seven workflows in `.github/workflows/`, `agent-00` through `agent-06`. The
+Six workflows in `.github/workflows/`, `agent-00` through `agent-05`. The
 number no longer maps to file purpose one-to-one — `agent-03-rollup.yml` and
 `agent-04-review.yml` swapped which number carries which role after
 `agent-05-fix.yml` was added — so treat the filename, not the number, as
-authoritative. Four spend AI credits (planner, execute, review, fix); three are
-plumbing and cost nothing (dashboard, rollup, metrics). `agent-00-dashboard.yml` no
+authoritative. Four spend AI credits (planner, execute, review, fix); two are
+plumbing and cost nothing (dashboard, rollup). `agent-00-dashboard.yml` no
 longer runs on every event — it renders on demand now. See *Issue views* and
 *The control plane* below.
 
@@ -451,7 +450,6 @@ depends on the color. Checked live against the repository on 2026-08-22:
 | `review:design-ambiguity` | `#FBCA04` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
 | `dashboard` | `#5319E7` | `agent-00-dashboard.yml` |
 | `dashboard:update` | `#5319E7` | `agent-00-dashboard.yml` |
-| `metrics:update` | `#5319E7` | `agent-06-metrics.yml` |
 
 "Bootstrapped by" only matters if the label is ever deleted: whichever
 workflow's `ensure_label` guard runs next recreates it, from that workflow's
@@ -1257,70 +1255,6 @@ load rather than degrade gracefully:
 There is **no "skill" concept** for the cloud agent. The only extension points
 are custom agents and MCP servers.
 
-## Measuring the workflow
-
-The routing above is a hypothesis: that a cheap implementer plus expensive
-planning and review beats running one mid-tier model throughout. Cost per
-token does not settle it. **Cost per merged task, with rework counted,**
-does.
-
-Run the report:
-
-```
-.github/scripts/agent-metrics.py                 # last 30 merged PRs
-.github/scripts/agent-metrics.py --since 2026-09-01
-.github/scripts/agent-metrics.py --json          # machine-readable
-```
-
-It needs `gh` authenticated against the repository and nothing else — no
-special permissions, no org.
-
-### What it measures
-
-| Metric | Reads | Tells you |
-| --- | --- | --- |
-| Verdict distribution | PR body `VERDICT:` | `PLANNING FAILURE` rate is the planner's report card — whether Opus 5 earns its 5× |
-| Scope adherence | Issue *Files Expected to Change* vs. files changed | Whether the cheap implementer stays in its box |
-| First-push CI | Check runs on the PR's first commit | Whether the implementer validated before opening, or CI caught it |
-| Diff size | PR additions + deletions | Outliers mean bad decomposition upstream, not a bad implementer |
-| Post-merge fixes | Later PRs touching the same files | A `PASS` needing repair days later means review was too cheap |
-| Rework, steering | PR template metadata | Under-specification, and credits spent recovering from it |
-
-Post-merge overlap is a heuristic, not proof of a defect. Churn-prone files
-(`project.godot`, `README.md`) make unrelated PRs look like fixes, so the
-report lists the shared paths — read them before believing the rate. On a
-young repository where most PRs touch the same few files, expect this number
-to be high and near-meaningless until the codebase spreads out.
-
-### What it cannot measure
-
-There is no per-PR or per-session cost attribution anywhere in GitHub's
-surface. Credits are billed per token and aggregated per user per day.
-Nothing ties a dollar figure to a session, which is why the PR template's
-**Agent Session Metadata** block is filled in by hand and why
-`agent-metrics.py` reports metadata coverage — rows without it are counted
-but cannot be attributed to a model.
-
-The Copilot usage metrics API does expose `ai_credits_used`, token sums, and
-PR merge times, but it requires enterprise owners, organization
-administrators, or billing managers. This repository is personally owned, so
-that API is unavailable; moving it under an organization you own would open
-it. Note that even then, `totals_by_model_feature` is empty in GitHub's own
-example schema — do not expect clean per-model cost.
-
-### Getting the report without a shell
-
-`agent-06-metrics.yml` posts the same report as an Issue comment on demand,
-same button-not-state pattern as the control plane: add **`metrics:update`**
-to any Issue and it comments a fresh `agent-metrics.py` run there, then
-removes the label. Works from GitHub Mobile. `workflow_dispatch` also takes
-`issue_number`, `limit`, `since`, and `window_days` directly, for a
-one-off run against a specific range without touching a label at all.
-
-It is still the same outcome-metrics report, not a cost report — see *What it
-cannot measure* above. Comparing Opus vs. Haiku sessions means comparing rows
-by `implementation_model` in the output, not a credits figure.
-
 ## Supporting files
 
 | File | Purpose |
@@ -1331,7 +1265,6 @@ by `implementation_model` in the output, not a credits figure.
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
 | `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix`; refuses fork PRs and diffs it cannot push before spending a session; ends with an independent validation job on the pushed SHA |
-| `.github/workflows/agent-06-metrics.yml` | Posts an `agent-metrics.py` report as an Issue comment, on `metrics:update` or dispatch |
 | `.github/workflows/godot-validation.yml` | The one reusable validation job (`workflow_call`); called by `godot-ci-validation.yml`, `agent-02-execute.yml`, and `agent-05-fix.yml` |
 | `.github/workflows/godot-ci-validation.yml` | Human-authored `pull_request` validation gate (`paths-ignore` deny-list) plus a manual dispatch; calls `godot-validation.yml` |
 | `.github/actions/build-review-request` | Shared by `agent-04-review.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the reviewer prompt |
@@ -1346,9 +1279,8 @@ by `implementation_model` in the output, not a credits figure.
 | `.github/agents/03-reviewer.agent.md` | Reviewer role, verdict classification |
 | `.github/agents/05-fixer.agent.md` | Fixer role, bounded-correction contract |
 | `.github/scripts/validate-godot.sh` | Single source of truth for validation; CI and agents call it |
-| `.github/scripts/agent-metrics.py` | Tier A outcome metrics from merged PRs |
 | `.github/ISSUE_TEMPLATE/99-execute_task.md` | Planner-emitted bounded task |
-| `.github/pull_request_template.md` | Handoff record, verdict, model metadata |
+| `.github/pull_request_template.md` | Handoff record, verdict |
 | `CLAUDE.md` | Points Claude Code at the same contract Copilot reads |
 | `.claude/agents/*.md`, `.claude/commands/*.md` | Local Claude Code counterparts of the four roles — see *Claude Code as an additional environment* |
 
