@@ -109,9 +109,15 @@ run_case "runtime-error" nonzero 'test suites (FAILED|never ran):.*Cooldown Test
 run_case "bootstrap-broken" nonzero 'exited 0 but ran no test suites' \
   "printf '\nfunc _regression_broken() -> void:\n\tthis is not valid gdscript\n' >> tests/test_bootstrap.gd"
 
+# 5. The expected list drifting out of sync with the _check() calls. An unlisted
+#    suite would push the actual count past the expected one and switch
+#    truncation detection off, so the bootstrap reports the drift as a failure.
+run_case "list-drift" nonzero 'HUD Test ran but is not in _expected_suites' \
+  "grep -v '^\t\"HUD Test\",$' tests/test_bootstrap.gd > tests/tb.tmp && mv tests/tb.tmp tests/test_bootstrap.gd"
+
 echo
 if [ "$failures" -ne 0 ]; then
-  echo "$failures of 4 exit-code regression cases FAILED." >&2
+  echo "$failures of 5 exit-code regression cases FAILED." >&2
   exit 1
 fi
-echo "All 4 exit-code regression cases passed."
+echo "All 5 exit-code regression cases passed."

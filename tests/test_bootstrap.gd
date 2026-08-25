@@ -68,6 +68,17 @@ func _ready() -> void:
 
 ## Record and announce one suite's result.
 func _check(suite_name: String, passed: bool) -> void:
+	# _expected_suites and the _check() calls in _ready() are both maintained by
+	# hand, and the truncation math above is only meaningful while they agree. A
+	# suite that runs without being listed would push the actual count past the
+	# expected one and silently switch truncation detection off, so treat the
+	# drift itself as a failure rather than letting it hide the next abort.
+	if suite_name not in _expected_suites:
+		_failures.append(suite_name)
+		printerr("FAIL %s" % suite_name)
+		printerr("  %s ran but is not in _expected_suites; add it there." % suite_name)
+		return
+
 	if passed:
 		_passes.append(suite_name)
 		print("PASS %s" % suite_name)
