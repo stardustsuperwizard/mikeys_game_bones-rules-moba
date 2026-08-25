@@ -91,6 +91,11 @@ fix-validate-output.txt
 gdformat-output.txt
 gdlint-output.txt
 changed-gd-files.txt
+changed-after-fix.txt
+untracked-after-fix.txt
+all-changes-after-fix.txt
+lint-fix-prompt.txt
+lint-fix-validate-output.txt
 comment.md
 blocker-comment.md
 fix-comment.md

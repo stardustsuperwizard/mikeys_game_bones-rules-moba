@@ -293,7 +293,13 @@ jobs:
           # Collect all modified tracked files
           git diff --name-only > changed-after-fix.txt
 
-          # Collect any untracked files created by the session
+          # Collect any untracked files created by the session.
+          # --exclude-standard is what keeps this workflow's own scratch
+          # files (lint-fix-prompt.txt and the lists written right here) out
+          # of the comparison -- they live at repo root and are .gitignored
+          # for exactly that reason. A new scratch file added to this job
+          # must be added to .gitignore too, or every run reports itself
+          # out of scope.
           git ls-files --others --exclude-standard > untracked-after-fix.txt || true
 
           # Combine tracked and untracked changes
