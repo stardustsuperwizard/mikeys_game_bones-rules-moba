@@ -23,8 +23,9 @@ func _initialize() -> void:
 
 func _run() -> void:
 	# --- stuck mouse capture recovers without a right-button release ---
-	# Runs before the scene work below: the rule under test is pure, and this
-	# way it still reports if a later scenario stalls.
+	# Runs before the scene work below because the rule under test is pure and
+	# needs none of it. Like every other check here, its result reaches you
+	# through _finish().
 	#
 	# Asserted through the predicate rather than by driving Input.mouse_mode,
 	# because the headless DisplayServer silently ignores writes to it -- a
@@ -314,11 +315,15 @@ func _run_interaction_scenarios(
 	# that dies to the basic attack is freed, and a freed target fails
 	# `invalid_target` for a reason that has nothing to do with this defect.
 	#
-	# What is asserted below is only the criterion #185 names -- that the click
-	# order supplied a target at all. Not whether the ability then lands in
-	# range: the controller halts at its own attack_range, which is the same 2.0
-	# as power_strike's range, so success and `out_of_range` are both ordinary
-	# outcomes here and neither says anything about target resolution.
+	# The half-metre of slack is deliberate. Waiting for the controller's exact
+	# halt at attack_range would race it, and the assertion would flake on which
+	# side of 2.0 a float landed. So slot 1 fires from about 2.5m, outside
+	# power_strike's 2.0 range, and reports `out_of_range` every run.
+	#
+	# That is the expected result, not a failure: what is asserted below is only
+	# the criterion #185 names -- that the click order supplied a target at all.
+	# Whether the ability then reaches it is a question about range, which this
+	# scenario deliberately does not pin down.
 	var ability_dummy_body := ability_dummy.get_node("Body") as Node3D
 	var closed_to_melee := await _wait_until(
 		func() -> bool:
