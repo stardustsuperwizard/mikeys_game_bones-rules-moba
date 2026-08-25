@@ -911,16 +911,15 @@ static func _test_brace_buff_application() -> Array[String]:
 	var result = action.execute()
 
 	if not result.success:
-		violations.append("brace_buff_application: activation should succeed, got: %s" % result.reason)
+		violations.append(
+			"brace_buff_application: activation should succeed, got: %s" % result.reason
+		)
 
 	# Check armor buff was applied
 	var buffed_armor = caster_combatant.get_stat(&"armor")
 	if not is_equal_approx(buffed_armor, 70.0):
 		violations.append(
-			(
-				"brace_buff_application: armor should be 70.0 after brace (+40), got %f"
-				% buffed_armor
-			)
+			"brace_buff_application: armor should be 70.0 after brace (+40), got %f" % buffed_armor
 		)
 
 	# Check magic resistance buff was applied
@@ -1001,9 +1000,7 @@ static func _test_brace_buff_expiry() -> Array[String]:
 	var buffed_armor = caster_combatant.get_stat(&"armor")
 	if not is_equal_approx(buffed_armor, 70.0):
 		violations.append(
-			(
-				"brace_buff_expiry: armor should be 70.0 after brace, got %f" % buffed_armor
-			)
+			"brace_buff_expiry: armor should be 70.0 after brace, got %f" % buffed_armor
 		)
 
 	# Tick past 4 seconds (duration of brace buff)
