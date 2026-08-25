@@ -45,7 +45,25 @@ func _run() -> void:
 		_fail("setup: controller is not PlayerController3D")
 		return _finish()
 
+	if not await _run_movement_scenarios(camera, controller, body):
+		return _finish()
+	if not await _run_interaction_scenarios(scene, camera, controller, body):
+		return _finish()
+
+	_finish()
+
+
+# Walking orders: ground, facing, and the two wall cases.
+#
+# Split from _run() so each scenario can bail the moment an actor it needs
+# is gone. Returns false once one has; the caller stops there rather than
+# running later scenarios through a freed controller.
+func _run_movement_scenarios(
+	camera: Camera3D, controller: PlayerController3D, body: CharacterBody3D
+) -> bool:
 	# --- click the ground -> walk there and settle ---------------------
+	if _actors_lost("ground click", [body, controller]):
+		return false
 	var goal := Vector3(2, 0, 2)
 	await _click_world_point(controller, camera, goal + Vector3(0, 0.01, 0))
 	var arrived := await _wait_until(
@@ -53,8 +71,7 @@ func _run() -> void:
 			if not is_instance_valid(body) or not is_instance_valid(controller):
 				return false
 			return _flat_distance(body.global_position, goal) <= controller.arrival_distance,
-		240,
-		"ground click"
+		240
 	)
 	for i in 40:
 		await physics_frame
@@ -75,6 +92,8 @@ func _run() -> void:
 		)
 
 	# --- click behind the player -> body turns to face the walk --------
+	if _actors_lost("click behind", [body, controller]):
+		return false
 	var behind := Vector3(-4, 0, 6)
 	await _click_world_point(controller, camera, behind + Vector3(0, 0.01, 0))
 	var faced := await _wait_until(
@@ -84,8 +103,7 @@ func _run() -> void:
 			var to_goal := behind - body.global_position
 			var want := atan2(-to_goal.x, -to_goal.z)
 			return absf(rad_to_deg(wrapf(want - body.global_rotation.y, -PI, PI))) <= 15.0,
-		180,
-		"turn toward order"
+		180
 	)
 	if not faced:
 		_fail(
@@ -101,11 +119,12 @@ func _run() -> void:
 			if not is_instance_valid(body):
 				return false
 			return _flat_distance(body.global_position, behind) <= 0.5,
-		240,
-		"turn toward order - arrival"
+		240
 	)
 
 	# --- click a wall -> walk up to it and stop flush ------------------
+	if _actors_lost("wall click", [body, controller]):
+		return false
 	# The north wall's inner face is at z = -9.9. Clicking high up the wall
 	# should still walk to its base, settle with the 0.4-radius capsule
 	# touching it, and drop the order on contact rather than grinding into
@@ -118,8 +137,7 @@ func _run() -> void:
 			if not is_instance_valid(body):
 				return false
 			return body.is_on_wall(),
-		600,
-		"wall click - contact"
+		600
 	)
 	if not is_instance_valid(body) or not is_instance_valid(controller):
 		_fail("wall click: player was freed during test")
@@ -176,6 +194,8 @@ func _run() -> void:
 					)
 
 	# --- click along a wall you are already against -> slide, don't stall
+	if _actors_lost("wall slide", [body, controller]):
+		return false
 	# Standing flush on the north wall, clicking it far to the west is a
 	# glancing contact, not a blocked one: the player should slide along the
 	# wall rather than read the wall it is already touching as "arrived".
@@ -193,8 +213,7 @@ func _run() -> void:
 				if not is_instance_valid(controller):
 					return false
 				return not controller._has_destination,
-			600,
-			"wall slide"
+			600
 		)
 		if not is_instance_valid(body):
 			_fail("wall slide: player was freed during wait")
@@ -217,7 +236,17 @@ func _run() -> void:
 					)
 				)
 
+	return true
+
+
+# Orders that need something to act on: a hostile, a door, a cancelled walk,
+# and an unreachable destination. Same bail-out contract as the movement half.
+func _run_interaction_scenarios(
+	scene: Node, camera: Camera3D, controller: PlayerController3D, body: CharacterBody3D
+) -> bool:
 	# --- click a hostile actor -> approach and attack ------------------
+	if _actors_lost("attack click", [body, controller]):
+		return false
 	var dummy := _make_dummy(scene, Vector3(2, 0, -3))
 	await physics_frame
 	await _click_world_point(controller, camera, dummy.global_position + Vector3(0, 1, 0))
@@ -229,8 +258,7 @@ func _run() -> void:
 				not is_instance_valid(dummy)
 				or dummy.character_sheet.current_hp < dummy.character_sheet.max_hp
 			),
-		360,
-		"attack click"
+		360
 	)
 	if not is_instance_valid(body) or not is_instance_valid(dummy):
 		_fail("attack click: actor was freed during test")
@@ -245,6 +273,8 @@ func _run() -> void:
 		print("PASS attack click -> closed to melee and dealt damage")
 
 	# --- click a door -> approach and open -----------------------------
+	if _actors_lost("door click", [body, controller]):
+		return false
 	var door := _make_door(scene, Vector3(-2, 1, 2))
 	await physics_frame
 	await _click_world_point(controller, camera, door.global_position)
@@ -253,8 +283,7 @@ func _run() -> void:
 			if not is_instance_valid(body) or not is_instance_valid(door):
 				return false
 			return door.is_open(),
-		360,
-		"door click"
+		360
 	)
 	if not is_instance_valid(body) or not is_instance_valid(door):
 		_fail("door click: actor was freed during test")
@@ -269,6 +298,8 @@ func _run() -> void:
 		print("PASS door click -> closed and opened the door")
 
 	# --- keyboard movement cancels a live click order ------------------
+	if _actors_lost("keyboard cancel", [body, controller]):
+		return false
 	await _click_world_point(controller, camera, Vector3(6, 0.01, 6))
 	await physics_frame
 	Input.action_press("move_forward")
@@ -289,6 +320,8 @@ func _run() -> void:
 			print("PASS keyboard input cancels the click order")
 
 	# --- unreachable order gives up instead of shoving forever ---------
+	if _actors_lost("unreachable order", [body, controller]):
+		return false
 	if not is_instance_valid(controller):
 		_fail("stall guard: player was freed during test")
 	else:
@@ -300,13 +333,14 @@ func _run() -> void:
 				if not is_instance_valid(controller):
 					return false
 				return not controller._has_destination,
-			600,
-			"unreachable order"
+			600
 		)
 		if not gave_up:
 			_fail("stall guard: player never abandoned an unreachable order")
 		else:
 			print("PASS unreachable order abandoned by the stall guard")
+
+	return true
 
 	_finish()
 
@@ -322,7 +356,7 @@ func _click_world_point(
 	controller._issue_order_from_click(camera.unproject_position(world_point))
 
 
-func _wait_until(predicate: Callable, max_frames: int, _scenario_name: String = "") -> bool:
+func _wait_until(predicate: Callable, max_frames: int) -> bool:
 	for i in max_frames:
 		if predicate.call():
 			return true
@@ -357,6 +391,20 @@ func _make_door(parent: Node, position: Vector3) -> Door:
 	parent.add_child(door)
 	door.global_position = position
 	return door
+
+
+# Stops the run when an actor a scenario needs has been freed.
+#
+# A dead player is not a failure to report and walk past: every scenario after
+# it would issue orders through a freed controller, and the first one to do so
+# takes the whole run down with a type error rather than a verdict. Naming the
+# scenario that first noticed is the only way the output says which one it was.
+func _actors_lost(scenario: String, nodes: Array) -> bool:
+	for node in nodes:
+		if not is_instance_valid(node):
+			_fail("%s: an actor this scenario needs was freed mid-run" % scenario)
+			return true
+	return false
 
 
 func _fail(message: String) -> void:
