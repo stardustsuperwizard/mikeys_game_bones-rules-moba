@@ -239,14 +239,17 @@ func apply_damage(damage: MobaDamage) -> void:
 	if get_parent() != null:
 		target_name = String(get_parent().name)
 	print(
-		"[MobaCombat] %s -> %s: %.1f raw / %.1f final (%s%s)" % [
-			attacker_name,
-			target_name,
-			raw,
-			final,
-			MobaDamage.DamageType.keys()[damage.damage_type],
-			", CRIT" if was_crit else ""
-		]
+		(
+			"[MobaCombat] %s -> %s: %.1f raw / %.1f final (%s%s)"
+			% [
+				attacker_name,
+				target_name,
+				raw,
+				final,
+				MobaDamage.DamageType.keys()[damage.damage_type],
+				", CRIT" if was_crit else ""
+			]
+		)
 	)
 
 	# Emit damage_resolved
