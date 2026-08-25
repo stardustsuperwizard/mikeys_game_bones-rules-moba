@@ -366,6 +366,19 @@ jobs:
           # This ensures the tree that gets validated is the tree that gets
           # committed -- nothing slips in or drops out between the two.
           mapfile -t FILES < changed-gd-files.txt
+
+          # An empty pathspec would make `git add -u` stage the whole work
+          # tree -- the exact "committed more than was validated" failure
+          # this step exists to prevent. Unreachable today (the job only
+          # runs when gdlint reported findings in these files), so treat it
+          # as a broken precondition rather than something to work around.
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::changed-gd-files.txt is empty but the tree is" \
+                 "dirty. Refusing to stage an unbounded set."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git add -u -- "${FILES[@]}"
 
           if ! .github/scripts/validate-godot.sh > lint-fix-validate-output.txt 2>&1; then
@@ -375,10 +388,18 @@ jobs:
 
             # Undo only the targeted files just staged above -- the scope
             # check already guarantees nothing else in the work tree was
-            # touched, so a plain `git checkout --` on that exact list is
-            # enough. No `git reset --hard` / `git clean -fd` sweep of the
-            # whole tree needed.
-            git checkout -- "${FILES[@]}"
+            # touched, so no `git reset --hard` / `git clean -fd` sweep of
+            # the whole tree is needed.
+            #
+            # `HEAD --`, not a bare `--`: without a tree-ish, `git checkout`
+            # restores the work tree *from the index*, and `git add -u` just
+            # put the session's changes there -- so it would discard nothing
+            # at all. Naming HEAD resets index and work tree together, and
+            # also handles a targeted file the session deleted, which a bare
+            # `--` cannot: that path is no longer in the index, so it fails
+            # with "did not match any file(s) known to git" and takes the
+            # whole step down under `set -e`.
+            git checkout HEAD -- "${FILES[@]}"
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
