@@ -232,6 +232,23 @@ func apply_damage(damage: MobaDamage) -> void:
 	_current_health -= final
 	_update_health()
 
+	var attacker_name := "unattributed"
+	if attacker != null and attacker.get_parent() != null:
+		attacker_name = String(attacker.get_parent().name)
+	var target_name := String(name)
+	if get_parent() != null:
+		target_name = String(get_parent().name)
+	print(
+		"[MobaCombat] %s -> %s: %.1f raw / %.1f final (%s%s)" % [
+			attacker_name,
+			target_name,
+			raw,
+			final,
+			MobaDamage.DamageType.keys()[damage.damage_type],
+			", CRIT" if was_crit else ""
+		]
+	)
+
 	# Emit damage_resolved
 	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source)
 
