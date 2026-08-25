@@ -72,10 +72,12 @@ static func _test_bad_stat_modifier() -> bool:
 	if not expected_violation_found:
 		printerr(
 			(
-				"ERROR: bad_stat_modifier.tres produced no violation naming stat"
-				+ " 'attak_damage'. Got: %s"
+				(
+					"ERROR: bad_stat_modifier.tres produced no violation naming stat"
+					+ " 'attak_damage'. Got: %s"
+				)
+				% [violations]
 			)
-			% [violations]
 		)
 		return false
 
@@ -97,8 +99,10 @@ static func _test_sample_complete_no_violations() -> bool:
 	for violation in violations:
 		if violation.contains("stat is"):
 			printerr(
-				"ERROR: sample_complete.tres should not have stat-name violations. Got: %s"
-				% [violation]
+				(
+					"ERROR: sample_complete.tres should not have stat-name violations. Got: %s"
+					% [violation]
+				)
 			)
 			return false
 
