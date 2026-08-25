@@ -98,6 +98,78 @@ func _run() -> void:
 		func() -> bool: return _flat_distance(body.global_position, behind) <= 0.5, 240
 	)
 
+	# --- a click order gives a TARGETED ability its target -------------
+	# The other half of the defect: `_ability_target()` resolves a TARGETED
+	# ability against the click order's target and nothing else, so while no
+	# order can be issued, slot 1 fails `invalid_target` on every press.
+	#
+	# Runs here, ahead of the wall scenarios, because a later scenario stalls
+	# the run (see #186) and this would never be reached at the end of the
+	# file. The dummy is freed and the order cancelled afterwards so the wall
+	# scenarios below start from the state they expect.
+	var ability_failures_before := _failures.size()
+	var ability_dummy := _make_dummy(scene, body.global_position + Vector3(2, 0, 0))
+	await physics_frame
+	await _click_world_point(controller, camera, ability_dummy.global_position + Vector3(0, 1, 0))
+	var ability_target_set := await _wait_until(
+		func() -> bool: return controller._ability_target() != null, 240
+	)
+
+	# Close to melee first, so slot 1 is judged on a live target rather than on
+	# a target it was never near. Proximity rather than damage deliberately: a
+	# dummy that dies to the basic attack is freed, and a freed target fails
+	# `invalid_target` for a reason that has nothing to do with this defect.
+	#
+	# The threshold is the controller's own attack_range, not the ability's:
+	# power_strike.tres `range`, longsword.tres `attack_range` and the
+	# controller's `attack_range` are all 2.0, so the player stops exactly on
+	# the ability's boundary and slot 1 reports `out_of_range` as often as it
+	# succeeds. What this asserts is the criterion #185 actually names -- that
+	# the click order supplied a target at all -- not which side of a shared
+	# 2.0 the float lands on.
+	var ability_dummy_body := ability_dummy.get_node("Body") as Node3D
+	var closed_to_melee := await _wait_until(
+		func() -> bool:
+			return (
+				_flat_distance(body.global_position, ability_dummy_body.global_position)
+				<= controller.attack_range + 0.5
+			),
+		360
+	)
+
+	if not ability_target_set:
+		_fail("ability target: clicking a hostile actor established no target for slot 1")
+	elif not closed_to_melee:
+		_fail("ability target: attack order never closed to melee, so slot 1 cannot be judged")
+	else:
+		var caster := player.get_node_or_null("MobaAbilityCaster") as MobaAbilityCaster
+		if caster == null:
+			_fail("ability target: player has no MobaAbilityCaster")
+		else:
+			var context := MobaCastContext.new(player, controller._ability_target())
+			var result := caster.activate_slot(1, context)
+			if result.reason == MobaAbilityAction.FAILURE_INVALID_TARGET:
+				_fail(
+					(
+						"ability slot 1: still failed invalid_target with an attack order on %s"
+						% ability_dummy
+					)
+				)
+			else:
+				print(
+					(
+						"PASS ability slot 1 resolved the click order's target (success=%s reason='%s')"
+						% [result.success, result.reason]
+					)
+				)
+
+	# Reported inline for the same reason as the capture check above.
+	_report_new_failures(ability_failures_before)
+
+	controller.cancel_order()
+	ability_dummy.queue_free()
+	await physics_frame
+
 	# --- click a wall -> walk up to it and stop flush ------------------
 	# The north wall's inner face is at z = -9.9. Clicking high up the wall
 	# should still walk to its base, settle with the 0.4-radius capsule
@@ -313,13 +385,18 @@ func _check_capture_recovery_rule() -> void:
 	if ThirdPersonCamera3D.should_release_capture(visible_mode, true):
 		_fail("capture recovery: an uncaptured mouse must not be released while held")
 
-	# Reported here rather than left to `_finish()`: a later scenario can stall
-	# the run before the closing summary is ever reached.
 	if _failures.size() == before:
 		print("PASS stuck capture releases only when the right button is up")
-	else:
-		for i in range(before, _failures.size()):
-			printerr("FAIL " + _failures[i])
+	_report_new_failures(before)
+
+
+# Prints any failures recorded since `before`, for checks that run ahead of the
+# scenario that stalls this file (#186). `_finish()` normally prints them, but
+# it is not reached while that stall stands, so a check placed before it would
+# otherwise record a failure that never surfaces.
+func _report_new_failures(before: int) -> void:
+	for i in range(before, _failures.size()):
+		printerr("FAIL " + _failures[i])
 
 
 func _fail(message: String) -> void:

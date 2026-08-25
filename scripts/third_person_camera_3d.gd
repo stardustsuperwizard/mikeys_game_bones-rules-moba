@@ -11,6 +11,14 @@
 # Setting auto_realign restores the WoW-style chase camera: the view tracks
 # the target's facing (so turning with A/D turns the camera too) and
 # realigns behind them after a free-look.
+#
+# This camera owns Input.mouse_mode outright. It captures the mouse on
+# right-button press, and _process() reconciles the mode against the button's
+# real state every frame (see should_release_capture), so any capture set
+# elsewhere without the right button held is cleared within a frame. Nothing
+# else writes mouse_mode today; a future system that needs a captured cursor of
+# its own has to coordinate with this reconciliation rather than set the mode
+# behind it.
 class_name ThirdPersonCamera3D
 extends Camera3D
 
