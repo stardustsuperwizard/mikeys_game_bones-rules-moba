@@ -95,7 +95,12 @@ func _report() -> void:
 			if suite_name not in _passes and suite_name not in _failures:
 				missing_suites.append(suite_name)
 
-		printerr("\n%d of %d test suites never ran: %s" % [missing_suites.size(), expected_count, ", ".join(missing_suites)])
+		printerr(
+			(
+				"\n%d of %d test suites never ran: %s"
+				% [missing_suites.size(), expected_count, ", ".join(missing_suites)]
+			)
+		)
 		return
 
 	# Report normal pass/fail outcomes.
@@ -103,7 +108,9 @@ func _report() -> void:
 		print("\nAll %d test suites passed." % actual_count)
 		return
 
-	printerr("\n%d of %d test suites FAILED: %s" % [_failures.size(), actual_count, ", ".join(_failures)])
+	printerr(
+		"\n%d of %d test suites FAILED: %s" % [_failures.size(), actual_count, ", ".join(_failures)]
+	)
 
 
 func _quit_engine() -> void:
