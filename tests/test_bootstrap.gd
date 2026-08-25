@@ -19,6 +19,24 @@ var _failures: Array[String] = []
 ## Suite names that returned true this run.
 var _passes: Array[String] = []
 
+## Expected suite names in execution order. Used to detect truncated runs.
+var _expected_suites: Array[String] = [
+	"Extraction Contract Test",
+	"Ability Data Test",
+	"Combatant Test",
+	"Effect Container Test",
+	"Resource Test",
+	"Formulas Test",
+	"State Machine Test",
+	"Cooldown Test",
+	"Ability Library Test",
+	"Ability Activation Test",
+	"Brace Ability Test",
+	"Loadout Test",
+	"HUD Slot Test",
+	"HUD Test",
+]
+
 
 func _ready() -> void:
 	if DisplayServer.get_name() != "headless":
@@ -27,6 +45,10 @@ func _ready() -> void:
 	var tree_script: Script = get_tree().get_script()
 	if tree_script != null:
 		return
+
+	# Queue completion logic BEFORE any suites run, so it executes even if
+	# a suite aborts due to compilation error or runtime error.
+	call_deferred("_finalize")
 
 	_check("Extraction Contract Test", ExtractionContractTest.run())
 	_check("Ability Data Test", AbilityDataTest.run())
@@ -43,14 +65,20 @@ func _ready() -> void:
 	_check("HUD Slot Test", HudSlotTest.run())
 	_check("HUD Test", HudTest.run())
 
-	_report()
-
-	# Exit after the tests complete to avoid loading the main scene.
-	call_deferred("_quit_engine")
-
 
 ## Record and announce one suite's result.
 func _check(suite_name: String, passed: bool) -> void:
+	# _expected_suites and the _check() calls in _ready() are both maintained by
+	# hand, and the truncation math above is only meaningful while they agree. A
+	# suite that runs without being listed would push the actual count past the
+	# expected one and silently switch truncation detection off, so treat the
+	# drift itself as a failure rather than letting it hide the next abort.
+	if suite_name not in _expected_suites:
+		_failures.append(suite_name)
+		printerr("FAIL %s" % suite_name)
+		printerr("  %s ran but is not in _expected_suites; add it there." % suite_name)
+		return
+
 	if passed:
 		_passes.append(suite_name)
 		print("PASS %s" % suite_name)
@@ -59,14 +87,45 @@ func _check(suite_name: String, passed: bool) -> void:
 		printerr("FAIL %s" % suite_name)
 
 
+## Finalize the test run: report results and exit. Called via call_deferred
+## to guarantee it runs even if a suite aborts due to compilation error or
+## runtime error.
+func _finalize() -> void:
+	_report()
+	_quit_engine()
+
+
 func _report() -> void:
-	var total := _passes.size() + _failures.size()
-	if _failures.is_empty():
-		print("\nAll %d test suites passed." % total)
+	var actual_count := _passes.size() + _failures.size()
+	var expected_count := _expected_suites.size()
+
+	# Check if fewer suites ran than expected (indicates a truncated run).
+	if actual_count < expected_count:
+		var missing_suites: Array[String] = []
+		for suite_name in _expected_suites:
+			if suite_name not in _passes and suite_name not in _failures:
+				missing_suites.append(suite_name)
+
+		printerr(
+			(
+				"\n%d of %d test suites never ran: %s"
+				% [missing_suites.size(), expected_count, ", ".join(missing_suites)]
+			)
+		)
 		return
 
-	printerr("\n%d of %d test suites FAILED: %s" % [_failures.size(), total, ", ".join(_failures)])
+	# Report normal pass/fail outcomes.
+	if _failures.is_empty():
+		print("\nAll %d test suites passed." % actual_count)
+		return
+
+	printerr(
+		"\n%d of %d test suites FAILED: %s" % [_failures.size(), actual_count, ", ".join(_failures)]
+	)
 
 
 func _quit_engine() -> void:
-	get_tree().quit(1 if not _failures.is_empty() else 0)
+	var actual_count := _passes.size() + _failures.size()
+	var expected_count := _expected_suites.size()
+	var should_fail := not _failures.is_empty() or actual_count < expected_count
+	get_tree().quit(1 if should_fail else 0)
