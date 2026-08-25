@@ -295,25 +295,30 @@ func _run_interaction_scenarios(
 	#
 	# The dummy is freed and the order cancelled afterwards so the scenarios
 	# around it start from the state they expect.
-	var ability_dummy := _make_dummy(scene, body.global_position + Vector3(2, 0, 0))
+	# Six metres out, toward the arena centre so it always lands on open floor.
+	# Far enough that the order has to actually close the distance: spawning it
+	# inside the melee threshold would satisfy the wait below on its first call,
+	# leaving the guard unable to fire and the walk never exercised.
+	var toward_centre := Vector3.ZERO - body.global_position
+	toward_centre.y = 0.0
+	var ability_spawn := body.global_position + toward_centre.normalized() * 6.0
+	var ability_dummy := _make_dummy(scene, ability_spawn)
 	await physics_frame
 	await _click_world_point(controller, camera, ability_dummy.global_position + Vector3(0, 1, 0))
 	var ability_target_set := await _wait_until(
 		func() -> bool: return controller._ability_target() != null, 240
 	)
 
-	# Close to melee first, so slot 1 is judged on a live target rather than on
-	# a target it was never near. Proximity rather than damage deliberately: a
-	# dummy that dies to the basic attack is freed, and a freed target fails
+	# Wait for the walk to actually arrive, so slot 1 is judged on a target the
+	# order really closed on. Proximity rather than damage deliberately: a dummy
+	# that dies to the basic attack is freed, and a freed target fails
 	# `invalid_target` for a reason that has nothing to do with this defect.
 	#
-	# The threshold is the controller's own attack_range, not the ability's:
-	# power_strike.tres `range`, longsword.tres `attack_range` and the
-	# controller's `attack_range` are all 2.0, so the player stops exactly on
-	# the ability's boundary and slot 1 reports `out_of_range` as often as it
-	# succeeds. What this asserts is the criterion #185 actually names -- that
-	# the click order supplied a target at all -- not which side of a shared
-	# 2.0 the float lands on.
+	# What is asserted below is only the criterion #185 names -- that the click
+	# order supplied a target at all. Not whether the ability then lands in
+	# range: the controller halts at its own attack_range, which is the same 2.0
+	# as power_strike's range, so success and `out_of_range` are both ordinary
+	# outcomes here and neither says anything about target resolution.
 	var ability_dummy_body := ability_dummy.get_node("Body") as Node3D
 	var closed_to_melee := await _wait_until(
 		func() -> bool:
