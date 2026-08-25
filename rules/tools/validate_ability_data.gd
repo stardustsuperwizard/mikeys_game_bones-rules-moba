@@ -119,25 +119,13 @@ static func _validate_stat_modifier(
 ) -> Array[String]:
 	var violations: Array[String] = []
 
-	# Check that stat is not empty
+	# Check that stat names a real MobaStatBlock stat
 	if modifier.stat.is_empty():
+		violations.append("%s: %s stat is empty" % [resource_path, context])
+	elif not StringName(modifier.stat) in MobaStatBlock.get_valid_stats():
 		violations.append(
-			(
-				"%s: %s stat is empty"
-				% [resource_path, context]
-			)
+			"%s: %s stat is unknown (%s)" % [resource_path, context, modifier.stat]
 		)
-	else:
-		# Check that stat is in valid stats list
-		var valid_stats = MobaStatBlock.get_valid_stats()
-		var stat_as_stringname = StringName(modifier.stat)
-		if not stat_as_stringname in valid_stats:
-			violations.append(
-				(
-					"%s: %s stat is unknown (%s)"
-					% [resource_path, context, modifier.stat]
-				)
-			)
 
 	# Check that if stacking is STACK, max_stacks is set
 	if modifier.stacking == MobaStatModifier.Stacking.STACK:

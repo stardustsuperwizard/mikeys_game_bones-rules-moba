@@ -71,7 +71,10 @@ static func _test_bad_stat_modifier() -> bool:
 
 	if not expected_violation_found:
 		printerr(
-			"ERROR: bad_stat_modifier.tres did not produce expected violation for stat 'attak_damage'. Got violations: %s"
+			(
+				"ERROR: bad_stat_modifier.tres produced no violation naming stat"
+				+ " 'attak_damage'. Got: %s"
+			)
 			% [violations]
 		)
 		return false
