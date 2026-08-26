@@ -778,10 +778,11 @@ func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 	if _attack_target == null or not _attack_target.is_alive():
 		return
 
-	# Check for BLIND miss: roll against the active BLIND entry's magnitude
+	# Check for BLIND miss: the attacker's own BLIND entry impairs its accuracy,
+	# rolled against that entry's magnitude as a miss chance.
 	var blind_type = MobaCrowdControlSpec.CCType.BLIND
-	if _attack_target.has_crowd_control(blind_type):
-		var blind_spec = _attack_target.get_crowd_control_spec(blind_type)
+	if has_crowd_control(blind_type):
+		var blind_spec = get_crowd_control_spec(blind_type)
 		if blind_spec != null:
 			var blind_roll := MobaRules.roll_blind()
 			var miss_chance := blind_spec.magnitude

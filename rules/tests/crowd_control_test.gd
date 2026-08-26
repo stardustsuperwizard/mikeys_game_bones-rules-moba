@@ -12,6 +12,14 @@ class_name CrowdControlTest
 const _BASELINE_STAT_BLOCK = preload("res://rules/data/stat_blocks/baseline.tres")
 
 
+## Minimal Node exposing a settable global_position, matching
+## LoadoutTest._TestPositionedNode -- MobaCombatant._is_in_range() duck-types
+## on the parent's global_position and a plain Actor (extends Node) has none.
+class _TestPositionedNode:
+	extends Node
+	var global_position: Vector3 = Vector3.ZERO
+
+
 static func run() -> bool:
 	var all_violations: Array[String] = []
 
@@ -23,6 +31,8 @@ static func run() -> bool:
 	all_violations.append_array(_test_different_cc_types_coexist())
 	all_violations.append_array(_test_crowd_control_refused_on_dead())
 	all_violations.append_array(_test_crowd_control_refused_while_dashing())
+	all_violations.append_array(_test_blind_causes_attacker_miss())
+	all_violations.append_array(_test_blind_zero_magnitude_never_misses())
 
 	if all_violations.is_empty():
 		return true
@@ -382,5 +392,138 @@ static func _test_crowd_control_refused_while_dashing() -> Array[String]:
 	# Verify the CC entry was not tracked
 	if target.has_crowd_control(MobaCrowdControlSpec.CCType.STUN):
 		violations.append("refused_while_dashing: STUN should not be tracked while DASHING")
+
+	return violations
+
+
+## Build an attacker (with a loadout+weapon) and a target, both positioned at
+## the origin so range is never the limiting factor, mirroring
+## LoadoutTest._create_test_actor_with_loadout_and_weapon().
+static func _create_attacker_and_target() -> Dictionary:
+	var attacker := _TestPositionedNode.new()
+	attacker.global_position = Vector3.ZERO
+
+	var attacker_combatant := MobaCombatant.new()
+	attacker_combatant.name = "MobaCombatant"
+	attacker_combatant.stat_block = _BASELINE_STAT_BLOCK
+	attacker_combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
+	attacker_combatant._current_health = attacker_combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.HEALTH
+	)
+	attacker_combatant._current_resource = attacker_combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.RESOURCE
+	)
+
+	var loadout := MobaLoadout.new()
+	var weapon := MobaWeapon.new()
+	weapon.damage = 50.0
+	weapon.attack_speed = 1.0
+	weapon.wind_up = 0.1
+	weapon.recovery = 0.2
+	weapon.attack_range = 10.0
+	weapon.damage_type = MobaDamage.DamageType.PHYSICAL
+	loadout.weapon = weapon
+	attacker_combatant.loadout = loadout
+	attacker.add_child(attacker_combatant)
+
+	var attacker_state_machine := MobaStateMachine.new()
+	attacker_state_machine.name = "MobaStateMachine"
+	attacker_state_machine._load_state_table()
+	attacker.add_child(attacker_state_machine)
+
+	var target := _TestPositionedNode.new()
+	target.global_position = Vector3.ZERO
+
+	var target_combatant := MobaCombatant.new()
+	target_combatant.name = "MobaCombatant"
+	target_combatant.stat_block = _BASELINE_STAT_BLOCK
+	target_combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
+	target_combatant._current_health = target_combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.HEALTH
+	)
+	target.add_child(target_combatant)
+
+	return {
+		"attacker": attacker,
+		"attacker_combatant": attacker_combatant,
+		"attacker_state_machine": attacker_state_machine,
+		"target": target,
+		"target_combatant": target_combatant,
+	}
+
+
+## Run one full basic-attack cycle (windup then recovery) from attacker to target.
+static func _run_basic_attack_cycle(data: Dictionary) -> void:
+	var attacker_combatant: MobaCombatant = data["attacker_combatant"]
+	var target_combatant: MobaCombatant = data["target_combatant"]
+	var weapon = attacker_combatant.loadout.get_weapon()
+
+	attacker_combatant.basic_attack(target_combatant)
+	attacker_combatant.tick(weapon.wind_up + 0.01)
+	attacker_combatant.tick(weapon.recovery + 0.01)
+
+
+## Test that an active BLIND entry on the attacker rolls a miss chance at
+## basic-attack resolution: magnitude=1.0 forces the roll (always < 1.0,
+## since MobaRules.roll_blind() draws from [0.0, 1.0)) to register as a miss,
+## skipping apply_damage() entirely while the attack cycle still completes.
+static func _test_blind_causes_attacker_miss() -> Array[String]:
+	var violations: Array[String] = []
+
+	var data = _create_attacker_and_target()
+	var attacker_combatant: MobaCombatant = data["attacker_combatant"]
+	var target_combatant: MobaCombatant = data["target_combatant"]
+	var attacker_state_machine: MobaStateMachine = data["attacker_state_machine"]
+
+	var spec = MobaCrowdControlSpec.new()
+	spec.type = MobaCrowdControlSpec.CCType.BLIND
+	spec.duration = 5.0
+	spec.magnitude = 1.0
+	spec.affected_by_tenacity = false
+	attacker_combatant.apply_crowd_control(spec, attacker_combatant)
+
+	var target_health_before = target_combatant.current_health
+	_run_basic_attack_cycle(data)
+
+	if target_combatant.current_health != target_health_before:
+		violations.append(
+			"blind_causes_attacker_miss: fully-blinded attacker's hit should have missed, target took damage"
+		)
+
+	if attacker_state_machine.current_state != MobaState.IDLE:
+		violations.append(
+			(
+				"blind_causes_attacker_miss: attack cycle should still complete (windup/recovery/cooldown)"
+				+ " and return attacker to IDLE even on a miss"
+			)
+		)
+
+	return violations
+
+
+## Test that a BLIND entry with magnitude=0.0 never causes a miss (the roll,
+## drawn from [0.0, 1.0), is never < 0.0), proving the miss-chance branch is
+## a magnitude-gated roll and not an unconditional skip.
+static func _test_blind_zero_magnitude_never_misses() -> Array[String]:
+	var violations: Array[String] = []
+
+	var data = _create_attacker_and_target()
+	var attacker_combatant: MobaCombatant = data["attacker_combatant"]
+	var target_combatant: MobaCombatant = data["target_combatant"]
+
+	var spec = MobaCrowdControlSpec.new()
+	spec.type = MobaCrowdControlSpec.CCType.BLIND
+	spec.duration = 5.0
+	spec.magnitude = 0.0
+	spec.affected_by_tenacity = false
+	attacker_combatant.apply_crowd_control(spec, attacker_combatant)
+
+	var target_health_before = target_combatant.current_health
+	_run_basic_attack_cycle(data)
+
+	if target_combatant.current_health >= target_health_before:
+		violations.append(
+			"blind_zero_magnitude_never_misses: a 0.0-magnitude BLIND should never cause a miss"
+		)
 
 	return violations
