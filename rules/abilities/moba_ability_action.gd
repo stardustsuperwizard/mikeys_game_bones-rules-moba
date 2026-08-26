@@ -286,4 +286,6 @@ func _apply_effects_seam(ability: MobaAbility, target: Node) -> void:
 
 	# Apply shield to the caster's combatant
 	if caster_combatant != null and ability.shield_amount > 0.0:
-		caster_combatant.apply_shield(ability.shield_amount, StringName(ability.id), ability.duration)
+		caster_combatant.apply_shield(
+			ability.shield_amount, StringName(ability.id), ability.duration
+		)

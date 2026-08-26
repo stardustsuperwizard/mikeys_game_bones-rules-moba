@@ -877,8 +877,11 @@ static func _test_force_barrier_shield_application() -> Array[String]:
 	var force_barrier_ability = MobaAbilityLibrary.get_ability(&"force_barrier")
 	if force_barrier_ability == null:
 		MobaAbilityLibrary._reset()
-		violations.append(
-			"force_barrier_shield: force_barrier.tres did not load as a MobaAbility with id 'force_barrier'"
+		(
+			violations
+			. append(
+				"force_barrier_shield: force_barrier.tres did not load as a MobaAbility with id 'force_barrier'"
+			)
 		)
 		return violations
 
@@ -903,14 +906,18 @@ static func _test_force_barrier_shield_application() -> Array[String]:
 	var shield_total = caster_combatant.total_shield()
 	if not _approx_equal(shield_total, expected_shield):
 		violations.append(
-			"force_barrier_shield: total shield should be %f, got %f"
-			% [expected_shield, shield_total]
+			(
+				"force_barrier_shield: total shield should be %f, got %f"
+				% [expected_shield, shield_total]
+			)
 		)
 
 	if caster_combatant._active_shields.size() != 1:
 		violations.append(
-			"force_barrier_shield: should have exactly 1 shield, got %d"
-			% caster_combatant._active_shields.size()
+			(
+				"force_barrier_shield: should have exactly 1 shield, got %d"
+				% caster_combatant._active_shields.size()
+			)
 		)
 		MobaAbilityLibrary._reset()
 		return violations
@@ -918,8 +925,10 @@ static func _test_force_barrier_shield_application() -> Array[String]:
 	var shield = caster_combatant._active_shields[0] as MobaShield
 	if not _approx_equal(shield.remaining, expected_duration):
 		violations.append(
-			"force_barrier_shield: shield duration should be %f, got %f"
-			% [expected_duration, shield.remaining]
+			(
+				"force_barrier_shield: shield duration should be %f, got %f"
+				% [expected_duration, shield.remaining]
+			)
 		)
 
 	# The cost is spent through the ordinary activation path, not a special case.
@@ -968,8 +977,11 @@ static func _test_field_dressing_healing_application() -> Array[String]:
 	var field_dressing_ability = MobaAbilityLibrary.get_ability(&"field_dressing")
 	if field_dressing_ability == null:
 		MobaAbilityLibrary._reset()
-		violations.append(
-			"field_dressing_heal: field_dressing.tres did not load as a MobaAbility with id 'field_dressing'"
+		(
+			violations
+			. append(
+				"field_dressing_heal: field_dressing.tres did not load as a MobaAbility with id 'field_dressing'"
+			)
 		)
 		return violations
 
@@ -993,9 +1005,7 @@ static func _test_field_dressing_healing_application() -> Array[String]:
 
 	var result = _activate_ability(caster, &"field_dressing")
 	if not result.success:
-		violations.append(
-			"field_dressing_heal: activation should succeed, got: %s" % result.reason
-		)
+		violations.append("field_dressing_heal: activation should succeed, got: %s" % result.reason)
 
 	var expected_health: float = minf(wounded_health + expected_heal, max_health)
 	if not _approx_equal(caster_combatant.current_health, expected_health):
@@ -1018,9 +1028,7 @@ static func _test_field_dressing_healing_application() -> Array[String]:
 
 	if caster_combatant.total_shield() > 0.0:
 		violations.append(
-			(
-				"field_dressing_heal: shield should be 0.0, got %f" % caster_combatant.total_shield()
-			)
+			"field_dressing_heal: shield should be 0.0, got %f" % caster_combatant.total_shield()
 		)
 
 	# Healing at full health is clamped at maximum rather than overhealing.
@@ -1040,7 +1048,10 @@ static func _test_field_dressing_healing_application() -> Array[String]:
 	var result2 = _activate_ability(caster2, &"field_dressing")
 	if not result2.success:
 		violations.append(
-			"field_dressing_heal: activation at full health should succeed, got: %s" % result2.reason
+			(
+				"field_dressing_heal: activation at full health should succeed, got: %s"
+				% result2.reason
+			)
 		)
 
 	if not _approx_equal(caster_combatant2.current_health, max_health):
