@@ -86,7 +86,7 @@ static func _test_bad_stat_modifier() -> bool:
 
 ## Test that sample_complete.tres produces no stat-name violations.
 static func _test_sample_complete_no_violations() -> bool:
-	var fixture_path = ABILITIES_DIR.path_join("sample_complete.tres")
+	var fixture_path = FIXTURES_ABILITIES_DIR.path_join("sample_complete.tres")
 	var ability = ResourceLoader.load(fixture_path) as MobaAbility
 
 	if ability == null:
