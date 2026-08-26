@@ -83,10 +83,13 @@ static func _first_cc_table_error(data: Variant) -> String:
 
 	# Check that we have exactly the right CC types
 	if data.keys().size() != expected_cc_types.size():
-		return "crowd_control_effects.json: expected %d CC types, found %d" % [
-			expected_cc_types.size(),
-			data.keys().size(),
-		]
+		return (
+			"crowd_control_effects.json: expected %d CC types, found %d"
+			% [
+				expected_cc_types.size(),
+				data.keys().size(),
+			]
+		)
 
 	# Validate and process each CC type
 	for cc_type_name_str: String in data.keys():

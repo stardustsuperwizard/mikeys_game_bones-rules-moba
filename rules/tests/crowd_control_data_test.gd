@@ -86,9 +86,7 @@ static func _test_blocks_move_all_types() -> Array[String]:
 		var result = MobaCrowdControl.blocks_move(cc_type)
 		if result != expected:
 			var cc_name = MobaCrowdControlSpec.CCType.keys()[cc_type]
-			violations.append(
-				"blocks_move(%s): expected %s, got %s" % [cc_name, expected, result]
-			)
+			violations.append("blocks_move(%s): expected %s, got %s" % [cc_name, expected, result])
 
 	return violations
 
@@ -161,7 +159,6 @@ static func _test_blocks_ability_all_types() -> Array[String]:
 	return violations
 
 
-
 ## Build a complete, valid table: every CCType row with all three columns.
 ##
 ## The malformed-table tests below each start from this and introduce exactly
@@ -194,9 +191,14 @@ static func _expect_rejected(
 	if error_message == "":
 		violations.append("Malformed table (%s) should fail validation" % label)
 	elif expected_fragment not in error_message:
-		violations.append(
-			"Malformed table (%s) rejected for the wrong reason: expected an error containing '%s', got '%s'"
-			% [label, expected_fragment, error_message]
+		(
+			violations
+			. append(
+				(
+					"Malformed table (%s) rejected for the wrong reason: expected an error containing '%s', got '%s'"
+					% [label, expected_fragment, error_message]
+				)
+			)
 		)
 
 	if MobaCrowdControl._parse_cc_table(bad_data):

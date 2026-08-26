@@ -283,8 +283,6 @@ static func _test_crowd_control_duration_worked_example() -> Array[String]:
 
 	var result = MobaFormulas.crowd_control_duration(2.0, 0.25)
 	if not _approx_equal(result, 1.5, 0.0001):
-		violations.append(
-			"crowd_control_duration(2.0, 0.25): expected 1.5, got %f" % result
-		)
+		violations.append("crowd_control_duration(2.0, 0.25): expected 1.5, got %f" % result)
 
 	return violations
