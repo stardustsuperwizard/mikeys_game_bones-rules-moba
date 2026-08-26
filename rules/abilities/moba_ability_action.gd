@@ -259,7 +259,7 @@ func _check_silenced_seam(combatant: MobaCombatant) -> bool:
 
 
 ## Seam for applying effects.
-## Applies crowd control, buffs, and debuffs from the ability to the target.
+## Applies crowd control, buffs, debuffs, healing, and shielding from the ability.
 func _apply_effects_seam(ability: MobaAbility, target: Node) -> void:
 	var caster_combatant := _get_combatant(actor)
 	var target_combatant := _get_combatant(target)
@@ -279,3 +279,11 @@ func _apply_effects_seam(ability: MobaAbility, target: Node) -> void:
 		var target_effects := target_combatant.get_effect_container()
 		for debuff in ability.debuffs:
 			target_effects.apply_modifier(debuff, StringName(ability.id))
+
+	# Apply healing to the caster's combatant
+	if caster_combatant != null and ability.heal_amount > 0.0:
+		caster_combatant.apply_healing(ability.heal_amount)
+
+	# Apply shield to the caster's combatant
+	if caster_combatant != null and ability.shield_amount > 0.0:
+		caster_combatant.apply_shield(ability.shield_amount, StringName(ability.id), ability.duration)

@@ -100,6 +100,16 @@ enum OnChannelBreak {
 @export var scaling: Dictionary = {}
 
 # ---------------------------------------------------------------------------
+# Healing and shielding
+# ---------------------------------------------------------------------------
+
+## Instant self-heal on cast.
+@export var heal_amount: float = 0.0
+
+## Self-shield capacity on cast (uses ability's duration field for shield duration).
+@export var shield_amount: float = 0.0
+
+# ---------------------------------------------------------------------------
 # Resource and cooldown
 # ---------------------------------------------------------------------------
 
