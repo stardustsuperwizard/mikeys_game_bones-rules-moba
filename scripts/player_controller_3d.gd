@@ -156,7 +156,24 @@ func _unhandled_input(event: InputEvent) -> void:
 # Returns world-space movement direction. Keyboard input is relative to the
 # player's current facing so forward/back/strafe respect which way the body
 # is pointing, and takes precedence over -- and cancels -- any click order.
+#
+# Gated by crowd control: if forced movement (FEAR/KNOCKBACK/PULL/KNOCK_UP) is
+# active, returns it. Else if movement is blocked by hard CC (STUN/ROOT/etc),
+# returns Vector3.ZERO. Else falls through to normal input/order logic.
 func get_move_direction() -> Vector3:
+	var combatant := _combatant()
+
+	# Gate 1: Forced movement overrides everything
+	if combatant:
+		var forced := combatant.get_forced_move_direction()
+		if forced != Vector3.ZERO:
+			return forced
+
+	# Gate 2: If movement is not currently permitted, stop all movement
+	if combatant and not combatant.can_perform_action(&"move"):
+		return Vector3.ZERO
+
+	# Gate 3: Fall through to normal input/order logic
 	var body := _body()
 	if not body:
 		return Vector3.ZERO
@@ -191,7 +208,27 @@ func consume_jump() -> bool:
 
 # Bones polls these once the body has moved for the frame, so an order that
 # arrived this frame resolves on the same frame it arrived.
+#
+# Gated by TAUNT: if the combatant is taunted, returns the taunt source's Actor
+# instead of the player's click order, overriding player target selection.
 func get_attack_target() -> Actor:
+	var combatant := _combatant()
+
+	# Gate: If taunted, return the taunt source as the forced attack target
+	if combatant:
+		var taunt_type := MobaCrowdControlSpec.CCType.TAUNT
+		if combatant.has_crowd_control(taunt_type):
+			var taunt_source := combatant.get_crowd_control_source(taunt_type)
+			if taunt_source:
+				var taunt_source_actor := taunt_source.get_parent() as Actor
+				if taunt_source_actor and _in_range_of(taunt_source_actor, attack_range):
+					# When taunted and in range, set up the attack cycle on the forced target
+					if not _basic_attack_pending:
+						cancel_order()
+						_pending_attack_target = taunt_source_actor
+						_basic_attack_pending = true
+					return null
+
 	if _attack_target == null or not _in_range_of(_attack_target, attack_range):
 		return null
 	# When this actor has a MobaCombatant the ruleset basic-attack path
@@ -202,7 +239,7 @@ func get_attack_target() -> Actor:
 	# the same input (architecture constraint: ruleset path wins).
 	# Gate the order-cancel + flag-set on the flag not already being live so
 	# that standing still in range does not repeatedly call cancel_order().
-	if _combatant() != null:
+	if combatant != null:
 		if not _basic_attack_pending:
 			var pending_target := _attack_target
 			cancel_order()

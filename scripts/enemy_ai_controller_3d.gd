@@ -62,6 +62,28 @@ func _physics_process(delta: float) -> void:
 			_clear_pending_attack()
 
 
+# Overrides SimpleAIController's get_move_direction to gate movement by crowd control.
+#
+# Gated by crowd control: if forced movement (FEAR/KNOCKBACK/PULL/KNOCK_UP) is
+# active, returns it. Else if movement is blocked by hard CC (STUN/ROOT/etc),
+# returns Vector3.ZERO. Else falls through to the AI's normal aggro/chase logic.
+func get_move_direction() -> Vector3:
+	var combatant := _combatant()
+
+	# Gate 1: Forced movement overrides everything
+	if combatant:
+		var forced := combatant.get_forced_move_direction()
+		if forced != Vector3.ZERO:
+			return forced
+
+	# Gate 2: If movement is not currently permitted, stop all movement
+	if combatant and not combatant.can_perform_action(&"move"):
+		return Vector3.ZERO
+
+	# Gate 3: Fall through to the inherited AI logic
+	return super.get_move_direction()
+
+
 # Overrides SimpleAIController's get_attack_target to route basic attacks through
 # the ruleset when a MobaCombatant is present.
 #
@@ -74,10 +96,25 @@ func _physics_process(delta: float) -> void:
 # When this actor has no MobaCombatant it falls through entirely to
 # SimpleAIController's inherited behavior -- the flat Actor.attack_cooldown and
 # Actor.try_attack() path -- which stays intact for actors without a combatant.
+#
+# Gated by TAUNT: if the combatant is taunted, returns the taunt source's Actor
+# instead of the AI's own target selection, overriding AI decision-making.
 func get_attack_target() -> Actor:
 	var combatant := _combatant()
 	if combatant == null:
 		return super.get_attack_target()
+
+	# Gate: If taunted, return the taunt source as the forced attack target
+	var taunt_type := MobaCrowdControlSpec.CCType.TAUNT
+	if combatant.has_crowd_control(taunt_type):
+		var taunt_source := combatant.get_crowd_control_source(taunt_type)
+		if taunt_source:
+			var taunt_source_actor := taunt_source.get_parent() as Actor
+			if taunt_source_actor and actor.global_position.distance_to(taunt_source_actor.global_position) <= attack_range:
+				# When taunted and in range, set up the attack cycle on the forced target
+				_pending_attack_target = taunt_source_actor
+				_basic_attack_pending = true
+				return null
 
 	# Deaggroed, leashed home, or chased out of range: drop the pending cycle
 	# rather than latching a stale target the enemy would keep swinging at.
