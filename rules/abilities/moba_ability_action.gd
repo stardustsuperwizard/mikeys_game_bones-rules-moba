@@ -113,7 +113,7 @@ func _get_state_machine(node: Node) -> MobaStateMachine:
 ## via MobaCombatant.can_activate), step 4 (silenced).
 ## Returns an empty StringName if legal, otherwise a FAILURE_* constant.
 func _check_early_legality(combatant: MobaCombatant, state_machine: MobaStateMachine) -> StringName:
-	if state_machine != null and not state_machine.can(&"ability"):
+	if not combatant.can_perform_action(&"ability"):
 		return FAILURE_ILLEGAL_STATE
 
 	var legality_result: int = combatant.can_activate(ability_id)
@@ -251,18 +251,22 @@ func _get_position(node: Node) -> Vector3:
 	return Vector3.ZERO
 
 
-## Seam for silenced check (Batch 2 feature).
+## Seam for silenced check.
 ## Returns true if caster is silenced and cannot activate abilities.
-## Empty implementation for Batch 1.
-func _check_silenced_seam(_combatant: MobaCombatant) -> bool:
-	# TODO Batch 2: Check if caster has silenced crowd control
-	return false
+func _check_silenced_seam(combatant: MobaCombatant) -> bool:
+	var silence_type = MobaCrowdControlSpec.CCType.SILENCE
+	return combatant.has_crowd_control(silence_type)
 
 
-## Seam for applying effects (Batch 2 feature).
+## Seam for applying effects.
 ## Applies crowd control, buffs, and debuffs from the ability to the target.
 func _apply_effects_seam(ability: MobaAbility, target: Node) -> void:
-	# TODO Batch 2: Apply crowd control from ability.crowd_control
+	# Apply crowd control from ability.crowd_control to the target
+	if ability.crowd_control != null:
+		var target_combatant := _get_combatant(target)
+		var caster_combatant := _get_combatant(actor)
+		if target_combatant != null and caster_combatant != null:
+			target_combatant.apply_crowd_control(ability.crowd_control, caster_combatant)
 
 	# Apply buffs to the caster's combatant
 	var caster_combatant := _get_combatant(actor)

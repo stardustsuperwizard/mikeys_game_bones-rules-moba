@@ -31,6 +31,19 @@ const _EFFECT_CONTAINER_NAME := "MobaEffectContainer"
 ## Positive floor applied to attack_speed after modifiers.
 const _MINIMUM_ATTACK_SPEED := 0.01
 
+## Internal entry for an active crowd control effect.
+class _CCEntry:
+	var type: int  # CCType enum value
+	var remaining: float  # Time left in seconds
+	var source: MobaCombatant  # The combatant who applied this CC
+	var spec: MobaCrowdControlSpec  # The effect spec (carries magnitude for BLIND/SLOW)
+
+	func _init(p_type: int, p_remaining: float, p_source: MobaCombatant, p_spec: MobaCrowdControlSpec) -> void:
+		type = p_type
+		remaining = p_remaining
+		source = p_source
+		spec = p_spec
+
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
 
 ## Registers the loadout's action abilities as soon as it is assigned, so a
@@ -76,6 +89,9 @@ var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
 var _attack_target: Node = null
 var _attack_time_since_ready: float = INF
 var _effect_container: MobaEffectContainer = null
+## Active crowd control entries keyed by CCType. Maps int (CCType) to _CCEntry.
+## Multiple entries of different types can exist simultaneously; only one per type.
+var _active_cc_entries: Dictionary = {}
 ## Per-stat cache of the modifier bonuses (flat, percent), NOT the final
 ## value: the base is always re-read live from _runtime_stat_block so a
 ## direct mutation of the runtime stat block (as several existing test
@@ -292,6 +308,117 @@ func apply_healing(amount: float) -> void:
 	_update_health()
 
 
+## Apply crowd control to this combatant from a source.
+##
+## Refuses outright if the combatant is DEAD (dead is terminal per #25).
+## Consults the state machine's hard_cc_policy() before applying hard-CC types
+## (STUN/ROOT/SILENCE/DISARM/FEAR/TAUNT/BLIND). A policy of "no" or "displacement_only"
+## refuses the application outright. "yes" and "breaks_channel" both permit entry.
+##
+## Computes the effect's final duration via MobaFormulas.crowd_control_duration()
+## when affected_by_tenacity is true, using the target's TENACITY stat.
+##
+## Tracks active hard-CC entries per CCType. A second application of the same
+## CCType while one is already active sets remaining duration to max(remaining, new_duration)
+## (never a sum, and never a second independent instance).
+##
+## Enters/stays in CROWD_CONTROLLED via the state machine while at least one
+## hard-CC entry is active; returns to IDLE once the last one expires.
+func apply_crowd_control(spec: MobaCrowdControlSpec, source: MobaCombatant) -> void:
+	var state_machine := _get_state_machine()
+
+	# Refuse on DEAD (terminal state)
+	if not is_alive():
+		return
+
+	# Consult state machine policy for hard-CC types
+	var policy := state_machine.hard_cc_policy() if state_machine != null else &"no"
+	if policy == &"no" or policy == &"displacement_only":
+		return
+
+	# Enter CROWD_CONTROLLED (durationless state) if not already there
+	# "yes" and "breaks_channel" both permit entry
+	if state_machine != null:
+		if state_machine.current_state != MobaState.CROWD_CONTROLLED:
+			state_machine.try_enter(MobaState.CROWD_CONTROLLED)
+
+	# Compute final duration
+	var final_duration := spec.duration
+	if spec.affected_by_tenacity:
+		var tenacity := get_stat(MobaStatBlock.TENACITY)
+		final_duration = MobaFormulas.crowd_control_duration(spec.duration, tenacity)
+
+	# Track the entry (max(remaining, new_duration) rule for same CCType)
+	var cc_type := spec.type
+	if cc_type in _active_cc_entries:
+		var existing_entry = _active_cc_entries[cc_type]
+		existing_entry.remaining = maxf(existing_entry.remaining, final_duration)
+		existing_entry.source = source
+		existing_entry.spec = spec
+	else:
+		var new_entry = _CCEntry.new(cc_type, final_duration, source, spec)
+		_active_cc_entries[cc_type] = new_entry
+
+
+## Query whether the combatant can perform an action right now, accounting for active crowd control.
+##
+## While CROWD_CONTROLLED, returns the union (OR) of restrictions from all active hard-CC entries,
+## consulted through MobaCrowdControl's per-effect flags. In every other state, delegates
+## straight to state_machine.can(action).
+func can_perform_action(action: StringName) -> bool:
+	var state_machine := _get_state_machine()
+	if state_machine == null:
+		return false
+
+	# If not crowd controlled, delegate to state machine
+	if state_machine.current_state != MobaState.CROWD_CONTROLLED:
+		return state_machine.can(action)
+
+	# While CROWD_CONTROLLED, check if ANY active CC entry blocks this action
+	match action:
+		&"move":
+			for cc_entry in _active_cc_entries.values():
+				if MobaCrowdControl.blocks_move(cc_entry.type):
+					return false
+			return true
+		&"basic_attack":
+			for cc_entry in _active_cc_entries.values():
+				if MobaCrowdControl.blocks_basic_attack(cc_entry.type):
+					return false
+			return true
+		&"ability":
+			for cc_entry in _active_cc_entries.values():
+				if MobaCrowdControl.blocks_ability(cc_entry.type):
+					return false
+			return true
+		_:
+			return state_machine.can(action)
+
+
+## Check if this combatant currently has an active crowd control entry of a given type.
+## Returns true if the type is active, false otherwise.
+func has_crowd_control(cc_type: int) -> bool:
+	return cc_type in _active_cc_entries
+
+
+## Get the source combatant of an active crowd control entry.
+## Returns the source MobaCombatant, or null if the type is not active.
+func get_crowd_control_source(cc_type: int) -> MobaCombatant:
+	if cc_type not in _active_cc_entries:
+		return null
+	var entry = _active_cc_entries[cc_type]
+	return entry.source
+
+
+## Get the spec of an active crowd control entry.
+## Returns the MobaCrowdControlSpec, or null if the type is not active.
+func get_crowd_control_spec(cc_type: int) -> MobaCrowdControlSpec:
+	if cc_type not in _active_cc_entries:
+		return null
+	var entry = _active_cc_entries[cc_type]
+	return entry.spec
+
+
 ## Check if the combatant is alive.
 func is_alive() -> bool:
 	return _current_health > 0.0
@@ -461,13 +588,16 @@ func commit_activate(ability_id: StringName) -> int:
 ## Health regeneration clamps at maximum and emits health_changed.
 ## A dead combatant does not regenerate health.
 ## Resource regeneration always occurs (dead or alive).
-## Also advances all active cooldowns.
+## Also advances all active cooldowns and crowd control durations.
 func tick(delta: float) -> void:
 	# Advance cooldowns
 	_cooldowns.tick(delta)
 
 	# Advance active stat modifiers so timed effects expire on the caller's clock.
 	get_effect_container().tick(delta)
+
+	# Advance crowd control durations and expire entries
+	_tick_crowd_control(delta)
 
 	# Advance the sibling state machine and the basic-attack cycle together.
 	# MobaCombatant.tick() is the single driver of MobaStateMachine.tick() for
@@ -508,13 +638,30 @@ func tick(delta: float) -> void:
 			_update_health()
 
 
+## Advance crowd control durations and expire entries.
+## Returns to IDLE once the last active entry expires.
+func _tick_crowd_control(delta: float) -> void:
+	var state_machine := _get_state_machine()
+
+	# Advance all active entries
+	for cc_type in _active_cc_entries.keys():
+		var entry = _active_cc_entries[cc_type]
+		entry.remaining -= delta
+		if entry.remaining <= 0.0:
+			_active_cc_entries.erase(cc_type)
+
+	# If no active entries remain, return to IDLE (if we're in CROWD_CONTROLLED)
+	if _active_cc_entries.is_empty() and state_machine != null:
+		if state_machine.current_state == MobaState.CROWD_CONTROLLED:
+			state_machine.try_enter(MobaState.IDLE)
+
+
 ## Whether basic_attack() may be called right now to start a new cycle: the
-## state machine currently permits a basic attack and the attack-speed
-## interval (1.0 / attack_speed) has elapsed since the last attack started.
+## combatant currently permits a basic attack (accounting for crowd control)
+## and the attack-speed interval (1.0 / attack_speed) has elapsed since the last attack started.
 ## This is the minimal query the game side needs to drive repeat attacks.
 func is_basic_attack_ready() -> bool:
-	var state_machine := _get_state_machine()
-	if state_machine == null or not state_machine.can(&"basic_attack"):
+	if not can_perform_action(&"basic_attack"):
 		return false
 	var attack_speed := get_stat(MobaStatBlock.ATTACK_SPEED)
 	if attack_speed <= 0.0:
@@ -630,6 +777,19 @@ func _advance_basic_attack_phase(expiring_state: int, state_machine: MobaStateMa
 func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 	if _attack_target == null or not _attack_target.is_alive():
 		return
+
+	# Check for BLIND miss: roll against the active BLIND entry's magnitude
+	var blind_type = MobaCrowdControlSpec.CCType.BLIND
+	if _attack_target.has_crowd_control(blind_type):
+		var blind_spec = _attack_target.get_crowd_control_spec(blind_type)
+		if blind_spec != null:
+			var blind_roll := MobaRules.roll_blind()
+			var miss_chance := blind_spec.magnitude
+			if blind_roll < miss_chance:
+				# Miss: skip apply_damage entirely; attack cycle still runs
+				basic_attack_resolved.emit(_attack_target, weapon.damage, 0.0, weapon.damage_type, false)
+				return
+
 	var attack_damage := get_stat(MobaStatBlock.ATTACK_DAMAGE)
 	var total_damage := MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
 	var damage := MobaDamage.new(
