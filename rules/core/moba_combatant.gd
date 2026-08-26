@@ -72,7 +72,7 @@ class _DisplacementEntry:
 	var spec: MobaCrowdControlSpec  # The effect spec
 	var direction: Vector3  # The direction to move (normalized)
 	var speed: float  # The speed in units per second
-	var queued_effect: MobaCrowdControlSpec  # Optional follow-up effect to apply on landing (for KNOCK_UP)
+	var queued_effect: MobaCrowdControlSpec  # Optional follow-up effect (for KNOCK_UP)
 	var queued_effect_source: MobaCombatant  # Source for the queued effect
 
 	func _init(

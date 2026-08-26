@@ -234,10 +234,10 @@ static func _test_knockback_honors_affected_by_tenacity_true() -> Array[String]:
 	# Tick 0.02 more seconds (0.51 total) - should expire
 	target.tick(0.02)
 	if target._active_displacement != null:
-		(
-			violations
-			. append(
-				"knockback_honors_affected_by_tenacity_true: displacement should have expired at 0.51s with 50% Tenacity"
+		violations.append(
+			(
+				"knockback_honors_affected_by_tenacity_true: displacement should have expired at "
+				+ "0.51s with 50% Tenacity"
 			)
 		)
 
