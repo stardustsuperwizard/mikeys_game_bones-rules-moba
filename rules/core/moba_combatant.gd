@@ -626,4 +626,6 @@ func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 		get_stat(MobaStatBlock.ARMOR_PEN_PERCENT)
 	)
 	_attack_target.apply_damage(damage)
-	basic_attack_resolved.emit(_attack_target, damage.amount, damage.final_amount, damage.damage_type, damage.was_crit)
+	basic_attack_resolved.emit(
+		_attack_target, damage.amount, damage.final_amount, damage.damage_type, damage.was_crit
+	)

@@ -624,23 +624,48 @@ static func _test_basic_attack_damage_amount_non_crit() -> bool:
 		return false
 
 	if not is_equal_approx(observed_raw[0], expected_raw):
-		print("ERROR: non-crit basic_attack_resolved raw should be %f, got %f" % [expected_raw, observed_raw[0]])
+		print(
+			(
+				"ERROR: non-crit basic_attack_resolved raw should be %f, got %f"
+				% [expected_raw, observed_raw[0]]
+			)
+		)
 		return false
 
 	if not is_equal_approx(observed_raw[0], damage_resolved_raw[0]):
-		print("ERROR: non-crit raw %f should equal damage_resolved raw %f" % [observed_raw[0], damage_resolved_raw[0]])
+		print(
+			(
+				"ERROR: non-crit raw %f should equal damage_resolved raw %f"
+				% [observed_raw[0], damage_resolved_raw[0]]
+			)
+		)
 		return false
 
 	if not is_equal_approx(observed_final[0], damage_resolved_final[0]):
-		print("ERROR: non-crit final %f should equal damage_resolved final %f" % [observed_final[0], damage_resolved_final[0]])
+		print(
+			(
+				"ERROR: non-crit final %f should equal damage_resolved final %f"
+				% [observed_final[0], damage_resolved_final[0]]
+			)
+		)
 		return false
 
 	if observed_damage_type[0] != damage_resolved_type[0]:
-		print("ERROR: non-crit damage_type %d should equal damage_resolved type %d" % [observed_damage_type[0], damage_resolved_type[0]])
+		print(
+			(
+				"ERROR: non-crit damage_type %d should equal damage_resolved type %d"
+				% [observed_damage_type[0], damage_resolved_type[0]]
+			)
+		)
 		return false
 
 	if observed_damage_type[0] != weapon.damage_type:
-		print("ERROR: non-crit damage_type %d should equal weapon damage_type %d" % [observed_damage_type[0], weapon.damage_type])
+		print(
+			(
+				"ERROR: non-crit damage_type %d should equal weapon damage_type %d"
+				% [observed_damage_type[0], weapon.damage_type]
+			)
+		)
 		return false
 
 	# Restore original crit chance
@@ -706,19 +731,39 @@ static func _test_basic_attack_damage_amount_crit() -> bool:
 		return false
 
 	if not is_equal_approx(observed_raw[0], expected_raw):
-		print("ERROR: crit basic_attack_resolved raw should be %f, got %f" % [expected_raw, observed_raw[0]])
+		print(
+			(
+				"ERROR: crit basic_attack_resolved raw should be %f, got %f"
+				% [expected_raw, observed_raw[0]]
+			)
+		)
 		return false
 
 	if not is_equal_approx(observed_raw[0], damage_resolved_raw[0]):
-		print("ERROR: crit raw %f should equal damage_resolved raw %f" % [observed_raw[0], damage_resolved_raw[0]])
+		print(
+			(
+				"ERROR: crit raw %f should equal damage_resolved raw %f"
+				% [observed_raw[0], damage_resolved_raw[0]]
+			)
+		)
 		return false
 
 	if not is_equal_approx(observed_final[0], damage_resolved_final[0]):
-		print("ERROR: crit final %f should equal damage_resolved final %f" % [observed_final[0], damage_resolved_final[0]])
+		print(
+			(
+				"ERROR: crit final %f should equal damage_resolved final %f"
+				% [observed_final[0], damage_resolved_final[0]]
+			)
+		)
 		return false
 
 	if observed_damage_type[0] != damage_resolved_type[0]:
-		print("ERROR: crit damage_type %d should equal damage_resolved type %d" % [observed_damage_type[0], damage_resolved_type[0]])
+		print(
+			(
+				"ERROR: crit damage_type %d should equal damage_resolved type %d"
+				% [observed_damage_type[0], damage_resolved_type[0]]
+			)
+		)
 		return false
 
 	if observed_was_crit[0] != damage_resolved_crit[0]:
@@ -726,7 +771,12 @@ static func _test_basic_attack_damage_amount_crit() -> bool:
 		return false
 
 	if observed_damage_type[0] != weapon.damage_type:
-		print("ERROR: crit damage_type %d should equal weapon damage_type %d" % [observed_damage_type[0], weapon.damage_type])
+		print(
+			(
+				"ERROR: crit damage_type %d should equal weapon damage_type %d"
+				% [observed_damage_type[0], weapon.damage_type]
+			)
+		)
 		return false
 
 	# Restore original crit chance
