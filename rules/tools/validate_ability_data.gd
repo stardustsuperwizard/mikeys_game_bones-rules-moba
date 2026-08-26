@@ -30,6 +30,16 @@ static func validate_ability(resource_path: String, ability: MobaAbility) -> Arr
 			"%s: resource_cost (negative: %s)" % [resource_path, ability.resource_cost]
 		)
 
+	# Check heal_amount >= 0
+	if ability.heal_amount < 0.0:
+		violations.append("%s: heal_amount (negative: %s)" % [resource_path, ability.heal_amount])
+
+	# Check shield_amount >= 0
+	if ability.shield_amount < 0.0:
+		violations.append(
+			"%s: shield_amount (negative: %s)" % [resource_path, ability.shield_amount]
+		)
+
 	# Check magnitude-style fields are in range 0.0-1.0
 	if ability.magnetism < 0.0 or ability.magnetism > 1.0:
 		violations.append(

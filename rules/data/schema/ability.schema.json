@@ -157,6 +157,16 @@
       "type": "string",
       "enum": ["no_effect_remaining", "partial_effect_already_applied"],
       "description": "What happens to effect delivery when a channel is broken"
+    },
+    "heal_amount": {
+      "type": "number",
+      "description": "Instant self-heal on cast",
+      "minimum": 0.0
+    },
+    "shield_amount": {
+      "type": "number",
+      "description": "Self-shield capacity on cast (uses ability's duration field for shield duration)",
+      "minimum": 0.0
     }
   },
   "required": [
@@ -191,7 +201,9 @@
     "cancellable_by_hard_cc",
     "refund_resource_on_cancel",
     "on_cancel",
-    "on_channel_break"
+    "on_channel_break",
+    "heal_amount",
+    "shield_amount"
   ],
   "definitions": {
     "statModifier": {
