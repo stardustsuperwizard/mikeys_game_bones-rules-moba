@@ -363,8 +363,8 @@ func _consume_shields(incoming_damage: float) -> float:
 
 	# Sort shields by remaining duration (ascending) so we consume shortest-remaining first
 	var sorted_shields: Array[MobaShield] = _active_shields.duplicate()
-	sorted_shields.sort_custom(func(a: MobaShield, b: MobaShield) -> bool:
-		return a.remaining < b.remaining
+	sorted_shields.sort_custom(
+		func(a: MobaShield, b: MobaShield) -> bool: return a.remaining < b.remaining
 	)
 
 	# Consume shields in order

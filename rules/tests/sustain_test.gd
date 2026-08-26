@@ -57,7 +57,9 @@ static func _test_shield_creation() -> Array[String]:
 	if not _approx_equal(shield.amount, 100.0):
 		violations.append("shield_creation: expected amount 100.0, got %f" % shield.amount)
 	if shield.source != &"test_source":
-		violations.append("shield_creation: expected source 'test_source', got '%s'" % shield.source)
+		violations.append(
+			"shield_creation: expected source 'test_source', got '%s'" % shield.source
+		)
 	if not _approx_equal(shield.remaining, 5.0):
 		violations.append("shield_creation: expected remaining 5.0, got %f" % shield.remaining)
 
@@ -72,17 +74,23 @@ static func _test_total_shield() -> Array[String]:
 
 	# Empty shield pool
 	if not _approx_equal(combatant.total_shield(), 0.0):
-		violations.append("total_shield: expected 0.0 with no shields, got %f" % combatant.total_shield())
+		violations.append(
+			"total_shield: expected 0.0 with no shields, got %f" % combatant.total_shield()
+		)
 
 	# One shield
 	combatant.apply_shield(100.0, &"source1", 5.0)
 	if not _approx_equal(combatant.total_shield(), 100.0):
-		violations.append("total_shield: expected 100.0 with one shield, got %f" % combatant.total_shield())
+		violations.append(
+			"total_shield: expected 100.0 with one shield, got %f" % combatant.total_shield()
+		)
 
 	# Two shields
 	combatant.apply_shield(50.0, &"source2", 3.0)
 	if not _approx_equal(combatant.total_shield(), 150.0):
-		violations.append("total_shield: expected 150.0 with two shields, got %f" % combatant.total_shield())
+		violations.append(
+			"total_shield: expected 150.0 with two shields, got %f" % combatant.total_shield()
+		)
 
 	return violations
 
@@ -96,13 +104,20 @@ static func _test_shield_application() -> Array[String]:
 	combatant.apply_shield(75.0, &"shield_source", 10.0)
 
 	if combatant._active_shields.size() != 1:
-		violations.append("shield_application: expected 1 active shield, got %d" % combatant._active_shields.size())
+		violations.append(
+			(
+				"shield_application: expected 1 active shield, got %d"
+				% combatant._active_shields.size()
+			)
+		)
 
 	var shield = combatant._active_shields[0] as MobaShield
 	if not _approx_equal(shield.amount, 75.0):
 		violations.append("shield_application: expected shield amount 75.0, got %f" % shield.amount)
 	if shield.source != &"shield_source":
-		violations.append("shield_application: expected source 'shield_source', got '%s'" % shield.source)
+		violations.append(
+			"shield_application: expected source 'shield_source', got '%s'" % shield.source
+		)
 	if not _approx_equal(shield.remaining, 10.0):
 		violations.append("shield_application: expected remaining 10.0, got %f" % shield.remaining)
 
@@ -114,29 +129,47 @@ static func _test_shield_changed_signal() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant := _make_combatant()
-	var signal_count := 0
-	var signal_total := 0.0
+	# GDScript lambdas capture local variables by value, so plain int/float
+	# locals mutated inside the lambda would not be visible outside it. A
+	# Dictionary is a reference type, so mutating its entries from the lambda
+	# is visible to this function after the signal fires.
+	var signal_log := {"count": 0, "total": 0.0}
 
-	combatant.shield_changed.connect(func(total: float):
-		signal_count += 1
-		signal_total = total
+	combatant.shield_changed.connect(
+		func(total: float):
+			signal_log["count"] += 1
+			signal_log["total"] = total
 	)
 
 	combatant.apply_shield(50.0, &"test", 5.0)
 
-	if signal_count != 1:
-		violations.append("shield_changed_signal: expected 1 signal emission, got %d" % signal_count)
+	if signal_log["count"] != 1:
+		violations.append(
+			"shield_changed_signal: expected 1 signal emission, got %d" % signal_log["count"]
+		)
 
-	if not _approx_equal(signal_total, 50.0):
-		violations.append("shield_changed_signal: expected signal total 50.0, got %f" % signal_total)
+	if not _approx_equal(signal_log["total"], 50.0):
+		violations.append(
+			"shield_changed_signal: expected signal total 50.0, got %f" % signal_log["total"]
+		)
 
 	combatant.apply_shield(30.0, &"test", 5.0)
 
-	if signal_count != 2:
-		violations.append("shield_changed_signal: expected 2 signal emissions after second apply, got %d" % signal_count)
+	if signal_log["count"] != 2:
+		violations.append(
+			(
+				"shield_changed_signal: expected 2 signal emissions after second apply, got %d"
+				% signal_log["count"]
+			)
+		)
 
-	if not _approx_equal(signal_total, 80.0):
-		violations.append("shield_changed_signal: expected signal total 80.0 after second apply, got %f" % signal_total)
+	if not _approx_equal(signal_log["total"], 80.0):
+		violations.append(
+			(
+				"shield_changed_signal: expected signal total 80.0 after second apply, got %f"
+				% signal_log["total"]
+			)
+		)
 
 	return violations
 
@@ -146,24 +179,29 @@ static func _test_shield_consumption_happy_path() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant := _make_combatant()
-	var shield_signal_count := 0
-	var health_signal_count := 0
+	# See _test_shield_changed_signal() for why signal counters are boxed in
+	# a Dictionary rather than plain locals.
+	var signal_log := {"shield": 0, "health": 0}
 
-	combatant.shield_changed.connect(func(_total): shield_signal_count += 1)
-	combatant.health_changed.connect(func(_current, _max): health_signal_count += 1)
+	combatant.shield_changed.connect(func(_total): signal_log["shield"] += 1)
+	combatant.health_changed.connect(func(_current, _max): signal_log["health"] += 1)
 
 	# Setup: 500 health, 100 shield
 	if not _approx_equal(combatant.current_health, 500.0):
-		violations.append("happy_path: initial health should be 500.0, got %f" % combatant.current_health)
+		violations.append(
+			"happy_path: initial health should be 500.0, got %f" % combatant.current_health
+		)
 
 	combatant.apply_shield(100.0, &"test_shield", 10.0)
 
 	if not _approx_equal(combatant.total_shield(), 100.0):
-		violations.append("happy_path: total shield should be 100.0, got %f" % combatant.total_shield())
+		violations.append(
+			"happy_path: total shield should be 100.0, got %f" % combatant.total_shield()
+		)
 
 	# Clear signals from apply_shield
-	shield_signal_count = 0
-	health_signal_count = 0
+	signal_log["shield"] = 0
+	signal_log["health"] = 0
 
 	# Apply 130 damage
 	var damage := MobaDamage.new(130.0, MobaDamage.DamageType.TRUE)
@@ -171,15 +209,22 @@ static func _test_shield_consumption_happy_path() -> Array[String]:
 
 	# Verify results
 	if not _approx_equal(combatant.current_health, 470.0):
-		violations.append("happy_path: health should be 470.0 after 130 damage on 100 shield, got %f" % combatant.current_health)
+		violations.append(
+			(
+				"happy_path: health should be 470.0 after 130 damage on 100 shield, got %f"
+				% combatant.current_health
+			)
+		)
 
 	if not _approx_equal(combatant.total_shield(), 0.0):
-		violations.append("happy_path: shield should be 0.0 (consumed), got %f" % combatant.total_shield())
+		violations.append(
+			"happy_path: shield should be 0.0 (consumed), got %f" % combatant.total_shield()
+		)
 
-	if shield_signal_count == 0:
+	if signal_log["shield"] == 0:
 		violations.append("happy_path: shield_changed should have fired during damage")
 
-	if health_signal_count == 0:
+	if signal_log["health"] == 0:
 		violations.append("happy_path: health_changed should have fired during damage")
 
 	return violations
@@ -205,7 +250,9 @@ static func _test_shield_consumption_two_shields() -> Array[String]:
 
 	# Verify: 1s shield fully consumed, 5s shield reduced by 10
 	if combatant._active_shields.size() != 1:
-		violations.append("two_shields: expected 1 shield remaining, got %d" % combatant._active_shields.size())
+		violations.append(
+			"two_shields: expected 1 shield remaining, got %d" % combatant._active_shields.size()
+		)
 
 	if not _approx_equal(combatant.total_shield(), 90.0):
 		violations.append("two_shields: total should be 90.0, got %f" % combatant.total_shield())
@@ -213,14 +260,23 @@ static func _test_shield_consumption_two_shields() -> Array[String]:
 	# Verify the remaining shield is the 5s one
 	var remaining = combatant._active_shields[0] as MobaShield
 	if not _approx_equal(remaining.amount, 90.0):
-		violations.append("two_shields: remaining shield amount should be 90.0, got %f" % remaining.amount)
+		violations.append(
+			"two_shields: remaining shield amount should be 90.0, got %f" % remaining.amount
+		)
 
 	if not _approx_equal(remaining.remaining, 5.0):
-		violations.append("two_shields: remaining shield duration should still be 5.0, got %f" % remaining.remaining)
+		violations.append(
+			(
+				"two_shields: remaining shield duration should still be 5.0, got %f"
+				% remaining.remaining
+			)
+		)
 
 	# Verify health is untouched
 	if not _approx_equal(combatant.current_health, 500.0):
-		violations.append("two_shields: health should be untouched at 500.0, got %f" % combatant.current_health)
+		violations.append(
+			"two_shields: health should be untouched at 500.0, got %f" % combatant.current_health
+		)
 
 	return violations
 
@@ -230,30 +286,42 @@ static func _test_shield_expiry() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant := _make_combatant()
-	var signal_count := 0
+	# See _test_shield_changed_signal() for why signal counters are boxed in
+	# a Dictionary rather than plain locals.
+	var signal_log := {"count": 0}
 
-	combatant.shield_changed.connect(func(_total): signal_count += 1)
+	combatant.shield_changed.connect(func(_total): signal_log["count"] += 1)
 
 	# Setup: shield with 1.0 second duration
 	combatant.apply_shield(100.0, &"test", 1.0)
-	signal_count = 0  # Reset after apply
+	signal_log["count"] = 0  # Reset after apply
 
 	# Tick for 1.5 seconds - shield should expire
 	combatant.tick(1.5)
 
 	if not _approx_equal(combatant.total_shield(), 0.0):
-		violations.append("shield_expiry: shield should be expired after tick(1.5), got %f" % combatant.total_shield())
+		violations.append(
+			(
+				"shield_expiry: shield should be expired after tick(1.5), got %f"
+				% combatant.total_shield()
+			)
+		)
 
-	if signal_count == 0:
+	if signal_log["count"] == 0:
 		violations.append("shield_expiry: shield_changed should have fired during expiry")
 
 	# Apply damage - should reduce health entirely
-	signal_count = 0
+	signal_log["count"] = 0
 	var damage := MobaDamage.new(50.0, MobaDamage.DamageType.TRUE)
 	combatant.apply_damage(damage)
 
 	if not _approx_equal(combatant.current_health, 450.0):
-		violations.append("shield_expiry: health should be 450.0 after expired shield + 50 damage, got %f" % combatant.current_health)
+		violations.append(
+			(
+				"shield_expiry: health should be 450.0 after expired shield + 50 damage, got %f"
+				% combatant.current_health
+			)
+		)
 
 	return violations
 
@@ -263,26 +331,38 @@ static func _test_shield_no_op_on_zero_amount() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant := _make_combatant()
-	var signal_count := 0
+	# See _test_shield_changed_signal() for why signal counters are boxed in
+	# a Dictionary rather than plain locals.
+	var signal_log := {"count": 0}
 
-	combatant.shield_changed.connect(func(_total): signal_count += 1)
+	combatant.shield_changed.connect(func(_total): signal_log["count"] += 1)
 
 	# Try to apply shield with 0 amount
 	combatant.apply_shield(0.0, &"test", 5.0)
 
 	if combatant._active_shields.size() != 0:
-		violations.append("no_op_zero: shield list should be empty, got %d shields" % combatant._active_shields.size())
+		violations.append(
+			(
+				"no_op_zero: shield list should be empty, got %d shields"
+				% combatant._active_shields.size()
+			)
+		)
 
-	if signal_count != 0:
+	if signal_log["count"] != 0:
 		violations.append("no_op_zero: shield_changed should not fire for 0 amount")
 
 	# Try to apply shield with negative amount
 	combatant.apply_shield(-50.0, &"test", 5.0)
 
 	if combatant._active_shields.size() != 0:
-		violations.append("no_op_zero: shield list should still be empty, got %d shields" % combatant._active_shields.size())
+		violations.append(
+			(
+				"no_op_zero: shield list should still be empty, got %d shields"
+				% combatant._active_shields.size()
+			)
+		)
 
-	if signal_count != 0:
+	if signal_log["count"] != 0:
 		violations.append("no_op_zero: shield_changed should not fire for negative amount")
 
 	return violations
