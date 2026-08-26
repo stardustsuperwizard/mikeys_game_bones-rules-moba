@@ -455,7 +455,9 @@ func _apply_displacement(
 
 	# For KNOCK_UP, enter AIRBORNE state
 	if spec.type == MobaCrowdControlSpec.CCType.KNOCK_UP and state_machine != null:
-		state_machine.try_enter(MobaState.AIRBORNE, final_duration, MobaState.AirborneCause.KNOCK_UP)
+		state_machine.try_enter(
+			MobaState.AIRBORNE, final_duration, MobaState.AirborneCause.KNOCK_UP
+		)
 
 	# Try to interrupt current state if applicable
 	if state_machine != null:
@@ -620,7 +622,10 @@ func get_forced_move_direction() -> Vector3:
 func queue_follow_up_effect_for_displacement(
 	effect_spec: MobaCrowdControlSpec, source: MobaCombatant
 ) -> void:
-	if _active_displacement == null or _active_displacement.type != MobaCrowdControlSpec.CCType.KNOCK_UP:
+	if (
+		_active_displacement == null
+		or _active_displacement.type != MobaCrowdControlSpec.CCType.KNOCK_UP
+	):
 		return
 
 	_active_displacement.queued_effect = effect_spec

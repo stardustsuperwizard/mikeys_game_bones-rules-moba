@@ -94,8 +94,10 @@ static func _test_knockback_moves_away_from_source() -> Array[String]:
 	# X component should be positive (away from origin)
 	if forced_move.x <= 0.0:
 		violations.append(
-			"knockback_moves_away: X component should be positive (away from source), got %.2f"
-			% forced_move.x
+			(
+				"knockback_moves_away: X component should be positive (away from source), got %.2f"
+				% forced_move.x
+			)
 		)
 
 	# Magnitude should be non-zero
@@ -135,8 +137,10 @@ static func _test_pull_moves_toward_source() -> Array[String]:
 	# X component should be negative (toward source at origin)
 	if forced_move.x >= 0.0:
 		violations.append(
-			"pull_moves_toward: X component should be negative (toward source), got %.2f"
-			% forced_move.x
+			(
+				"pull_moves_toward: X component should be negative (toward source), got %.2f"
+				% forced_move.x
+			)
 		)
 
 	# Magnitude should be non-zero
@@ -175,8 +179,11 @@ static func _test_knockback_honors_affected_by_tenacity_false() -> Array[String]
 	target.tick(0.99)
 
 	if target._active_displacement == null:
-		violations.append(
-			"knockback_honors_affected_by_tenacity_false: displacement should still be active at 0.99s"
+		(
+			violations
+			. append(
+				"knockback_honors_affected_by_tenacity_false: displacement should still be active at 0.99s"
+			)
 		)
 
 	# After 1.01 seconds, it should expire
@@ -217,15 +224,21 @@ static func _test_knockback_honors_affected_by_tenacity_true() -> Array[String]:
 	# Tick 0.49 seconds - should still be active
 	target.tick(0.49)
 	if target._active_displacement == null:
-		violations.append(
-			"knockback_honors_affected_by_tenacity_true: displacement should still be active at 0.49s"
+		(
+			violations
+			. append(
+				"knockback_honors_affected_by_tenacity_true: displacement should still be active at 0.49s"
+			)
 		)
 
 	# Tick 0.02 more seconds (0.51 total) - should expire
 	target.tick(0.02)
 	if target._active_displacement != null:
-		violations.append(
-			"knockback_honors_affected_by_tenacity_true: displacement should have expired at 0.51s with 50% Tenacity"
+		(
+			violations
+			. append(
+				"knockback_honors_affected_by_tenacity_true: displacement should have expired at 0.51s with 50% Tenacity"
+			)
 		)
 
 	return violations
@@ -328,8 +341,10 @@ static func _test_knock_up_enters_airborne_with_knock_up_cause() -> Array[String
 	# Should be in AIRBORNE state
 	if state_machine.current_state != MobaState.AIRBORNE:
 		violations.append(
-			"knock_up_enters_airborne_with_knock_up_cause: should be AIRBORNE, got %s"
-			% MobaState.state_to_string(state_machine.current_state)
+			(
+				"knock_up_enters_airborne_with_knock_up_cause: should be AIRBORNE, got %s"
+				% MobaState.state_to_string(state_machine.current_state)
+			)
 		)
 
 	# Cause should be KNOCK_UP
@@ -384,8 +399,10 @@ static func _test_queued_effect_applied_on_landing() -> Array[String]:
 	# Should be back in IDLE after landing
 	if state_machine.current_state != MobaState.IDLE:
 		violations.append(
-			"queued_effect_applied_on_landing: should be IDLE after landing, got %s"
-			% MobaState.state_to_string(state_machine.current_state)
+			(
+				"queued_effect_applied_on_landing: should be IDLE after landing, got %s"
+				% MobaState.state_to_string(state_machine.current_state)
+			)
 		)
 
 	return violations
