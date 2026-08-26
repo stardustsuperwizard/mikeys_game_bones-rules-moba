@@ -1,4 +1,5 @@
-## Test suite for the Shield Bash ability's damage and crowd control delivery through the ability pipeline.
+## Test suite for the Shield Bash ability's damage and crowd control delivery through
+## the ability pipeline.
 ##
 ## Covers rules/data/abilities/shield_bash.tres and MobaAbilityAction's damage and
 ## effects seams: activating Shield Bash must apply ~40 physical damage (mitigated
@@ -21,8 +22,8 @@ const BASE_MAGIC_RESISTANCE := 0.0
 const SHIELD_BASH_BASE_DAMAGE := 40.0
 
 ## §8 mitigation: multiplier = 100 / (100 + Defense)
-## Unbuffed: 100 / (100 + 30) = 100/130 = ~76.9
-const EXPECTED_DAMAGE_AT_BASE_ARMOR := 76.9
+## Unbuffed: 40.0 * (100 / (100 + 30)) = 40.0 * (100/130) = ~30.77
+const EXPECTED_DAMAGE_AT_BASE_ARMOR := 30.77
 
 ## Slack for damage figures
 const DAMAGE_TOLERANCE := 0.05
@@ -126,14 +127,26 @@ static func _test_shield_bash_damage_and_stun() -> Array[String]:
 	if data.is_empty():
 		MobaAbilityLibrary._reset()
 		violations.append(
-			"shield_bash_damage_and_stun: shield_bash.tres did not load as a MobaAbility with id 'shield_bash'"
+			(
+				"shield_bash_damage_and_stun: shield_bash.tres did not load as a MobaAbility"
+				+ " with id 'shield_bash'"
+			)
 		)
 		return violations
 
 	var caster = data["caster_actor"]
 	var target = data["target_actor"]
+	var caster_combatant = data["caster_combatant"]
 	var target_combatant = data["target_combatant"]
 	var target_state_machine = data["target_state_machine"]
+
+	# Disable crit on the caster so the damage figure is deterministic: crit is
+	# the attacker's statistic and apply_damage() reads it off MobaDamage.source.
+	# The baseline stat block's 5% crit_chance would otherwise make this
+	# assertion fail one run in twenty. Also seed the crit RNG for deterministic
+	# replay per §34, mirroring AbilityActivationTest's targeted_damage test.
+	caster_combatant._runtime_stat_block.crit_chance = 0.0
+	MobaRules.seed_crit_rng(42)
 
 	# Capture pre-activation health
 	var target_health_before = target_combatant.current_health
@@ -149,8 +162,10 @@ static func _test_shield_bash_damage_and_stun() -> Array[String]:
 	var target_health_after = target_combatant.current_health
 	if target_health_after >= target_health_before:
 		violations.append(
-			"shield_bash_damage_and_stun: target should take damage (before %f, after %f)"
-			% [target_health_before, target_health_after]
+			(
+				"shield_bash_damage_and_stun: target should take damage (before %f, after %f)"
+				% [target_health_before, target_health_after]
+			)
 		)
 
 	# Verify damage is approximately correct (40 base with 30 armor mitigation)
@@ -166,8 +181,10 @@ static func _test_shield_bash_damage_and_stun() -> Array[String]:
 	# Verify target entered CROWD_CONTROLLED
 	if target_state_machine.current_state != MobaState.CROWD_CONTROLLED:
 		violations.append(
-			"shield_bash_damage_and_stun: target should be CROWD_CONTROLLED, got state %d"
-			% target_state_machine.current_state
+			(
+				"shield_bash_damage_and_stun: target should be CROWD_CONTROLLED, got state %d"
+				% target_state_machine.current_state
+			)
 		)
 
 	# Verify STUN entry is active
@@ -180,11 +197,15 @@ static func _test_shield_bash_damage_and_stun() -> Array[String]:
 
 	# Verify target cannot basic_attack while stunned
 	if target_combatant.can_perform_action(&"basic_attack"):
-		violations.append("shield_bash_damage_and_stun: stunned target should not be able to basic_attack")
+		violations.append(
+			"shield_bash_damage_and_stun: stunned target should not be able to basic_attack"
+		)
 
 	# Verify target cannot use ability while stunned
 	if target_combatant.can_perform_action(&"ability"):
-		violations.append("shield_bash_damage_and_stun: stunned target should not be able to use ability")
+		violations.append(
+			"shield_bash_damage_and_stun: stunned target should not be able to use ability"
+		)
 
 	MobaAbilityLibrary._reset()
 
@@ -200,8 +221,11 @@ static func _test_shield_bash_stun_expiry() -> Array[String]:
 	var data = _create_caster_and_target()
 	if data.is_empty():
 		MobaAbilityLibrary._reset()
-		violations.append(
-			"shield_bash_stun_expiry: shield_bash.tres did not load as a MobaAbility with id 'shield_bash'"
+		(
+			violations
+			. append(
+				"shield_bash_stun_expiry: shield_bash.tres did not load as a MobaAbility with id 'shield_bash'"
+			)
 		)
 		return violations
 
@@ -213,11 +237,15 @@ static func _test_shield_bash_stun_expiry() -> Array[String]:
 	# Activate Shield Bash
 	var result = _activate_shield_bash(caster, target)
 	if not result.success:
-		violations.append("shield_bash_stun_expiry: activation should succeed, got: %s" % result.reason)
+		violations.append(
+			"shield_bash_stun_expiry: activation should succeed, got: %s" % result.reason
+		)
 
 	# Verify target is stunned
 	if target_state_machine.current_state != MobaState.CROWD_CONTROLLED:
-		violations.append("shield_bash_stun_expiry: target should be CROWD_CONTROLLED after activation")
+		violations.append(
+			"shield_bash_stun_expiry: target should be CROWD_CONTROLLED after activation"
+		)
 
 	# Advance past stun duration
 	target_combatant.tick(TICK_PAST_EXPIRY)
@@ -225,8 +253,10 @@ static func _test_shield_bash_stun_expiry() -> Array[String]:
 	# Verify target is back to IDLE
 	if target_state_machine.current_state != MobaState.IDLE:
 		violations.append(
-			"shield_bash_stun_expiry: target should be IDLE after stun expires, got state %d"
-			% target_state_machine.current_state
+			(
+				"shield_bash_stun_expiry: target should be IDLE after stun expires, got state %d"
+				% target_state_machine.current_state
+			)
 		)
 
 	# Verify STUN entry is no longer active
@@ -235,13 +265,19 @@ static func _test_shield_bash_stun_expiry() -> Array[String]:
 
 	# Verify target can act again
 	if not target_combatant.can_perform_action(&"move"):
-		violations.append("shield_bash_stun_expiry: target should be able to move after stun expires")
+		violations.append(
+			"shield_bash_stun_expiry: target should be able to move after stun expires"
+		)
 
 	if not target_combatant.can_perform_action(&"basic_attack"):
-		violations.append("shield_bash_stun_expiry: target should be able to basic_attack after stun expires")
+		violations.append(
+			"shield_bash_stun_expiry: target should be able to basic_attack after stun expires"
+		)
 
 	if not target_combatant.can_perform_action(&"ability"):
-		violations.append("shield_bash_stun_expiry: target should be able to use ability after stun expires")
+		violations.append(
+			"shield_bash_stun_expiry: target should be able to use ability after stun expires"
+		)
 
 	MobaAbilityLibrary._reset()
 

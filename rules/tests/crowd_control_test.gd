@@ -187,7 +187,9 @@ static func _test_silenced_blocks_ability() -> Array[String]:
 
 	# Verify target cannot use ability
 	if target.can_perform_action(&"ability"):
-		violations.append("silenced_blocks_ability: silenced target should not be able to use ability")
+		violations.append(
+			"silenced_blocks_ability: silenced target should not be able to use ability"
+		)
 
 	# Verify target can move
 	if not target.can_perform_action(&"move"):
@@ -222,7 +224,9 @@ static func _test_disarmed_blocks_basic_attack() -> Array[String]:
 
 	# Verify target cannot basic_attack
 	if target.can_perform_action(&"basic_attack"):
-		violations.append("disarmed_blocks_basic_attack: disarmed target should not be able to basic_attack")
+		violations.append(
+			"disarmed_blocks_basic_attack: disarmed target should not be able to basic_attack"
+		)
 
 	# Verify target can move
 	if not target.can_perform_action(&"move"):
@@ -230,7 +234,9 @@ static func _test_disarmed_blocks_basic_attack() -> Array[String]:
 
 	# Verify target can use ability
 	if not target.can_perform_action(&"ability"):
-		violations.append("disarmed_blocks_basic_attack: disarmed target should be able to use ability")
+		violations.append(
+			"disarmed_blocks_basic_attack: disarmed target should be able to use ability"
+		)
 
 	return violations
 
@@ -387,7 +393,9 @@ static func _test_crowd_control_refused_while_dashing() -> Array[String]:
 
 	# Verify target is not in CROWD_CONTROLLED
 	if state_machine.current_state == MobaState.CROWD_CONTROLLED:
-		violations.append("refused_while_dashing: target should not enter CROWD_CONTROLLED while DASHING")
+		violations.append(
+			"refused_while_dashing: target should not enter CROWD_CONTROLLED while DASHING"
+		)
 
 	# Verify the CC entry was not tracked
 	if target.has_crowd_control(MobaCrowdControlSpec.CCType.STUN):
@@ -487,14 +495,20 @@ static func _test_blind_causes_attacker_miss() -> Array[String]:
 
 	if target_combatant.current_health != target_health_before:
 		violations.append(
-			"blind_causes_attacker_miss: fully-blinded attacker's hit should have missed, target took damage"
+			(
+				"blind_causes_attacker_miss: fully-blinded attacker's hit should have missed,"
+				+ " target took damage"
+			)
 		)
 
 	if attacker_state_machine.current_state != MobaState.IDLE:
-		violations.append(
-			(
-				"blind_causes_attacker_miss: attack cycle should still complete (windup/recovery/cooldown)"
-				+ " and return attacker to IDLE even on a miss"
+		(
+			violations
+			. append(
+				(
+					"blind_causes_attacker_miss: attack cycle should still complete (windup/recovery/cooldown)"
+					+ " and return attacker to IDLE even on a miss"
+				)
 			)
 		)
 

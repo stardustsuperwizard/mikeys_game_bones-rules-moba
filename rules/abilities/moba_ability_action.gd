@@ -64,7 +64,7 @@ func execute() -> ActionResult:
 
 	# Steps 1-4: state machine, cooldown/charges/resource legality, then silenced
 	var state_machine := _get_state_machine(actor)
-	var early_failure := _check_early_legality(combatant, state_machine)
+	var early_failure := _check_early_legality(combatant)
 	if early_failure != &"":
 		return ActionResult.new(false, early_failure)
 
@@ -112,7 +112,7 @@ func _get_state_machine(node: Node) -> MobaStateMachine:
 ## Order pinned by the Scope: step 1 (state), steps 2-3 (cooldown/charges/resource
 ## via MobaCombatant.can_activate), step 4 (silenced).
 ## Returns an empty StringName if legal, otherwise a FAILURE_* constant.
-func _check_early_legality(combatant: MobaCombatant, state_machine: MobaStateMachine) -> StringName:
+func _check_early_legality(combatant: MobaCombatant) -> StringName:
 	if not combatant.can_perform_action(&"ability"):
 		return FAILURE_ILLEGAL_STATE
 
@@ -261,22 +261,20 @@ func _check_silenced_seam(combatant: MobaCombatant) -> bool:
 ## Seam for applying effects.
 ## Applies crowd control, buffs, and debuffs from the ability to the target.
 func _apply_effects_seam(ability: MobaAbility, target: Node) -> void:
+	var caster_combatant := _get_combatant(actor)
+	var target_combatant := _get_combatant(target)
+
 	# Apply crowd control from ability.crowd_control to the target
-	if ability.crowd_control != null:
-		var target_combatant := _get_combatant(target)
-		var caster_combatant := _get_combatant(actor)
-		if target_combatant != null and caster_combatant != null:
-			target_combatant.apply_crowd_control(ability.crowd_control, caster_combatant)
+	if ability.crowd_control != null and target_combatant != null and caster_combatant != null:
+		target_combatant.apply_crowd_control(ability.crowd_control, caster_combatant)
 
 	# Apply buffs to the caster's combatant
-	var caster_combatant := _get_combatant(actor)
 	if caster_combatant != null:
 		var caster_effects := caster_combatant.get_effect_container()
 		for buff in ability.buffs:
 			caster_effects.apply_modifier(buff, StringName(ability.id))
 
 	# Apply debuffs to the resolved target's combatant
-	var target_combatant := _get_combatant(target)
 	if target_combatant != null:
 		var target_effects := target_combatant.get_effect_container()
 		for debuff in ability.debuffs:
