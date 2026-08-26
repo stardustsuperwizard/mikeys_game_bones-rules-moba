@@ -5,8 +5,14 @@
 #
 # Loads the real main scene and drives PlayerController3D through the real
 # ActorBody3D/Actor/MobaCombatant pipeline, testing that crowd control effects
-# properly gate movement and attack intent at the Controller seam. Exits non-zero
-# on the first failed expectation.
+# gate movement intent at the Controller seam. Exits non-zero on the first
+# failed expectation.
+#
+# Covers, in order:
+#   - a feared player's held input is replaced by flight away from the source,
+#     and input resumes once the fear expires;
+#   - a stunned player's held input produces no movement, and movement resumes
+#     once the stun expires.
 #
 # This test is NOT wired into tests/test_bootstrap.gd; it is a manual integration
 # check matching tests/mouse_action_test.gd's own precedent.
@@ -25,12 +31,6 @@ func _run() -> void:
 	await physics_frame
 	await physics_frame
 
-	# Neutralize the spawned enemy so it doesn't kill the player during test scenarios
-	var enemy := scene.get_node_or_null("WorldManager/Enemy")
-	if enemy != null:
-		enemy.queue_free()
-	await physics_frame
-
 	var player := scene.get_node_or_null("WorldManager/Player") as Actor
 	if player == null:
 		_fail("setup: player not found")
@@ -43,10 +43,117 @@ func _run() -> void:
 		_fail("setup: controller=%s combatant=%s body=%s" % [controller, combatant, body])
 		return _finish()
 
+	# Fear runs first, while the spawned enemy is still alive: it is the only
+	# real Actor+MobaCombatant in the scene that can stand in as a fear source,
+	# and fear is defined relative to that source's position.
+	var enemy := scene.get_node_or_null("WorldManager/Enemy") as Actor
+	if not await _run_fear_scenario(controller, combatant, player, enemy):
+		return _finish()
+
+	# Neutralize the spawned enemy so it doesn't kill the player during the
+	# remaining scenarios, which need nothing from it.
+	if is_instance_valid(enemy):
+		enemy.queue_free()
+	await physics_frame
+
 	if not await _run_stun_scenarios(controller, combatant, body, player):
 		return _finish()
 
 	_finish()
+
+
+# Test: a feared player's held movement input is replaced by the forced
+# away-from-source direction, and normal input resumes once the fear expires.
+#
+# The fear source is planted in the exact direction the player is asking to
+# move, so "away from source" is the reverse of the held input: a controller
+# that ignored fear and used input would return the opposite vector, not a
+# merely different one.
+func _run_fear_scenario(
+	controller: PlayerController3D,
+	combatant: MobaCombatant,
+	player: Actor,
+	enemy: Actor
+) -> bool:
+	if not is_instance_valid(enemy):
+		_fail("fear: no Enemy in the scene to stand in as the fear source")
+		return false
+
+	var enemy_combatant := enemy.get_node_or_null("MobaCombatant") as MobaCombatant
+	var enemy_body := enemy.get_node_or_null("Body") as CharacterBody3D
+	if enemy_combatant == null or enemy_body == null:
+		_fail("fear: enemy has no MobaCombatant/Body to source the fear from")
+		return false
+
+	Input.action_press("move_forward")
+	await physics_frame
+
+	var input_move := controller.get_move_direction()
+	if input_move == Vector3.ZERO:
+		_fail("fear: held move_forward produced no movement before the fear")
+		Input.action_release("move_forward")
+		return false
+
+	# Plant the source ahead of the player, along the direction they are asking
+	# to move. Actor.global_position is a getter over the Body, so move the Body.
+	var toward := input_move.normalized()
+	enemy_body.global_position = player.global_position + toward * 3.0
+	await physics_frame
+
+	var fear_spec := MobaCrowdControlSpec.new()
+	fear_spec.type = MobaCrowdControlSpec.CCType.FEAR
+	fear_spec.duration = 0.5
+	fear_spec.affected_by_tenacity = false
+
+	combatant.apply_crowd_control(fear_spec, enemy_combatant)
+	await physics_frame
+
+	if not combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR):
+		_fail("fear: the fear was refused, so the gate under test never ran")
+		Input.action_release("move_forward")
+		return false
+
+	var feared_move := controller.get_move_direction()
+	if feared_move == Vector3.ZERO:
+		_fail("fear: feared player was frozen instead of fleeing the source")
+		Input.action_release("move_forward")
+		return false
+
+	var alignment := feared_move.normalized().dot(-toward)
+	if alignment < 0.9:
+		_fail(
+			"fear: expected flight away from the source (%v), got %v"
+			% [-toward, feared_move.normalized()]
+		)
+		Input.action_release("move_forward")
+		return false
+
+	print("PASS feared movement overrides input: fled %v" % feared_move.normalized())
+
+	for i in 50:
+		await physics_frame
+		if not combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR):
+			break
+
+	if combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR):
+		_fail("fear: the fear never expired")
+		Input.action_release("move_forward")
+		return false
+
+	var resumed_move := controller.get_move_direction()
+	if resumed_move.normalized().dot(toward) < 0.9:
+		_fail(
+			"fear: input did not resume once the fear expired -- expected %v, got %v"
+			% [toward, resumed_move.normalized()]
+		)
+		Input.action_release("move_forward")
+		return false
+
+	print("PASS fear expiration restores input-driven movement")
+
+	Input.action_release("move_forward")
+	await physics_frame
+	return true
 
 
 # Test: a stunned player's held movement input produces no movement.
