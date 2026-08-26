@@ -355,7 +355,7 @@ static func _simulate_attacks_for(
 	# Array is a reference type, so mutating its contents from the lambda is
 	# visible to this function after the signal fires.
 	var resolved_count = [0]
-	var handler = func(_t, _d): resolved_count[0] += 1
+	var handler = func(_target, _raw, _final, _damage_type, _was_crit): resolved_count[0] += 1
 	combatant.basic_attack_resolved.connect(handler)
 
 	var step = 0.01
@@ -560,43 +560,228 @@ static func _test_basic_attack_refuses_when_state_forbids() -> bool:
 
 
 static func _test_basic_attack_damage_amount() -> bool:
+	# Test both forced non-crit and forced-crit cases
+	if not _test_basic_attack_damage_amount_non_crit():
+		return false
+	if not _test_basic_attack_damage_amount_crit():
+		return false
+	return true
+
+
+## Test basic attack with crit forced to false.
+static func _test_basic_attack_damage_amount_non_crit() -> bool:
 	var data := _create_test_actor_with_loadout_and_weapon()
 	var combatant: MobaCombatant = data["combatant"]
 	var target: MobaCombatant = data["target"]
 
+	# Force non-crit by setting crit chance to 0
+	var original_crit_chance = combatant._runtime_stat_block.crit_chance
+	combatant._runtime_stat_block.crit_chance = 0.0
+	combatant._invalidate_stat_cache()
+
 	var weapon = combatant.loadout.get_weapon()
 	var attack_damage = combatant.get_stat(MobaStatBlock.ATTACK_DAMAGE)
-	var expected_amount = MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
+	var expected_raw = MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
 
-	# One-element Arrays are reference types, so mutating their contents from
-	# inside a lambda is visible here after the signal fires; a plain float
-	# local would only be mutated inside the lambda's own captured-by-value copy.
-	var observed_amount = [-1.0]
-	var handler = func(t, d):
+	# Capture basic_attack_resolved parameters as reference types
+	var observed_raw = [-1.0]
+	var observed_final = [-1.0]
+	var observed_damage_type = [-1]
+	var observed_was_crit = [false]
+	var handler = func(t, raw, final, damage_type, was_crit):
 		if t == target:
-			observed_amount[0] = d
+			observed_raw[0] = raw
+			observed_final[0] = final
+			observed_damage_type[0] = damage_type
+			observed_was_crit[0] = was_crit
 	combatant.basic_attack_resolved.connect(handler)
 
-	var observed_raw = [-1.0]
-	var damage_handler = func(raw, _final, _damage_type, _was_crit, _source): observed_raw[0] = raw
+	# Also capture target's damage_resolved
+	var damage_resolved_raw = [-1.0]
+	var damage_resolved_final = [-1.0]
+	var damage_resolved_type = [-1]
+	var damage_resolved_crit = [false]
+	var damage_handler = func(raw, final, damage_type, was_crit, _source):
+		damage_resolved_raw[0] = raw
+		damage_resolved_final[0] = final
+		damage_resolved_type[0] = damage_type
+		damage_resolved_crit[0] = was_crit
 	target.damage_resolved.connect(damage_handler)
 
 	if not combatant.basic_attack(target):
 		combatant.basic_attack_resolved.disconnect(handler)
 		target.damage_resolved.disconnect(damage_handler)
-		print("ERROR: basic_attack should succeed")
+		print("ERROR: basic_attack should succeed (non-crit case)")
 		return false
 
 	combatant.tick(weapon.wind_up + 0.01)
 	combatant.basic_attack_resolved.disconnect(handler)
 	target.damage_resolved.disconnect(damage_handler)
 
-	if not is_equal_approx(observed_amount[0], expected_amount):
-		print("ERROR: Expected damage %f, got %f" % [expected_amount, observed_amount[0]])
+	# Verify non-crit case
+	if observed_was_crit[0]:
+		print("ERROR: Forced non-crit should not have critted")
 		return false
-	if not is_equal_approx(observed_raw[0], expected_amount):
-		print("ERROR: Expected damage_resolved raw %f, got %f" % [expected_amount, observed_raw[0]])
+
+	if not is_equal_approx(observed_raw[0], expected_raw):
+		print(
+			(
+				"ERROR: non-crit basic_attack_resolved raw should be %f, got %f"
+				% [expected_raw, observed_raw[0]]
+			)
+		)
 		return false
+
+	if not is_equal_approx(observed_raw[0], damage_resolved_raw[0]):
+		print(
+			(
+				"ERROR: non-crit raw %f should equal damage_resolved raw %f"
+				% [observed_raw[0], damage_resolved_raw[0]]
+			)
+		)
+		return false
+
+	if not is_equal_approx(observed_final[0], damage_resolved_final[0]):
+		print(
+			(
+				"ERROR: non-crit final %f should equal damage_resolved final %f"
+				% [observed_final[0], damage_resolved_final[0]]
+			)
+		)
+		return false
+
+	if observed_damage_type[0] != damage_resolved_type[0]:
+		print(
+			(
+				"ERROR: non-crit damage_type %d should equal damage_resolved type %d"
+				% [observed_damage_type[0], damage_resolved_type[0]]
+			)
+		)
+		return false
+
+	if observed_damage_type[0] != weapon.damage_type:
+		print(
+			(
+				"ERROR: non-crit damage_type %d should equal weapon damage_type %d"
+				% [observed_damage_type[0], weapon.damage_type]
+			)
+		)
+		return false
+
+	# Restore original crit chance
+	combatant._runtime_stat_block.crit_chance = original_crit_chance
+	combatant._invalidate_stat_cache()
+
+	return true
+
+
+## Test basic attack with crit forced to true.
+static func _test_basic_attack_damage_amount_crit() -> bool:
+	var data := _create_test_actor_with_loadout_and_weapon()
+	var combatant: MobaCombatant = data["combatant"]
+	var target: MobaCombatant = data["target"]
+
+	# Force crit by setting crit chance to 100%
+	var original_crit_chance = combatant._runtime_stat_block.crit_chance
+	combatant._runtime_stat_block.crit_chance = 1.0
+	combatant._invalidate_stat_cache()
+
+	var weapon = combatant.loadout.get_weapon()
+	var attack_damage = combatant.get_stat(MobaStatBlock.ATTACK_DAMAGE)
+	var expected_raw = MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
+
+	# Capture basic_attack_resolved parameters
+	var observed_raw = [-1.0]
+	var observed_final = [-1.0]
+	var observed_damage_type = [-1]
+	var observed_was_crit = [false]
+	var handler = func(t, raw, final, damage_type, was_crit):
+		if t == target:
+			observed_raw[0] = raw
+			observed_final[0] = final
+			observed_damage_type[0] = damage_type
+			observed_was_crit[0] = was_crit
+	combatant.basic_attack_resolved.connect(handler)
+
+	# Also capture target's damage_resolved
+	var damage_resolved_raw = [-1.0]
+	var damage_resolved_final = [-1.0]
+	var damage_resolved_type = [-1]
+	var damage_resolved_crit = [false]
+	var damage_handler = func(raw, final, damage_type, was_crit, _source):
+		damage_resolved_raw[0] = raw
+		damage_resolved_final[0] = final
+		damage_resolved_type[0] = damage_type
+		damage_resolved_crit[0] = was_crit
+	target.damage_resolved.connect(damage_handler)
+
+	if not combatant.basic_attack(target):
+		combatant.basic_attack_resolved.disconnect(handler)
+		target.damage_resolved.disconnect(damage_handler)
+		print("ERROR: basic_attack should succeed (crit case)")
+		return false
+
+	combatant.tick(weapon.wind_up + 0.01)
+	combatant.basic_attack_resolved.disconnect(handler)
+	target.damage_resolved.disconnect(damage_handler)
+
+	# Verify crit case
+	if not observed_was_crit[0]:
+		print("ERROR: Forced crit should have critted")
+		return false
+
+	if not is_equal_approx(observed_raw[0], expected_raw):
+		print(
+			(
+				"ERROR: crit basic_attack_resolved raw should be %f, got %f"
+				% [expected_raw, observed_raw[0]]
+			)
+		)
+		return false
+
+	if not is_equal_approx(observed_raw[0], damage_resolved_raw[0]):
+		print(
+			(
+				"ERROR: crit raw %f should equal damage_resolved raw %f"
+				% [observed_raw[0], damage_resolved_raw[0]]
+			)
+		)
+		return false
+
+	if not is_equal_approx(observed_final[0], damage_resolved_final[0]):
+		print(
+			(
+				"ERROR: crit final %f should equal damage_resolved final %f"
+				% [observed_final[0], damage_resolved_final[0]]
+			)
+		)
+		return false
+
+	if observed_damage_type[0] != damage_resolved_type[0]:
+		print(
+			(
+				"ERROR: crit damage_type %d should equal damage_resolved type %d"
+				% [observed_damage_type[0], damage_resolved_type[0]]
+			)
+		)
+		return false
+
+	if observed_was_crit[0] != damage_resolved_crit[0]:
+		print("ERROR: crit was_crit should match damage_resolved crit")
+		return false
+
+	if observed_damage_type[0] != weapon.damage_type:
+		print(
+			(
+				"ERROR: crit damage_type %d should equal weapon damage_type %d"
+				% [observed_damage_type[0], weapon.damage_type]
+			)
+		)
+		return false
+
+	# Restore original crit chance
+	combatant._runtime_stat_block.crit_chance = original_crit_chance
+	combatant._invalidate_stat_cache()
 
 	return true
 

@@ -39,6 +39,12 @@ var flat_pen: float = 0.0
 ## Percent armor/magic penetration from the attacker (as a fraction, e.g., 0.2 for 20%).
 var percent_pen: float = 0.0
 
+## Post-resolution final damage amount (populated after apply_damage() completes).
+var final_amount: float = 0.0
+
+## Post-resolution crit flag (populated after apply_damage() completes).
+var was_crit: bool = false
+
 
 ## Convenient constructor for MobaDamage.
 func _init(
