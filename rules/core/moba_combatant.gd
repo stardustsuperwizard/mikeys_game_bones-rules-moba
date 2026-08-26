@@ -16,6 +16,9 @@ signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: boo
 signal resource_changed(current: float, maximum: float)
 ## Emitted when a basic attack hit is resolved. Carries the post-mitigation resolved damage outcome.
 signal basic_attack_resolved(target, raw: float, final: float, damage_type: int, was_crit: bool)
+## Emitted when the shield pool changes: applied, consumed, or expired.
+## Carries the post-mutation total shield amount.
+signal shield_changed(total: float)
 
 ## Typed failure reason for activation checks.
 enum ActivationFailure {
@@ -153,6 +156,8 @@ var _active_cc_entries: Dictionary = {}
 ## Active displacement entry (KNOCKBACK, PULL, or KNOCK_UP). Only one displacement
 ## can be active at a time. null when no displacement is active.
 var _active_displacement: _DisplacementEntry = null
+## Active shield pool: list of MobaShield instances, each with remaining absorption capacity.
+var _active_shields: Array[MobaShield] = []
 ## Per-stat cache of the modifier bonuses (flat, percent), NOT the final
 ## value: the base is always re-read live from _runtime_stat_block so a
 ## direct mutation of the runtime stat block (as several existing test
@@ -271,7 +276,7 @@ func _get_modified_stat(stat: StringName) -> float:
 ## 4. Penetration against target's defense
 ## 5. Mitigation multiplier
 ## 6. Final amount
-## 7. Shield seam (documented empty hook)
+## 7. Shield consumption (shortest-remaining-duration first, before health)
 ##
 ## Emits damage_resolved once per packet.
 func apply_damage(damage: MobaDamage) -> void:
@@ -315,10 +320,8 @@ func apply_damage(damage: MobaDamage) -> void:
 			# TRUE damage ignores all defenses and penetration
 			final = MobaFormulas.true_damage(final)
 
-	# Step 7: Shield seam (documented empty hook per §16, Batch 2 sustain issue)
-	# This private hook receives the final amount and returns it unchanged.
-	# It exists as a placeholder for future shield implementations.
-	final = _apply_shield_seam(final)
+	# Step 7: Shield consumption (shortest-remaining-duration first)
+	final = _consume_shields(final)
 
 	# Populate post-resolution fields on the damage packet for listeners
 	damage.final_amount = final
@@ -352,13 +355,35 @@ func apply_damage(damage: MobaDamage) -> void:
 	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source)
 
 
-## Private shield seam: documented empty hook per §16.
-## This exists as a placeholder for Batch 2 sustain systems (shields, lifesteal).
-## Returns the input unchanged.
-func _apply_shield_seam(amount: float) -> float:
-	# TODO §16: Shield mitigation hook for Batch 2
-	# return amount adjusted by any active shields
-	return amount
+## Consume shields in order of shortest-remaining-duration first.
+## Returns the remaining damage after shields absorb what they can.
+## Emits shield_changed for each shield that is consumed or damaged.
+func _consume_shields(incoming_damage: float) -> float:
+	var remaining_damage: float = incoming_damage
+
+	# Sort shields by remaining duration (ascending) so we consume shortest-remaining first
+	var sorted_shields: Array[MobaShield] = _active_shields.duplicate()
+	sorted_shields.sort_custom(
+		func(a: MobaShield, b: MobaShield) -> bool: return a.remaining < b.remaining
+	)
+
+	# Consume shields in order
+	for shield in sorted_shields:
+		if remaining_damage <= 0.0:
+			break
+
+		if shield.amount >= remaining_damage:
+			# Shield absorbs all remaining damage
+			shield.amount -= remaining_damage
+			remaining_damage = 0.0
+			shield_changed.emit(total_shield())
+		else:
+			# Shield is fully consumed, remainder carries to next shield or health
+			remaining_damage -= shield.amount
+			_active_shields.erase(shield)
+			shield_changed.emit(total_shield())
+
+	return remaining_damage
 
 
 ## Apply healing to the combatant.
@@ -367,6 +392,25 @@ func apply_healing(amount: float) -> void:
 	var max_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	_current_health = minf(_current_health + amount, max_health)
 	_update_health()
+
+
+## Return the total absorption capacity from all active shields.
+func total_shield() -> float:
+	var total: float = 0.0
+	for shield in _active_shields:
+		total += shield.amount
+	return total
+
+
+## Apply a new shield to the combatant.
+## A no-op if amount <= 0.0. Emits shield_changed with the post-mutation total.
+func apply_shield(amount: float, source: StringName, duration: float) -> void:
+	if amount <= 0.0:
+		return
+
+	var shield := MobaShield.new(amount, source, duration)
+	_active_shields.append(shield)
+	shield_changed.emit(total_shield())
 
 
 ## Apply crowd control to this combatant from a source.
@@ -759,6 +803,9 @@ func tick(delta: float) -> void:
 	# Advance active stat modifiers so timed effects expire on the caller's clock.
 	get_effect_container().tick(delta)
 
+	# Advance shield durations and expire shields
+	_tick_shields(delta)
+
 	# Advance crowd control durations and expire entries
 	_tick_crowd_control(delta)
 
@@ -799,6 +846,23 @@ func tick(delta: float) -> void:
 		if new_health != _current_health:
 			_current_health = new_health
 			_update_health()
+
+
+## Advance shield durations and remove expired shields.
+## Emits shield_changed when any shields expire during this tick.
+func _tick_shields(delta: float) -> void:
+	var shields_before := _active_shields.size()
+
+	# Advance all shield durations
+	for i in range(_active_shields.size() - 1, -1, -1):
+		var shield = _active_shields[i]
+		shield.remaining -= delta
+		if shield.remaining <= 0.0:
+			_active_shields.remove_at(i)
+
+	# Emit shield_changed if any shields expired
+	if _active_shields.size() < shields_before:
+		shield_changed.emit(total_shield())
 
 
 ## Advance crowd control durations and expire entries.
