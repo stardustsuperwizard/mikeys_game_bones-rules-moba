@@ -1,0 +1,57 @@
+{
+  "STUN": {
+    "blocks_move": true,
+    "blocks_basic_attack": true,
+    "blocks_ability": true
+  },
+  "ROOT": {
+    "blocks_move": true,
+    "blocks_basic_attack": false,
+    "blocks_ability": false
+  },
+  "SLOW": {
+    "blocks_move": false,
+    "blocks_basic_attack": false,
+    "blocks_ability": false
+  },
+  "SILENCE": {
+    "blocks_move": false,
+    "blocks_basic_attack": false,
+    "blocks_ability": true
+  },
+  "DISARM": {
+    "blocks_move": false,
+    "blocks_basic_attack": true,
+    "blocks_ability": false
+  },
+  "KNOCKBACK": {
+    "blocks_move": false,
+    "blocks_basic_attack": false,
+    "blocks_ability": false
+  },
+  "PULL": {
+    "blocks_move": false,
+    "blocks_basic_attack": false,
+    "blocks_ability": false
+  },
+  "KNOCK_UP": {
+    "blocks_move": false,
+    "blocks_basic_attack": false,
+    "blocks_ability": false
+  },
+  "FEAR": {
+    "blocks_move": false,
+    "blocks_basic_attack": false,
+    "blocks_ability": false
+  },
+  "TAUNT": {
+    "blocks_move": false,
+    "blocks_basic_attack": false,
+    "blocks_ability": false
+  },
+  "BLIND": {
+    "blocks_move": false,
+    "blocks_basic_attack": false,
+    "blocks_ability": false
+  }
+}

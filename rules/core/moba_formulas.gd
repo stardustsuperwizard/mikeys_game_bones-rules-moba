@@ -179,3 +179,28 @@ static func apply_crit(raw: float, crit_damage: float) -> float:
 ##     Raw basic attack damage, before apply_damage()'s mitigation pipeline
 static func basic_attack_damage(weapon_damage: float, attack_damage: float) -> float:
 	return weapon_damage + attack_damage
+
+
+## Calculate crowd control duration after Tenacity reduction.
+##
+## Per §14, the formula is: Effective Duration = Base Duration × (1.0 - Tenacity)
+##
+## Tenacity is a percent-reduction stat that shortens the duration of crowd control effects.
+## A Tenacity value of 0.25 (25%) means the effect lasts 75% of its base duration.
+## This function takes no `affected_by_tenacity` flag—deciding whether to call it is
+## the caller's responsibility.
+##
+## Args:
+##     base_duration: Base duration in seconds
+##     tenacity: Tenacity value as a fraction (e.g., 0.25 for 25% reduction)
+##
+## Returns:
+##     Effective duration after Tenacity reduction (in seconds)
+##
+## Known extension point (§60): diminishing returns on repeated crowd control
+## is deliberately not implemented here. Adding it means scaling `base_duration`
+## by the target's recent crowd control history before the Tenacity reduction
+## below, which needs per-target state this pure function does not and should
+## not carry -- the caller would supply an already-scaled `base_duration`.
+static func crowd_control_duration(base_duration: float, tenacity: float) -> float:
+	return base_duration * (1.0 - tenacity)

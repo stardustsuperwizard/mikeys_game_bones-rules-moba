@@ -30,3 +30,32 @@ stack: every application refreshes that shared duration, including
 applications made once the entry's `max_stacks` cap has already been
 reached. Past the cap, magnitude stops growing but the effect stays alive as
 long as it keeps being reapplied.
+
+## MobaCrowdControl
+
+`MobaCrowdControl` (`moba_crowd_control.gd`) is the data model for crowd
+control legality. It loads per-effect boolean metadata from
+`crowd_control_effects.json` lazily, on the first query rather than at
+startup, and exposes three static query methods: `blocks_move()`,
+`blocks_basic_attack()`, and `blocks_ability()` for each of the eleven
+`MobaCrowdControlSpec.CCType` values. A malformed table is a load failure:
+it is reported through `push_error()` and left detectable on `load_failed`,
+with the reason on `load_error`. The queries answer `false` for an
+out-of-range type rather than guessing at a row.
+
+The table defines which actions each crowd control effect blocks:
+
+- **STUN** blocks all three (move, basic attack, ability).
+- **ROOT** blocks only movement.
+- **SILENCE** blocks only abilities.
+- **DISARM** blocks only basic attacks.
+- **SLOW, KNOCKBACK, PULL, KNOCK_UP, FEAR, TAUNT, BLIND** block nothing at
+  the legality gate; they achieve their effects through other mechanisms:
+  SLOW via `MobaStatModifier` on `movement_speed` (the same pipeline Brace's
+  armor buff uses), FEAR/TAUNT via intent override on movement/targeting,
+  BLIND via miss chance at attack resolution, and displacement effects via
+  forced movement.
+
+This is pure data and query logic; it does not apply crowd control to a
+combatant or enter any state. Applying an effect, entering a crowd-control
+state, and gating controller intent are all callers' concerns.
