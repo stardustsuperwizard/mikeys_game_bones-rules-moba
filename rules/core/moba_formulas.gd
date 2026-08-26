@@ -204,3 +204,39 @@ static func basic_attack_damage(weapon_damage: float, attack_damage: float) -> f
 ## not carry -- the caller would supply an already-scaled `base_duration`.
 static func crowd_control_duration(base_duration: float, tenacity: float) -> float:
 	return base_duration * (1.0 - tenacity)
+
+
+## Calculate healing from lifesteal and omnivamp based on damage dealt.
+##
+## Sustain healing (lifesteal + omnivamp) is applied as a fraction of the
+## damage dealt, where damage_dealt includes both shield absorption and
+## health reduction. This formula ensures overkill scenarios do not grant
+## bonus healing: a hit dealing 10 health damage yields 10% of 10, not 10% of
+## the raw or pre-mitigation amount.
+##
+## Args:
+##     damage_dealt: Actual damage absorbed (shield + health), post-mitigation
+##     sustain_pct: Combined sustain percentage (lifesteal + omnivamp as fraction)
+##
+## Returns:
+##     Healing amount (damage_dealt * sustain_pct)
+static func sustain_healing(damage_dealt: float, sustain_pct: float) -> float:
+	return maxf(damage_dealt, 0.0) * sustain_pct
+
+
+## Calculate the actual healing applied, clamped to maximum health.
+##
+## Applies healing without exceeding the target's maximum health, ensuring
+## healing at max health results in 0.0 applied (not negative) and preventing
+## overheal from "wasting" resources. The returned amount is what actually
+## went to health, accounting for the current_health cap.
+##
+## Args:
+##     current_health: Target's current health before healing
+##     max_health: Target's maximum health
+##     amount: Proposed healing amount (will be clamped)
+##
+## Returns:
+##     Actual healing applied (never negative, never exceeds max_health - current_health)
+static func clamped_heal(current_health: float, max_health: float, amount: float) -> float:
+	return clampf(amount, 0.0, maxf(0.0, max_health - current_health))

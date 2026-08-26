@@ -201,3 +201,58 @@ def expected_crit_multiplier(crit_chance: float, crit_multiplier: float) -> floa
         2.0
     """
     return (1.0 - crit_chance) + crit_chance * crit_multiplier
+
+
+def sustain_healing(damage_dealt: float, sustain_pct: float) -> float:
+    """Calculate healing from lifesteal and omnivamp based on damage dealt.
+
+    Sustain healing (lifesteal + omnivamp) is applied as a fraction of the
+    damage dealt, where damage_dealt includes both shield absorption and
+    health reduction. This formula ensures overkill scenarios do not grant
+    bonus healing: a hit dealing 10 health damage yields 10% of 10, not 10% of
+    the raw or pre-mitigation amount.
+
+    Args:
+        damage_dealt: Actual damage absorbed (shield + health), post-mitigation
+        sustain_pct: Combined sustain percentage (lifesteal + omnivamp as fraction)
+
+    Returns:
+        Healing amount (damage_dealt * sustain_pct)
+
+    Example:
+        >>> sustain_healing(40.0, 0.10)
+        4.0
+        >>> sustain_healing(0.0, 0.10)
+        0.0
+    """
+    return max(damage_dealt, 0.0) * sustain_pct
+
+
+def clamped_heal(current_health: float, max_health: float, amount: float) -> float:
+    """Calculate the actual healing applied, clamped to maximum health.
+
+    Applies healing without exceeding the target's maximum health, ensuring
+    healing at max health results in 0.0 applied (not negative) and preventing
+    overheal from "wasting" resources. The returned amount is what actually
+    went to health, accounting for the current_health cap.
+
+    Args:
+        current_health: Target's current health before healing
+        max_health: Target's maximum health
+        amount: Proposed healing amount (will be clamped)
+
+    Returns:
+        Actual healing applied (never negative, never exceeds max_health - current_health)
+
+    Example:
+        >>> clamped_heal(480.0, 500.0, 100.0)
+        20.0
+        >>> clamped_heal(500.0, 500.0, 100.0)
+        0.0
+        >>> clamped_heal(100.0, 500.0, -10.0)
+        0.0
+    """
+    # Clamp the amount: at minimum 0.0, at maximum the remaining space to max_health
+    min_clamp = 0.0
+    max_clamp = max(0.0, max_health - current_health)
+    return min(max(amount, min_clamp), max_clamp)
