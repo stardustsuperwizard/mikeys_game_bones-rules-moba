@@ -3,6 +3,10 @@ class_name MobaLoadout
 extends Resource
 
 ## The weapon equipped in this loadout.
+## This is deliberately shared authored equipment data, not duplicated per combatant.
+## Each combatant's loadout is a shallow copy of the assigned resource, but the weapon
+## reference stays shared across those copies. No code path mutates a MobaWeapon's fields
+## in place on a live combatant; weapon is always replaced wholesale.
 @export var weapon: MobaWeapon
 
 ## Four action ability id slots (fixed-size array).

@@ -531,7 +531,7 @@ static func _test_hud_getters() -> Array[String]:
 	if combatant.get_passive_slot_id() != &"":
 		violations.append("hud_getters: empty passive slot should yield empty passive id")
 
-	loadout.set_passive_slot("test_passive")
+	combatant.loadout.set_passive_slot("test_passive")
 	if combatant.get_passive_slot_id() != &"test_passive":
 		violations.append(
 			(

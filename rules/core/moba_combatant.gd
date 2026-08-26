@@ -37,9 +37,16 @@ const _MINIMUM_ATTACK_SPEED := 0.01
 ## combatant that never enters the tree (e.g. a standalone test fixture) or
 ## has its loadout assigned after _ready() still resolves them without a
 ## separate manual register_ability() step.
+##
+## Assignment duplicates the loadout (shallow copy) so each combatant holds an
+## independent instance. This prevents mutations through one combatant's loadout
+## from leaking to another combatant assigned the same resource file or to the
+## resource Godot cached from disk. The weapon sub-resource stays deliberately
+## shared across those duplicates; no code path mutates a MobaWeapon in place
+## on a live combatant. Assigning null is safe and leaves loadout null.
 @export var loadout: MobaLoadout:
 	set(value):
-		loadout = value
+		loadout = value.duplicate() if value != null else null
 		if loadout != null:
 			_register_loadout_abilities()
 
