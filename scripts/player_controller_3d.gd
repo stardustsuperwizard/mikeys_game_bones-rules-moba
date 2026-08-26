@@ -157,24 +157,39 @@ func _unhandled_input(event: InputEvent) -> void:
 # player's current facing so forward/back/strafe respect which way the body
 # is pointing, and takes precedence over -- and cancels -- any click order.
 #
-# Crowd control is gated here, at the one place this controller decides where
-# it wants to go: forced movement (FEAR, KNOCKBACK/PULL/KNOCK_UP) replaces the
-# player's intent outright; otherwise a movement-blocking effect (STUN/ROOT)
-# zeroes it whatever is held; otherwise the normal logic below runs unchanged.
+# Crowd control is gated here, at the one place this controller decides where it
+# wants to go, in strict precedence: displacement replaces the player's intent
+# outright; else a movement-blocking effect (STUN/ROOT) zeroes it whatever is
+# held; else fear redirects it away from its source; else the normal logic
+# below runs unchanged.
 func get_move_direction() -> Vector3:
 	var combatant := _combatant()
 
-	# Gate 1: forced movement overrides both held input and any click order.
-	var forced := _forced_move_direction(combatant)
-	if forced != Vector3.ZERO:
-		return forced
+	# Gate 1: displacement (KNOCKBACK/PULL/KNOCK_UP) overrides everything, a
+	# blocking effect included -- being knocked back while stunned is the entire
+	# point of a knockback, and #221 publishes it pre-scaled.
+	if combatant:
+		var displacement := combatant.get_forced_move_direction()
+		if displacement != Vector3.ZERO:
+			return displacement
 
 	# Gate 2: movement not currently permitted -- stand still regardless of
 	# what is being pressed or where the player last clicked.
+	# Ahead of fear deliberately: crowd-control entries are tracked per type, so
+	# FEAR and STUN are routinely co-active (a fear, then a Shield Bash), and a
+	# feared *and* stunned actor is stunned -- it does not flee at full speed.
 	if combatant and not combatant.can_perform_action(&"move"):
 		return Vector3.ZERO
 
-	# Gate 3: fall through to normal input/order logic
+	# Gate 3: fear redirects intent rather than blocking it -- it carries an
+	# all-false row in the crowd-control table -- so it resolves here, after
+	# every effect that can forbid movement outright has had its say.
+	if combatant:
+		var fleeing := _fear_move_direction(combatant)
+		if fleeing != Vector3.ZERO:
+			return fleeing
+
+	# Gate 4: fall through to normal input/order logic
 	var body := _body()
 	if not body:
 		return Vector3.ZERO
@@ -484,28 +499,13 @@ func _ability_target() -> Node:
 	return null
 
 
-# Forced movement for this frame, or Vector3.ZERO when the actor's intent is
-# still its own. Displacement (KNOCKBACK/PULL/KNOCK_UP) arrives pre-scaled from
-# MobaCombatant.get_forced_move_direction() (#221). FEAR is deliberately not a
-# displacement and has an all-false row in the crowd-control table -- it
-# redirects intent rather than blocking it -- so it is resolved here from the
-# fear source #220 exposes for exactly this consumer.
-func _forced_move_direction(combatant: MobaCombatant) -> Vector3:
-	if combatant == null:
-		return Vector3.ZERO
-
-	var displacement := combatant.get_forced_move_direction()
-	if displacement != Vector3.ZERO:
-		return displacement
-
-	return _fear_move_direction(combatant)
-
-
-# Unit vector pointing straight away from the recorded FEAR source, flattened
-# to the ground plane, or Vector3.ZERO when not feared. Left unscaled so
-# ActorBody3D's existing velocity formula flees at the actor's normal speed;
-# displacement is the case that needs its own scaling, and #221 already applies
-# it before publishing.
+# Unit vector pointing straight away from the recorded FEAR source, flattened to
+# the ground plane, or Vector3.ZERO when not feared. Resolved here from the
+# source #220 exposes for exactly this consumer, because #220 does not route
+# FEAR through get_forced_move_direction() -- only displacement lands there.
+# Left unscaled so ActorBody3D's existing velocity formula flees at the actor's
+# normal speed; displacement is the case needing its own scaling, and #221
+# already applies it before publishing.
 func _fear_move_direction(combatant: MobaCombatant) -> Vector3:
 	var fear_type := MobaCrowdControlSpec.CCType.FEAR
 	if not combatant.has_crowd_control(fear_type):

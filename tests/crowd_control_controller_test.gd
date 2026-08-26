@@ -10,7 +10,8 @@
 #
 # Covers, in order:
 #   - a feared player's held input is replaced by flight away from the source,
-#     and input resumes once the fear expires;
+#     a stun landing on top of that fear outranks it, and input resumes once
+#     both expire;
 #   - a stunned player's held input produces no movement, and movement resumes
 #     once the stun expires.
 #
@@ -56,7 +57,7 @@ func _run() -> void:
 		enemy.queue_free()
 	await physics_frame
 
-	if not await _run_stun_scenarios(controller, combatant, body, player):
+	if not await _run_stun_scenarios(controller, combatant, body):
 		return _finish()
 
 	_finish()
@@ -130,9 +131,39 @@ func _run_fear_scenario(
 
 	print("PASS feared movement overrides input: fled %v" % feared_move.normalized())
 
+	# --- a feared *and* stunned actor is stunned, not fleeing ---
+	# Entries are tracked per CCType, so this pair is ordinary (a fear, then a
+	# Shield Bash). Fear must resolve behind the blocking effects, not ahead of
+	# them, or a stun lands on a feared actor and changes nothing.
+	var stun_over_fear := MobaCrowdControlSpec.new()
+	stun_over_fear.type = MobaCrowdControlSpec.CCType.STUN
+	stun_over_fear.duration = 0.5
+	stun_over_fear.affected_by_tenacity = false
+
+	combatant.apply_crowd_control(stun_over_fear, enemy_combatant)
+	await physics_frame
+
+	if not combatant.has_crowd_control(MobaCrowdControlSpec.CCType.STUN):
+		_fail("fear+stun: the stun was refused, so the precedence under test never ran")
+		Input.action_release("move_forward")
+		return false
+
+	var feared_and_stunned := controller.get_move_direction()
+	if feared_and_stunned != Vector3.ZERO:
+		_fail(
+			"fear+stun: a stunned player kept fleeing the fear source: %v"
+			% feared_and_stunned
+		)
+		Input.action_release("move_forward")
+		return false
+
+	print("PASS stun outranks a co-active fear: get_move_direction() == Vector3.ZERO")
+
 	for i in 50:
 		await physics_frame
-		if not combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR):
+		var still_feared := combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR)
+		var still_stunned := combatant.has_crowd_control(MobaCrowdControlSpec.CCType.STUN)
+		if not still_feared and not still_stunned:
 			break
 
 	if combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR):
@@ -161,8 +192,7 @@ func _run_fear_scenario(
 func _run_stun_scenarios(
 	controller: PlayerController3D,
 	combatant: MobaCombatant,
-	body: CharacterBody3D,
-	player: Actor
+	body: CharacterBody3D
 ) -> bool:
 	# --- stunned player with held movement input produces Vector3.ZERO ----
 	if _actors_lost("stun movement gate", [body, controller, combatant]):
@@ -190,6 +220,13 @@ func _run_stun_scenarios(
 	# Apply stun to the combatant (self-applied for simplicity)
 	combatant.apply_crowd_control(stun_spec, combatant)
 	await physics_frame
+
+	# Assert the stun landed before asserting on the gate: a refused application
+	# would otherwise surface as a misleading controller-gate failure.
+	if not combatant.has_crowd_control(MobaCrowdControlSpec.CCType.STUN):
+		_fail("stun movement: the stun was refused, so the gate under test never ran")
+		Input.action_release("move_forward")
+		return false
 
 	# Verify: movement should be blocked while stunned
 	var stunned_move := controller.get_move_direction()
