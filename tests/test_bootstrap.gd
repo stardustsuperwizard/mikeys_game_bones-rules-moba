@@ -33,6 +33,8 @@ var _expected_suites: Array[String] = [
 	"Ability Library Test",
 	"Ability Activation Test",
 	"Brace Ability Test",
+	"Crowd Control Test",
+	"Shield Bash Ability Test",
 	"Loadout Test",
 	"HUD Slot Test",
 	"HUD Test",
@@ -63,6 +65,8 @@ func _ready() -> void:
 	_check("Ability Library Test", AbilityLibraryTest.run())
 	_check("Ability Activation Test", AbilityActivationTest.run())
 	_check("Brace Ability Test", BraceAbilityTest.run())
+	_check("Crowd Control Test", CrowdControlTest.run())
+	_check("Shield Bash Ability Test", ShieldBashAbilityTest.run())
 	_check("Loadout Test", LoadoutTest.run())
 	_check("HUD Slot Test", HudSlotTest.run())
 	_check("HUD Test", HudTest.run())
