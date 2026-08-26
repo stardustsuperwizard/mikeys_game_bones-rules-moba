@@ -42,8 +42,8 @@ const _MINIMUM_ATTACK_SPEED := 0.01
 ## independent instance. This prevents mutations through one combatant's loadout
 ## from leaking to another combatant assigned the same resource file or to the
 ## resource Godot cached from disk. The weapon sub-resource stays deliberately
-## shared across those duplicates; no code path mutates a MobaWeapon in place
-## on a live combatant. Assigning null is safe and leaves loadout null.
+## shared across those duplicates -- MobaLoadout.weapon records why that is safe
+## and what would break it. Assigning null is safe and leaves loadout null.
 @export var loadout: MobaLoadout:
 	set(value):
 		loadout = value.duplicate() if value != null else null
