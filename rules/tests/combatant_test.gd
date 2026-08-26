@@ -41,6 +41,10 @@ static func run() -> bool:
 	var duplication_violations = _test_stat_block_duplicated()
 	all_violations.append_array(duplication_violations)
 
+	# Test 5b: Loadout is duplicated, not shared
+	var loadout_duplication_violations = _test_loadout_duplicated()
+	all_violations.append_array(loadout_duplication_violations)
+
 	# Test 6: 50 raw PHYSICAL vs 50 armor = 33.33 health reduction
 	var physical_mitigation_violations = _test_physical_armor_mitigation()
 	all_violations.append_array(physical_mitigation_violations)
@@ -444,5 +448,78 @@ static func _test_seeded_rng() -> Array[String]:
 				% [reduction1, reduction2]
 			)
 		)
+
+	return violations
+
+
+## Test loadout is duplicated, not shared
+static func _test_loadout_duplicated() -> Array[String]:
+	var violations: Array[String] = []
+
+	# Create a weapon and loadout to assign to both combatants
+	var weapon := MobaWeapon.new()
+	weapon.damage = 10.0
+	weapon.attack_range = 5.0
+	weapon.wind_up = 0.1
+	weapon.recovery = 0.2
+	weapon.damage_type = MobaDamage.DamageType.PHYSICAL
+
+	var shared_loadout := MobaLoadout.new()
+	shared_loadout.weapon = weapon
+	shared_loadout.set_action_slot(1, "test_ability")
+	shared_loadout.set_passive_slot("test_passive")
+
+	# Assign the same loadout instance to two combatants
+	var combatant1 = MobaCombatant.new()
+	combatant1.stat_block = _BASELINE_STAT_BLOCK
+	combatant1._runtime_stat_block = combatant1.stat_block.duplicate()
+	combatant1._current_health = combatant1._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	combatant1.loadout = shared_loadout
+
+	var combatant2 = MobaCombatant.new()
+	combatant2.stat_block = _BASELINE_STAT_BLOCK
+	combatant2._runtime_stat_block = combatant2.stat_block.duplicate()
+	combatant2._current_health = combatant2._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	combatant2.loadout = shared_loadout
+
+	# Check that the two combatants have different loadout instances
+	if combatant1.loadout == combatant2.loadout:
+		violations.append("loadout_duplicated: combatants should have different loadout instances")
+
+	# Check that neither is the original shared_loadout
+	if combatant1.loadout == shared_loadout:
+		violations.append("loadout_duplicated: combatant1's loadout should not be the original")
+
+	if combatant2.loadout == shared_loadout:
+		violations.append("loadout_duplicated: combatant2's loadout should not be the original")
+
+	# Action slot mutations through one combatant reach neither the other
+	# combatant nor the resource that was assigned to both
+	combatant1.loadout.set_action_slot(2, "mutated_ability")
+	if combatant2.get_action_slot_ability_id(2) == &"mutated_ability":
+		violations.append("loadout_duplicated: action slot mutation leaked to combatant2")
+
+	if shared_loadout.get_action_slot(2) == "mutated_ability":
+		violations.append("loadout_duplicated: action slot mutation leaked to original")
+
+	# Passive slot mutations are isolated the same way
+	combatant1.loadout.set_passive_slot("mutated_passive")
+	if combatant2.get_passive_slot_id() == &"mutated_passive":
+		violations.append("loadout_duplicated: passive slot mutation leaked to combatant2")
+
+	if shared_loadout.get_passive_slot() == "mutated_passive":
+		violations.append("loadout_duplicated: passive slot mutation leaked to original")
+
+	# The weapon is deliberately shared across the duplicates, not deep-copied
+	if combatant1.loadout.get_weapon() != combatant2.loadout.get_weapon():
+		violations.append("loadout_duplicated: weapon should be shared across duplicates")
+
+	if combatant1.loadout.get_weapon() != weapon:
+		violations.append("loadout_duplicated: weapon should be the assigned instance")
+
+	# Assigning null must not error and must leave the loadout null
+	combatant1.loadout = null
+	if combatant1.loadout != null:
+		violations.append("loadout_duplicated: null assignment should leave loadout null")
 
 	return violations

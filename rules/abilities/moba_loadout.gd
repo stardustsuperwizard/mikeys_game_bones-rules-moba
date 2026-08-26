@@ -3,6 +3,19 @@ class_name MobaLoadout
 extends Resource
 
 ## The weapon equipped in this loadout.
+##
+## Deliberately shared authored equipment data, not duplicated per combatant. A
+## combatant's loadout is a shallow copy of the assigned resource (see
+## MobaCombatant.loadout), and authored loadouts reference their weapon as an
+## ExtResource, so every combatant assigned the same loadout .tres shares one
+## MobaWeapon instance.
+##
+## That sharing is safe because no production code path mutates a MobaWeapon's
+## fields in place: a loadout's weapon is replaced wholesale. Writing to a field
+## of a weapon read back off a live combatant would write through to every other
+## combatant sharing that file. Some test fixtures do mutate one in place -- see
+## rules/tests/loadout_test.gd -- and are harmless only because each fixture call
+## builds its own MobaWeapon rather than loading the authored file.
 @export var weapon: MobaWeapon
 
 ## Four action ability id slots (fixed-size array).
