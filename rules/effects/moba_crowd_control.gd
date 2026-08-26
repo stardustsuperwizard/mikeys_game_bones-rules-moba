@@ -20,6 +20,12 @@ const _REQUIRED_COLUMNS = ["blocks_move", "blocks_basic_attack", "blocks_ability
 ## and tests rather than only observable through push_error side effects.
 static var load_failed: bool = false
 
+## The problem that caused the most recent load failure, or "" when the table
+## loaded cleanly. Lets a caller or test assert *why* a table was rejected,
+## not merely that it was -- a table refused by the wrong check still sets
+## load_failed, and without this the mistake is invisible.
+static var load_error: String = ""
+
 static var _cc_table: Dictionary = {}
 static var _table_loaded: bool = false
 
@@ -29,24 +35,22 @@ static func _ensure_loaded() -> void:
 	if _table_loaded:
 		return
 
-	_table_loaded = true
 	_load_cc_table()
+	_table_loaded = true
 
 
 static func _load_cc_table() -> void:
 	var json_path = "res://rules/data/crowd_control_effects.json"
 	var file = FileAccess.open(json_path, FileAccess.READ)
 	if file == null:
-		push_error("Failed to load crowd_control_effects.json at %s" % json_path)
-		load_failed = true
+		_fail("Failed to load crowd_control_effects.json at %s" % json_path)
 		return
 
 	var content = file.get_as_text()
 	var json = JSON.new()
 	var error = json.parse(content)
 	if error != OK:
-		push_error("Failed to parse crowd_control_effects.json: %s" % json.get_error_message())
-		load_failed = true
+		_fail("Failed to parse crowd_control_effects.json: %s" % json.get_error_message())
 		return
 
 	_parse_cc_table(json.data)
@@ -58,15 +62,22 @@ static func _load_cc_table() -> void:
 static func _parse_cc_table(data: Variant) -> bool:
 	_cc_table = {}
 	load_failed = false
+	load_error = ""
 
 	var error_message := _first_cc_table_error(data)
 
 	if error_message == "":
 		return true
 
-	push_error(error_message)
-	load_failed = true
+	_fail(error_message)
 	return false
+
+
+## Record a load failure: report it loudly and leave it detectable.
+static func _fail(message: String) -> void:
+	push_error(message)
+	load_failed = true
+	load_error = message
 
 
 ## Returns the first validation problem found in `data`, or "" if the whole
@@ -105,7 +116,11 @@ static func _first_cc_table_error(data: Variant) -> String:
 		if entry_error != "":
 			return entry_error
 
-		_cc_table[cc_type_name_str] = cc_data
+		# Key by enum index, not by name, mirroring MobaStateMachine's
+		# `_state_table[state_idx]`. The queries take an int, so keying by int
+		# is what lets their `not in _cc_table` guard actually reject an
+		# out-of-range value instead of indexing CCType.keys() blind.
+		_cc_table[MobaCrowdControlSpec.CCType[cc_type_name_str]] = cc_data
 
 	return ""
 
@@ -137,12 +152,11 @@ static func blocks_move(type: int) -> bool:
 		push_error("Cannot answer blocks_move(%d): CC table failed to load" % type)
 		return false
 
-	var cc_type_name = MobaCrowdControlSpec.CCType.keys()[type]
-	if cc_type_name not in _cc_table:
+	if type not in _cc_table:
 		push_error("Unknown CC type: %d" % type)
 		return false
 
-	return _cc_table[cc_type_name].get("blocks_move", false)
+	return _cc_table[type].get("blocks_move", false)
 
 
 ## Check if a crowd control type blocks basic attacks.
@@ -154,12 +168,11 @@ static func blocks_basic_attack(type: int) -> bool:
 		push_error("Cannot answer blocks_basic_attack(%d): CC table failed to load" % type)
 		return false
 
-	var cc_type_name = MobaCrowdControlSpec.CCType.keys()[type]
-	if cc_type_name not in _cc_table:
+	if type not in _cc_table:
 		push_error("Unknown CC type: %d" % type)
 		return false
 
-	return _cc_table[cc_type_name].get("blocks_basic_attack", false)
+	return _cc_table[type].get("blocks_basic_attack", false)
 
 
 ## Check if a crowd control type blocks abilities.
@@ -171,23 +184,27 @@ static func blocks_ability(type: int) -> bool:
 		push_error("Cannot answer blocks_ability(%d): CC table failed to load" % type)
 		return false
 
-	var cc_type_name = MobaCrowdControlSpec.CCType.keys()[type]
-	if cc_type_name not in _cc_table:
+	if type not in _cc_table:
 		push_error("Unknown CC type: %d" % type)
 		return false
 
-	return _cc_table[cc_type_name].get("blocks_ability", false)
+	return _cc_table[type].get("blocks_ability", false)
 
 
-## For testing only: expose the loaded CC table.
-## Tests may mutate this dictionary to verify data-driven behavior.
-static func get_cc_table_for_testing() -> Dictionary:
-	_ensure_loaded()
-	return _cc_table
+## For testing only: feed a hand-built table through the same validation path
+## used by _load_cc_table(), so malformed-table handling can be exercised
+## without touching the JSON resource on disk.
+static func load_cc_table_for_testing(data: Variant) -> bool:
+	return _parse_cc_table(data)
 
 
 ## For testing only: reset the table state to allow re-testing load failures.
-static func _reset_for_testing() -> void:
+##
+## Call this after a test that leaves a malformed table behind: the next
+## _ensure_loaded() reloads from disk, so a consumer reading `load_failed`
+## without first issuing a query does not see a stale failure.
+static func reset_for_testing() -> void:
 	_cc_table = {}
 	_table_loaded = false
 	load_failed = false
+	load_error = ""

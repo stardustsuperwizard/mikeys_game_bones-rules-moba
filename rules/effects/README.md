@@ -35,9 +35,13 @@ long as it keeps being reapplied.
 
 `MobaCrowdControl` (`moba_crowd_control.gd`) is the data model for crowd
 control legality. It loads per-effect boolean metadata from
-`crowd_control_effects.json` at startup and exposes three static query methods:
-`blocks_move()`, `blocks_basic_attack()`, and `blocks_ability()` for each of
-the eleven `MobaCrowdControlSpec.CCType` values.
+`crowd_control_effects.json` lazily, on the first query rather than at
+startup, and exposes three static query methods: `blocks_move()`,
+`blocks_basic_attack()`, and `blocks_ability()` for each of the eleven
+`MobaCrowdControlSpec.CCType` values. A malformed table is a load failure:
+it is reported through `push_error()` and left detectable on `load_failed`,
+with the reason on `load_error`. The queries answer `false` for an
+out-of-range type rather than guessing at a row.
 
 The table defines which actions each crowd control effect blocks:
 
@@ -53,4 +57,5 @@ The table defines which actions each crowd control effect blocks:
   forced movement.
 
 This is pure data and query logic; it does not apply crowd control to a
-combatant or enter any state. See #220, #221, and #222 for consumption.
+combatant or enter any state. Applying an effect, entering a crowd-control
+state, and gating controller intent are all callers' concerns.
