@@ -74,11 +74,11 @@ static func _test_knockback_moves_away_from_source() -> Array[String]:
 	var source = source_data["combatant"]
 	var target = target_data["combatant"]
 
-	# Apply knockback with magnitude (speed)
+	# Apply knockback with magnitude (0.0-1.0 fraction of ActorBody3D.SPEED)
 	var spec = MobaCrowdControlSpec.new()
 	spec.type = MobaCrowdControlSpec.CCType.KNOCKBACK
 	spec.duration = 1.0
-	spec.magnitude = 2.0  # Speed: 2.0 units per second
+	spec.magnitude = 0.4
 	spec.affected_by_tenacity = false
 
 	target.apply_crowd_control(spec, source)
@@ -117,11 +117,11 @@ static func _test_pull_moves_toward_source() -> Array[String]:
 	var source = source_data["combatant"]
 	var target = target_data["combatant"]
 
-	# Apply pull with magnitude (speed)
+	# Apply pull with magnitude (0.0-1.0 fraction of ActorBody3D.SPEED)
 	var spec = MobaCrowdControlSpec.new()
 	spec.type = MobaCrowdControlSpec.CCType.PULL
 	spec.duration = 1.0
-	spec.magnitude = 2.0  # Speed: 2.0 units per second
+	spec.magnitude = 0.4
 	spec.affected_by_tenacity = false
 
 	target.apply_crowd_control(spec, source)
@@ -169,7 +169,7 @@ static func _test_knockback_honors_affected_by_tenacity_false() -> Array[String]
 	var spec = MobaCrowdControlSpec.new()
 	spec.type = MobaCrowdControlSpec.CCType.KNOCKBACK
 	spec.duration = 1.0
-	spec.magnitude = 2.0
+	spec.magnitude = 0.4
 	spec.affected_by_tenacity = false
 
 	target.apply_crowd_control(spec, source)
@@ -215,7 +215,7 @@ static func _test_knockback_honors_affected_by_tenacity_true() -> Array[String]:
 	var spec = MobaCrowdControlSpec.new()
 	spec.type = MobaCrowdControlSpec.CCType.KNOCKBACK
 	spec.duration = 1.0
-	spec.magnitude = 2.0
+	spec.magnitude = 0.4
 	spec.affected_by_tenacity = true
 
 	target.apply_crowd_control(spec, source)
@@ -266,7 +266,7 @@ static func _test_displacement_interrupts_dashing() -> Array[String]:
 	var spec = MobaCrowdControlSpec.new()
 	spec.type = MobaCrowdControlSpec.CCType.KNOCKBACK
 	spec.duration = 0.5
-	spec.magnitude = 2.0
+	spec.magnitude = 0.4
 	spec.affected_by_tenacity = false
 
 	target.apply_crowd_control(spec, source)
@@ -275,8 +275,10 @@ static func _test_displacement_interrupts_dashing() -> Array[String]:
 	if target._active_displacement == null:
 		violations.append("displacement_interrupts_dashing: knockback should be applied")
 
-	# The state may or may not change to something else - that's policy-dependent.
-	# But the important thing is that knockback was applied.
+	# DASHING itself should be interrupted -- displacement is the one thing that
+	# gets through a "displacement_only" policy, cutting the dash short into IDLE.
+	if state_machine.current_state == MobaState.DASHING:
+		violations.append("displacement_interrupts_dashing: DASHING should have been interrupted")
 
 	return violations
 
@@ -333,7 +335,7 @@ static func _test_knock_up_enters_airborne_with_knock_up_cause() -> Array[String
 	var spec = MobaCrowdControlSpec.new()
 	spec.type = MobaCrowdControlSpec.CCType.KNOCK_UP
 	spec.duration = 0.5
-	spec.magnitude = 2.0
+	spec.magnitude = 0.4
 	spec.affected_by_tenacity = false
 
 	target.apply_crowd_control(spec, source)
@@ -357,9 +359,8 @@ static func _test_knock_up_enters_airborne_with_knock_up_cause() -> Array[String
 	return violations
 
 
-## Test that a follow-up effect queued during knock-up is applied on landing.
-## Currently skipped because the Issue doesn't specify how abilities queue follow-up effects.
-## This test demonstrates the intended behavior.
+## Test that a follow-up effect queued during knock-up is applied on landing,
+## not at the moment the knock-up itself was applied.
 static func _test_queued_effect_applied_on_landing() -> Array[String]:
 	var violations: Array[String] = []
 
@@ -374,35 +375,41 @@ static func _test_queued_effect_applied_on_landing() -> Array[String]:
 	var knock_up_spec = MobaCrowdControlSpec.new()
 	knock_up_spec.type = MobaCrowdControlSpec.CCType.KNOCK_UP
 	knock_up_spec.duration = 0.5
-	knock_up_spec.magnitude = 2.0
+	knock_up_spec.magnitude = 0.4
 	knock_up_spec.affected_by_tenacity = false
 
 	target.apply_crowd_control(knock_up_spec, source)
 
-	# For now, we can't queue a follow-up directly through apply_crowd_control()
-	# because the Issue specifies that the ability itself decides whether to queue one.
-	# This test documents the expected behavior but doesn't exercise the full path yet.
-	# A complete test would require an ability that queues a follow-up effect.
-
-	# Verify knock-up is active
 	if state_machine.current_state != MobaState.AIRBORNE:
 		violations.append("queued_effect_applied_on_landing: should be AIRBORNE after knock-up")
 		return violations
 
-	# Verify knock-up cause is correct
-	if state_machine.get_airborne_cause() != MobaState.AirborneCause.KNOCK_UP:
-		violations.append("queued_effect_applied_on_landing: cause should be KNOCK_UP")
+	# Queue a follow-up STUN to land with the knock-up (e.g. a knock-up-then-stun ability)
+	var stun_spec = MobaCrowdControlSpec.new()
+	stun_spec.type = MobaCrowdControlSpec.CCType.STUN
+	stun_spec.duration = 1.0
+	stun_spec.affected_by_tenacity = false
+	target.queue_follow_up_effect_for_displacement(stun_spec, source)
 
-	# Advance to landing
-	target.tick(0.6)  # Knock-up duration is 0.5, so this will land
+	# The queued effect must not be applied yet, mid-air
+	if target.has_crowd_control(MobaCrowdControlSpec.CCType.STUN):
+		violations.append(
+			"queued_effect_applied_on_landing: STUN should not be active before landing"
+		)
 
-	# Should be back in IDLE after landing
-	if state_machine.current_state != MobaState.IDLE:
+	# Advance to landing (knock-up duration is 0.5)
+	target.tick(0.6)
+
+	if state_machine.current_state != MobaState.CROWD_CONTROLLED:
 		violations.append(
 			(
-				"queued_effect_applied_on_landing: should be IDLE after landing, got %s"
+				"queued_effect_applied_on_landing: should be CROWD_CONTROLLED after landing, got %s"
 				% MobaState.state_to_string(state_machine.current_state)
 			)
 		)
+
+	# The queued STUN must be applied now, at landing
+	if not target.has_crowd_control(MobaCrowdControlSpec.CCType.STUN):
+		violations.append("queued_effect_applied_on_landing: STUN should be active after landing")
 
 	return violations
