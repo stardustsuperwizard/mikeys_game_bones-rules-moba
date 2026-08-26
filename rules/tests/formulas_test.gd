@@ -53,6 +53,9 @@ static func run() -> bool:
 	# sim/tests/test_defense.py::test_increasing_haste_decreases_cooldown)
 	all_violations.append_array(_test_haste_monotonicity())
 
+	# Test 13: crowd_control_duration worked example
+	all_violations.append_array(_test_crowd_control_duration_worked_example())
+
 	if all_violations.is_empty():
 		return true
 
@@ -269,5 +272,19 @@ static func _test_haste_monotonicity() -> Array[String]:
 						)
 					)
 				)
+
+	return violations
+
+
+## Test crowd_control_duration with the §14 worked example.
+## Base duration 2.0 with Tenacity 0.25 should yield 1.5.
+static func _test_crowd_control_duration_worked_example() -> Array[String]:
+	var violations: Array[String] = []
+
+	var result = MobaFormulas.crowd_control_duration(2.0, 0.25)
+	if not _approx_equal(result, 1.5, 0.0001):
+		violations.append(
+			"crowd_control_duration(2.0, 0.25): expected 1.5, got %f" % result
+		)
 
 	return violations
