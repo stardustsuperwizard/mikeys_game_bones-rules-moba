@@ -156,7 +156,40 @@ func _unhandled_input(event: InputEvent) -> void:
 # Returns world-space movement direction. Keyboard input is relative to the
 # player's current facing so forward/back/strafe respect which way the body
 # is pointing, and takes precedence over -- and cancels -- any click order.
+#
+# Crowd control is gated here, at the one place this controller decides where it
+# wants to go, in strict precedence: displacement replaces the player's intent
+# outright; else a movement-blocking effect (STUN/ROOT) zeroes it whatever is
+# held; else fear redirects it away from its source; else the normal logic
+# below runs unchanged.
 func get_move_direction() -> Vector3:
+	var combatant := _combatant()
+
+	# Gate 1: displacement (KNOCKBACK/PULL/KNOCK_UP) overrides everything, a
+	# blocking effect included -- being knocked back while stunned is the entire
+	# point of a knockback, and #221 publishes it pre-scaled.
+	if combatant:
+		var displacement := combatant.get_forced_move_direction()
+		if displacement != Vector3.ZERO:
+			return displacement
+
+	# Gate 2: movement not currently permitted -- stand still regardless of
+	# what is being pressed or where the player last clicked.
+	# Ahead of fear deliberately: crowd-control entries are tracked per type, so
+	# FEAR and STUN are routinely co-active (a fear, then a Shield Bash), and a
+	# feared *and* stunned actor is stunned -- it does not flee at full speed.
+	if combatant and not combatant.can_perform_action(&"move"):
+		return Vector3.ZERO
+
+	# Gate 3: fear redirects intent rather than blocking it -- it carries an
+	# all-false row in the crowd-control table -- so it resolves here, after
+	# every effect that can forbid movement outright has had its say.
+	if combatant:
+		var fleeing := _fear_move_direction(combatant)
+		if fleeing != Vector3.ZERO:
+			return fleeing
+
+	# Gate 4: fall through to normal input/order logic
 	var body := _body()
 	if not body:
 		return Vector3.ZERO
@@ -191,7 +224,29 @@ func consume_jump() -> bool:
 
 # Bones polls these once the body has moved for the frame, so an order that
 # arrived this frame resolves on the same frame it arrived.
+#
+# Gated by TAUNT at this same seam: while taunted the taunt source replaces the
+# player's click order as the attack target. Out of range it stays the target
+# and simply is not reachable -- falling through there would let a taunted
+# player keep swinging at their own pick, which is the whole thing Taunt takes
+# away. Chasing it is AI behavior (Batch 5), not intent, so nothing here moves.
 func get_attack_target() -> Actor:
+	var combatant := _combatant()
+
+	var taunt_source_actor := _taunt_target(combatant)
+	if taunt_source_actor:
+		if not _in_range_of(taunt_source_actor, attack_range):
+			_basic_attack_pending = false
+			_pending_attack_target = null
+			return null
+		# Re-point rather than gate on the flag alone: a taunt landing mid-cycle
+		# must steal a cycle already pending against the player's own target.
+		if _pending_attack_target != taunt_source_actor:
+			cancel_order()
+			_pending_attack_target = taunt_source_actor
+			_basic_attack_pending = true
+		return null
+
 	if _attack_target == null or not _in_range_of(_attack_target, attack_range):
 		return null
 	# When this actor has a MobaCombatant the ruleset basic-attack path
@@ -202,7 +257,7 @@ func get_attack_target() -> Actor:
 	# the same input (architecture constraint: ruleset path wins).
 	# Gate the order-cancel + flag-set on the flag not already being live so
 	# that standing still in range does not repeatedly call cancel_order().
-	if _combatant() != null:
+	if combatant != null:
 		if not _basic_attack_pending:
 			var pending_target := _attack_target
 			cancel_order()
@@ -442,3 +497,50 @@ func _ability_target() -> Node:
 	if _pending_attack_target != null and is_instance_valid(_pending_attack_target):
 		return _pending_attack_target
 	return null
+
+
+# Unit vector pointing straight away from the recorded FEAR source, flattened to
+# the ground plane, or Vector3.ZERO when not feared. Resolved here from the
+# source #220 exposes for exactly this consumer, because #220 does not route
+# FEAR through get_forced_move_direction() -- only displacement lands there.
+# Left unscaled so ActorBody3D's existing velocity formula flees at the actor's
+# normal speed; displacement is the case needing its own scaling, and #221
+# already applies it before publishing.
+func _fear_move_direction(combatant: MobaCombatant) -> Vector3:
+	var fear_type := MobaCrowdControlSpec.CCType.FEAR
+	if not combatant.has_crowd_control(fear_type):
+		return Vector3.ZERO
+
+	var fear_source := combatant.get_crowd_control_source(fear_type)
+	if not is_instance_valid(fear_source):
+		return Vector3.ZERO
+
+	var fear_source_actor := fear_source.get_parent() as Actor
+	if not is_instance_valid(fear_source_actor):
+		return Vector3.ZERO
+
+	var away := actor.global_position - fear_source_actor.global_position
+	away.y = 0.0
+	if away.length() < 0.001:
+		# Source standing exactly on the actor: flee a fixed way rather than
+		# stalling, and without reaching for a random number.
+		return Vector3.FORWARD
+
+	return away.normalized()
+
+
+# The Actor a TAUNT is forcing this controller to attack, or null when not
+# taunted. Per §19 the taunt source is itself the designated target.
+func _taunt_target(combatant: MobaCombatant) -> Actor:
+	if combatant == null:
+		return null
+
+	var taunt_type := MobaCrowdControlSpec.CCType.TAUNT
+	if not combatant.has_crowd_control(taunt_type):
+		return null
+
+	var taunt_source := combatant.get_crowd_control_source(taunt_type)
+	if not is_instance_valid(taunt_source):
+		return null
+
+	return taunt_source.get_parent() as Actor
