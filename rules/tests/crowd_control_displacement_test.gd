@@ -162,7 +162,7 @@ static func _test_knockback_honors_affected_by_tenacity_false() -> Array[String]
 
 	# Give target high Tenacity
 	var stat_block = target._runtime_stat_block.duplicate()
-	stat_block.set_stat_value(MobaStatBlock.TENACITY, 0.5)  # 50% CC duration reduction
+	stat_block.tenacity = 0.5  # 50% CC duration reduction
 	target._runtime_stat_block = stat_block
 
 	# Apply knockback with affected_by_tenacity=false
@@ -208,7 +208,7 @@ static func _test_knockback_honors_affected_by_tenacity_true() -> Array[String]:
 
 	# Give target 50% Tenacity (reduces 1.0s CC to 0.5s)
 	var stat_block = target._runtime_stat_block.duplicate()
-	stat_block.set_stat_value(MobaStatBlock.TENACITY, 0.5)
+	stat_block.tenacity = 0.5
 	target._runtime_stat_block = stat_block
 
 	# Apply knockback with affected_by_tenacity=true

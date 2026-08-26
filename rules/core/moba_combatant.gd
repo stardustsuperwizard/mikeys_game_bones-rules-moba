@@ -611,8 +611,7 @@ func get_forced_move_direction() -> Vector3:
 	# Scale the direction by speed, accounting for ActorBody3D.SPEED constant
 	# The formula velocity.x = move_direction.x * SPEED means we need to scale
 	# move_direction by desired_speed / SPEED to get the correct final velocity.
-	const ACTOR_BODY_SPEED = 5.0  # ActorBody3D.SPEED constant
-	var scale_factor := _active_displacement.speed / ACTOR_BODY_SPEED
+	var scale_factor := _active_displacement.speed / ActorBody3D.SPEED
 	return _active_displacement.direction * scale_factor
 
 
