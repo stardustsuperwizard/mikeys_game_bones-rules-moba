@@ -64,33 +64,51 @@ func _run() -> void:
 
 
 # Test: a feared player's held movement input is replaced by the forced
-# away-from-source direction, and normal input resumes once the fear expires.
+# away-from-source direction, a stun landing on top of that fear outranks it,
+# and normal input resumes once both expire.
 #
 # The fear source is planted in the exact direction the player is asking to
 # move, so "away from source" is the reverse of the held input: a controller
 # that ignored fear and used input would return the opposite vector, not a
 # merely different one.
+#
+# Split across three functions, and phrased as "return the problem, or an empty
+# string" rather than "assert and bail", to stay inside gdlint's max-returns
+# budget while keeping the input release on one path instead of every branch.
 func _run_fear_scenario(
 	controller: PlayerController3D, combatant: MobaCombatant, player: Actor, enemy: Actor
 ) -> bool:
-	if not is_instance_valid(enemy):
-		_fail("fear: no Enemy in the scene to stand in as the fear source")
+	var problem := await _fear_flight_problem(controller, combatant, player, enemy)
+
+	Input.action_release("move_forward")
+	await physics_frame
+
+	if problem != "":
+		_fail(problem)
 		return false
 
-	var enemy_combatant := enemy.get_node_or_null("MobaCombatant") as MobaCombatant
-	var enemy_body := enemy.get_node_or_null("Body") as CharacterBody3D
+	return true
+
+
+# Fear overrides held input: the player flees the source instead of steering.
+# Returns "" once the precedence check that follows it also passes.
+func _fear_flight_problem(
+	controller: PlayerController3D, combatant: MobaCombatant, player: Actor, enemy: Actor
+) -> String:
+	var enemy_combatant: MobaCombatant = null
+	var enemy_body: CharacterBody3D = null
+	if is_instance_valid(enemy):
+		enemy_combatant = enemy.get_node_or_null("MobaCombatant") as MobaCombatant
+		enemy_body = enemy.get_node_or_null("Body") as CharacterBody3D
 	if enemy_combatant == null or enemy_body == null:
-		_fail("fear: enemy has no MobaCombatant/Body to source the fear from")
-		return false
+		return "fear: needs an Enemy with a MobaCombatant and Body to source the fear from"
 
 	Input.action_press("move_forward")
 	await physics_frame
 
 	var input_move := controller.get_move_direction()
 	if input_move == Vector3.ZERO:
-		_fail("fear: held move_forward produced no movement before the fear")
-		Input.action_release("move_forward")
-		return false
+		return "fear: held move_forward produced no movement before the fear"
 
 	# Plant the source ahead of the player, along the direction they are asking
 	# to move. Actor.global_position is a getter over the Body, so move the Body.
@@ -107,33 +125,33 @@ func _run_fear_scenario(
 	await physics_frame
 
 	if not combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR):
-		_fail("fear: the fear was refused, so the gate under test never ran")
-		Input.action_release("move_forward")
-		return false
+		return "fear: the fear was refused, so the gate under test never ran"
 
 	var feared_move := controller.get_move_direction()
 	if feared_move == Vector3.ZERO:
-		_fail("fear: feared player was frozen instead of fleeing the source")
-		Input.action_release("move_forward")
-		return false
+		return "fear: feared player was frozen instead of fleeing the source"
 
-	var alignment := feared_move.normalized().dot(-toward)
-	if alignment < 0.9:
-		_fail(
-			(
-				"fear: expected flight away from the source (%v), got %v"
-				% [-toward, feared_move.normalized()]
-			)
+	if feared_move.normalized().dot(-toward) < 0.9:
+		return (
+			"fear: expected flight away from the source (%v), got %v"
+			% [-toward, feared_move.normalized()]
 		)
-		Input.action_release("move_forward")
-		return false
 
 	print("PASS feared movement overrides input: fled %v" % feared_move.normalized())
 
-	# --- a feared *and* stunned actor is stunned, not fleeing ---
-	# Entries are tracked per CCType, so this pair is ordinary (a fear, then a
-	# Shield Bash). Fear must resolve behind the blocking effects, not ahead of
-	# them, or a stun lands on a feared actor and changes nothing.
+	return await _fear_precedence_problem(controller, combatant, enemy_combatant, toward)
+
+
+# A feared *and* stunned actor is stunned, not fleeing, and normal input resumes
+# once both expire. Entries are tracked per CCType, so this pair is ordinary (a
+# fear, then a Shield Bash): fear must resolve behind the blocking effects, not
+# ahead of them, or a stun landing on a feared actor changes nothing.
+func _fear_precedence_problem(
+	controller: PlayerController3D,
+	combatant: MobaCombatant,
+	enemy_combatant: MobaCombatant,
+	toward: Vector3
+) -> String:
 	var stun_over_fear := MobaCrowdControlSpec.new()
 	stun_over_fear.type = MobaCrowdControlSpec.CCType.STUN
 	stun_over_fear.duration = 0.5
@@ -143,46 +161,34 @@ func _run_fear_scenario(
 	await physics_frame
 
 	if not combatant.has_crowd_control(MobaCrowdControlSpec.CCType.STUN):
-		_fail("fear+stun: the stun was refused, so the precedence under test never ran")
-		Input.action_release("move_forward")
-		return false
+		return "fear+stun: the stun was refused, so the precedence under test never ran"
 
 	var feared_and_stunned := controller.get_move_direction()
 	if feared_and_stunned != Vector3.ZERO:
-		_fail("fear+stun: a stunned player kept fleeing the fear source: %v" % feared_and_stunned)
-		Input.action_release("move_forward")
-		return false
+		return "fear+stun: a stunned player kept fleeing the fear source: %v" % feared_and_stunned
 
 	print("PASS stun outranks a co-active fear: get_move_direction() == Vector3.ZERO")
 
 	for i in 50:
 		await physics_frame
-		var still_feared := combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR)
-		var still_stunned := combatant.has_crowd_control(MobaCrowdControlSpec.CCType.STUN)
-		if not still_feared and not still_stunned:
+		var feared := combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR)
+		var stunned := combatant.has_crowd_control(MobaCrowdControlSpec.CCType.STUN)
+		if not feared and not stunned:
 			break
 
 	if combatant.has_crowd_control(MobaCrowdControlSpec.CCType.FEAR):
-		_fail("fear: the fear never expired")
-		Input.action_release("move_forward")
-		return false
+		return "fear: the fear never expired"
 
 	var resumed_move := controller.get_move_direction()
 	if resumed_move.normalized().dot(toward) < 0.9:
-		_fail(
-			(
-				"fear: input did not resume once the fear expired -- expected %v, got %v"
-				% [toward, resumed_move.normalized()]
-			)
+		return (
+			"fear: input did not resume once the fear expired -- expected %v, got %v"
+			% [toward, resumed_move.normalized()]
 		)
-		Input.action_release("move_forward")
-		return false
 
 	print("PASS fear expiration restores input-driven movement")
 
-	Input.action_release("move_forward")
-	await physics_frame
-	return true
+	return ""
 
 
 # Test: a stunned player's held movement input produces no movement.
