@@ -45,6 +45,10 @@ var final_amount: float = 0.0
 ## Post-resolution crit flag (populated after apply_damage() completes).
 var was_crit: bool = false
 
+## Whether this damage is from a basic attack (for lifesteal purposes).
+## Only true when constructed from MobaCombatant._apply_basic_attack_hit().
+var is_basic_attack: bool = false
+
 
 ## Convenient constructor for MobaDamage.
 func _init(
@@ -53,7 +57,8 @@ func _init(
 	p_source = null,
 	p_can_crit: bool = true,
 	p_flat_pen: float = 0.0,
-	p_percent_pen: float = 0.0
+	p_percent_pen: float = 0.0,
+	p_is_basic_attack: bool = false
 ) -> void:
 	amount = p_amount
 	damage_type = p_damage_type
@@ -61,3 +66,4 @@ func _init(
 	can_crit = p_can_crit
 	flat_pen = p_flat_pen
 	percent_pen = p_percent_pen
+	is_basic_attack = p_is_basic_attack

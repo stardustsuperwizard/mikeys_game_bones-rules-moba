@@ -12,6 +12,9 @@ signal health_changed(current: float, maximum: float)
 ## Emitted when damage is resolved. Carries both raw (pre-crit, pre-mitigation)
 ## and final (post-mitigation) amounts, plus metadata about the damage event.
 signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: bool, source)
+## Emitted when healing is applied via apply_healing() and not refused.
+## Carries the actual (post-clamp) amount applied.
+signal healing_applied(amount: float)
 ## Emitted when current or maximum resource changes.
 signal resource_changed(current: float, maximum: float)
 ## Emitted when a basic attack hit is resolved. Carries the post-mitigation resolved damage outcome.
@@ -321,15 +324,36 @@ func apply_damage(damage: MobaDamage) -> void:
 			final = MobaFormulas.true_damage(final)
 
 	# Step 7: Shield consumption (shortest-remaining-duration first)
+	var pre_shield_final := final
 	final = _consume_shields(final)
+	var post_shield_final := final
 
 	# Populate post-resolution fields on the damage packet for listeners
 	damage.final_amount = final
 	damage.was_crit = was_crit
 
+	# Compute shield_absorbed and health_applied for lifesteal/omnivamp calculation
+	var shield_absorbed := pre_shield_final - post_shield_final
+	var current_health_before_hit := _current_health
+	var health_applied := minf(post_shield_final, maxf(0.0, current_health_before_hit))
+	var damage_dealt := shield_absorbed + health_applied
+
 	# Reduce health
 	_current_health -= final
 	_update_health()
+
+	# Apply lifesteal/omnivamp if attacker exists and damage was dealt
+	if attacker != null and damage_dealt > 0.0:
+		var lifesteal_pct := 0.0
+		if damage.is_basic_attack:
+			lifesteal_pct = attacker.get_stat(MobaStatBlock.LIFESTEAL)
+
+		var omnivamp_pct := attacker.get_stat(MobaStatBlock.OMNIVAMP)
+		var heal_pct := lifesteal_pct + omnivamp_pct
+
+		if heal_pct > 0.0:
+			var sustain_amount := MobaFormulas.sustain_healing(damage_dealt, heal_pct)
+			attacker.apply_healing(sustain_amount)
 
 	var attacker_name := "unattributed"
 	if attacker != null and attacker.get_parent() != null:
@@ -387,11 +411,28 @@ func _consume_shields(incoming_damage: float) -> float:
 
 
 ## Apply healing to the combatant.
-## Increases current health but never exceeds maximum.
-func apply_healing(amount: float) -> void:
+##
+## Returns the actual amount applied (clamped to remaining health capacity).
+## Returns 0.0 and mutates nothing if the combatant is dead. Emits healing_applied
+## with the actual (post-clamp) amount whenever healing is not refused, including
+## 0.0 when already at full health.
+func apply_healing(amount: float) -> float:
+	# Refuse healing on dead combatants
+	if not is_alive():
+		return 0.0
+
+	# Compute the actual amount using the clamp formula
 	var max_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	_current_health = minf(_current_health + amount, max_health)
+	var actual_amount := MobaFormulas.clamped_heal(_current_health, max_health, amount)
+
+	# Apply the healing
+	_current_health += actual_amount
 	_update_health()
+
+	# Emit the healing_applied signal with the actual amount
+	healing_applied.emit(actual_amount)
+
+	return actual_amount
 
 
 ## Return the total absorption capacity from all active shields.
@@ -1053,7 +1094,8 @@ func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 		self,
 		true,
 		get_stat(MobaStatBlock.ARMOR_PEN_FLAT),
-		get_stat(MobaStatBlock.ARMOR_PEN_PERCENT)
+		get_stat(MobaStatBlock.ARMOR_PEN_PERCENT),
+		true
 	)
 	_attack_target.apply_damage(damage)
 	basic_attack_resolved.emit(
