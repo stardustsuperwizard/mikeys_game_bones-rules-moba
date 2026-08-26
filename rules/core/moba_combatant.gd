@@ -819,10 +819,10 @@ func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 	# rolled against that entry's magnitude as a miss chance.
 	var blind_type = MobaCrowdControlSpec.CCType.BLIND
 	if has_crowd_control(blind_type):
-		var blind_spec = get_crowd_control_spec(blind_type)
+		var blind_spec: MobaCrowdControlSpec = get_crowd_control_spec(blind_type)
 		if blind_spec != null:
 			var blind_roll := MobaRules.roll_blind()
-			var miss_chance := blind_spec.magnitude
+			var miss_chance: float = blind_spec.magnitude
 			if blind_roll < miss_chance:
 				# Miss: skip apply_damage entirely; attack cycle still runs
 				basic_attack_resolved.emit(
