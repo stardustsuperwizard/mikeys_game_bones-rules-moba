@@ -239,14 +239,17 @@ func apply_damage(damage: MobaDamage) -> void:
 	if get_parent() != null:
 		target_name = String(get_parent().name)
 	print(
-		"[MobaCombat] %s -> %s: %.1f raw / %.1f final (%s%s)" % [
-			attacker_name,
-			target_name,
-			raw,
-			final,
-			MobaDamage.DamageType.keys()[damage.damage_type],
-			", CRIT" if was_crit else ""
-		]
+		(
+			"[MobaCombat] %s -> %s: %.1f raw / %.1f final (%s%s)"
+			% [
+				attacker_name,
+				target_name,
+				raw,
+				final,
+				MobaDamage.DamageType.keys()[damage.damage_type],
+				", CRIT" if was_crit else ""
+			]
+		)
 	)
 
 	# Emit damage_resolved
@@ -403,6 +406,11 @@ func can_activate(ability_id: StringName) -> int:
 	# still running does not block activation; only being out of charges does.
 	var available_charges: int = _cooldowns.charges(ability_id)
 	if available_charges <= 0 and _cooldowns.remaining(ability_id) > 0.0:
+		# A single-charge ability (max_charges <= 1) that is out of charges is
+		# simply on cooldown; NO_CHARGES is reserved for a multi-charge ability
+		# that has spent every charge while its recharge timer is still running.
+		if _cooldowns.maximum_charges(ability_id) <= 1:
+			return ActivationFailure.ON_COOLDOWN
 		return ActivationFailure.NO_CHARGES
 
 	return ActivationFailure.OK

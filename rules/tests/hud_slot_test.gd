@@ -122,7 +122,7 @@ static func _test_cooldown_readout_reaches_zero() -> Array[String]:
 		slot.refresh()
 		ticks += 1
 		var blocked: bool = (
-			combatant.can_activate(&"sweep_case") == MobaCombatant.ActivationFailure.NO_CHARGES
+			combatant.can_activate(&"sweep_case") == MobaCombatant.ActivationFailure.ON_COOLDOWN
 		)
 		if not blocked:
 			became_ready = true
