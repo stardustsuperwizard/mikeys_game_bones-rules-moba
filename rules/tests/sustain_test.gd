@@ -21,6 +21,10 @@ static func _make_combatant() -> MobaCombatant:
 	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	# Crit is rolled before damage-type routing, so a stray crit would double the
+	# damage dealt -- and therefore the sustain payout -- on any of these cases.
+	# Disable it for predictable tests, as combatant_test.gd does.
+	combatant._runtime_stat_block.crit_chance = 0.0
 	return combatant
 
 
@@ -442,7 +446,7 @@ static func _test_lifesteal_on_basic_attack() -> Array[String]:
 	var target := _make_combatant()
 
 	# Set lifesteal on attacker and reduce health so it can heal
-	attacker._runtime_stat_block.stats[MobaStatBlock.LIFESTEAL] = 0.10
+	attacker._runtime_stat_block.lifesteal = 0.10
 	attacker._current_health = 450.0  # Leave room to heal
 
 	# Record healing
@@ -475,7 +479,7 @@ static func _test_lifesteal_not_on_ability() -> Array[String]:
 	var target := _make_combatant()
 
 	# Set lifesteal on attacker and reduce health so it can heal
-	attacker._runtime_stat_block.stats[MobaStatBlock.LIFESTEAL] = 0.10
+	attacker._runtime_stat_block.lifesteal = 0.10
 	attacker._current_health = 450.0  # Leave room to heal
 
 	# Record healing
@@ -504,7 +508,7 @@ static func _test_omnivamp_on_basic_attack() -> Array[String]:
 	var target := _make_combatant()
 
 	# Set omnivamp on attacker and reduce health so it can heal
-	attacker._runtime_stat_block.stats[MobaStatBlock.OMNIVAMP] = 0.10
+	attacker._runtime_stat_block.omnivamp = 0.10
 	attacker._current_health = 450.0  # Leave room to heal
 
 	# Record healing
@@ -537,7 +541,7 @@ static func _test_omnivamp_on_ability() -> Array[String]:
 	var target := _make_combatant()
 
 	# Set omnivamp on attacker and reduce health so it can heal
-	attacker._runtime_stat_block.stats[MobaStatBlock.OMNIVAMP] = 0.10
+	attacker._runtime_stat_block.omnivamp = 0.10
 	attacker._current_health = 450.0  # Leave room to heal
 
 	# Record healing
@@ -570,8 +574,8 @@ static func _test_lifesteal_and_omnivamp_sum() -> Array[String]:
 	var target := _make_combatant()
 
 	# Set both lifesteal and omnivamp on attacker and reduce health so it can heal
-	attacker._runtime_stat_block.stats[MobaStatBlock.LIFESTEAL] = 0.05
-	attacker._runtime_stat_block.stats[MobaStatBlock.OMNIVAMP] = 0.05
+	attacker._runtime_stat_block.lifesteal = 0.05
+	attacker._runtime_stat_block.omnivamp = 0.05
 	attacker._current_health = 450.0  # Leave room to heal
 
 	# Record healing
@@ -604,11 +608,11 @@ static func _test_lifesteal_on_damage_dealt() -> Array[String]:
 	var target := _make_combatant()
 
 	# Set lifesteal on attacker and reduce health so it can heal
-	attacker._runtime_stat_block.stats[MobaStatBlock.LIFESTEAL] = 0.10
+	attacker._runtime_stat_block.lifesteal = 0.10
 	attacker._current_health = 450.0  # Leave room to heal
 
 	# Set target armor to reduce damage
-	target._runtime_stat_block.stats[MobaStatBlock.ARMOR] = 30.0
+	target._runtime_stat_block.armor = 30
 
 	# Record healing
 	var healing_signal_log := {"amount": 0.0, "count": 0}
@@ -625,15 +629,12 @@ static func _test_lifesteal_on_damage_dealt() -> Array[String]:
 	var damage := MobaDamage.new(50.0, MobaDamage.DamageType.PHYSICAL, attacker, true, 0.0, 0.0, true)
 	target.apply_damage(damage)
 
-	# Should be 38.46 * 0.10, not 5.0
-	if _approx_equal(healing_signal_log["amount"], 5.0):
+	# Lifesteal is 10% of the 38.4615 actually dealt, not of the 50 raw.
+	var expected_dealt := 50.0 * (100.0 / 130.0)
+	if not _approx_equal(healing_signal_log["amount"], expected_dealt * 0.10):
 		violations.append(
-			"lifesteal_on_dealt: lifesteal should NOT be 5.0 (50% raw), but ~3.85 (damage dealt)"
-		)
-
-	if not (healing_signal_log["amount"] > 3.0 and healing_signal_log["amount"] < 4.0):
-		violations.append(
-			"lifesteal_on_dealt: lifesteal should be ~3.85, got %f" % healing_signal_log["amount"]
+			"lifesteal_on_dealt: lifesteal should be %f (10%% of damage dealt), got %f"
+			% [expected_dealt * 0.10, healing_signal_log["amount"]]
 		)
 
 	return violations
@@ -650,7 +651,7 @@ static func _test_overkill_boundary() -> Array[String]:
 	target._current_health = 10.0
 
 	# Set lifesteal on attacker and reduce health so it can heal
-	attacker._runtime_stat_block.stats[MobaStatBlock.LIFESTEAL] = 0.10
+	attacker._runtime_stat_block.lifesteal = 0.10
 	attacker._current_health = 450.0  # Leave room to heal
 
 	# Record healing
@@ -687,7 +688,9 @@ static func _test_apply_healing_returns_amount() -> Array[String]:
 	# Heal 100 (would overheal by 0) → should apply 100
 	var result1 := combatant.apply_healing(100.0)
 	if not _approx_equal(result1, 100.0):
-		violations.append("apply_healing_return: heal 100 into 400/500 should return 100.0, got %f" % result1)
+		violations.append(
+			"apply_healing_return: heal 100 into 400/500 should return 100.0, got %f" % result1
+		)
 
 	# Reset to 480 / 500
 	combatant._current_health = 480.0
@@ -695,7 +698,9 @@ static func _test_apply_healing_returns_amount() -> Array[String]:
 	# Heal 100 (would overheal by 80) → should apply 20
 	var result2 := combatant.apply_healing(100.0)
 	if not _approx_equal(result2, 20.0):
-		violations.append("apply_healing_return: heal 100 into 480/500 should return 20.0, got %f" % result2)
+		violations.append(
+			"apply_healing_return: heal 100 into 480/500 should return 20.0, got %f" % result2
+		)
 
 	# At full health 500 / 500
 	combatant._current_health = 500.0
@@ -755,7 +760,9 @@ static func _test_healing_applied_signal() -> Array[String]:
 	combatant._current_health = 400.0
 	combatant.apply_healing(50.0)
 	if signal_log["count"] != 1:
-		violations.append("healing_signal: first heal should fire signal, count = %d" % signal_log["count"])
+		violations.append(
+			"healing_signal: first heal should fire signal, count = %d" % signal_log["count"]
+		)
 
 	# Heal with overheal → should still fire (with clamped amount)
 	signal_log["count"] = 0
@@ -763,7 +770,9 @@ static func _test_healing_applied_signal() -> Array[String]:
 	combatant._current_health = 490.0
 	combatant.apply_healing(100.0)
 	if signal_log["count"] != 1:
-		violations.append("healing_signal: overheal should fire signal, count = %d" % signal_log["count"])
+		violations.append(
+			"healing_signal: overheal should fire signal, count = %d" % signal_log["count"]
+		)
 	if not _approx_equal(signal_log["amounts"][0], 10.0):
 		violations.append(
 			"healing_signal: overheal should fire with clamped amount (10.0), got %f"
@@ -776,7 +785,9 @@ static func _test_healing_applied_signal() -> Array[String]:
 	combatant._current_health = 500.0
 	combatant.apply_healing(50.0)
 	if signal_log["count"] != 1:
-		violations.append("healing_signal: heal at full should fire signal, count = %d" % signal_log["count"])
+		violations.append(
+			"healing_signal: heal at full should fire signal, count = %d" % signal_log["count"]
+		)
 	if not _approx_equal(signal_log["amounts"][0], 0.0):
 		violations.append(
 			"healing_signal: heal at full should fire with 0.0, got %f" % signal_log["amounts"][0]
@@ -788,6 +799,9 @@ static func _test_healing_applied_signal() -> Array[String]:
 	combatant._current_health = 0.0
 	combatant.apply_healing(50.0)
 	if signal_log["count"] != 0:
-		violations.append("healing_signal: heal on dead should NOT fire signal, count = %d" % signal_log["count"])
+		violations.append(
+			"healing_signal: heal on dead should NOT fire signal, count = %d"
+			% signal_log["count"]
+		)
 
 	return violations

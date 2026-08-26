@@ -177,21 +177,21 @@ def effective_cooldown(base_cooldown: float, ability_haste: float = 0.0) -> floa
 
 def expected_crit_multiplier(crit_chance: float, crit_multiplier: float) -> float:
     """Calculate expected damage multiplier from critical strikes.
-
+    
     The expected value combines the probability of a critical hit with its damage multiplier:
-
+    
     Expected = (1 - crit_chance) × 1.0 + crit_chance × crit_multiplier
              = 1.0 + crit_chance × (crit_multiplier - 1.0)
-
+    
     This is used for computing average damage output over many attacks.
-
+    
     Args:
         crit_chance: Probability of critical strike (0.0 to 1.0)
         crit_multiplier: Damage multiplier on critical (typically 2.0 for 200%)
-
+    
     Returns:
         Expected damage multiplier
-
+    
     Example:
         >>> expected_crit_multiplier(0.0, 2.0)
         1.0
