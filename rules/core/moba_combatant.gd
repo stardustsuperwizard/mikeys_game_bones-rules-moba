@@ -50,7 +50,7 @@ const _MINIMUM_ATTACK_SPEED := 0.01
 		if loadout != null:
 			_register_loadout_abilities()
 
-# Property accessors for current_resource and maximum_resource
+# Property accessors for current_resource, maximum_resource, current_health, and maximum_health
 var current_resource: float:
 	get:
 		return _current_resource
@@ -58,6 +58,14 @@ var current_resource: float:
 var maximum_resource: float:
 	get:
 		return get_stat(MobaStatBlock.RESOURCE)
+
+var current_health: float:
+	get:
+		return _current_health
+
+var maximum_health: float:
+	get:
+		return get_stat(MobaStatBlock.HEALTH)
 
 var _runtime_stat_block: MobaStatBlock
 var _current_health: float = 0.0
