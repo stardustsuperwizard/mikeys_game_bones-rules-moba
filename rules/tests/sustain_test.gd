@@ -977,10 +977,10 @@ static func _test_field_dressing_healing_application() -> Array[String]:
 	var field_dressing_ability = MobaAbilityLibrary.get_ability(&"field_dressing")
 	if field_dressing_ability == null:
 		MobaAbilityLibrary._reset()
-		(
-			violations
-			. append(
-				"field_dressing_heal: field_dressing.tres did not load as a MobaAbility with id 'field_dressing'"
+		violations.append(
+			(
+				"field_dressing_heal: field_dressing.tres did not load as a "
+				+ "MobaAbility with id 'field_dressing'"
 			)
 		)
 		return violations
