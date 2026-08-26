@@ -14,8 +14,8 @@ signal health_changed(current: float, maximum: float)
 signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: bool, source)
 ## Emitted when current or maximum resource changes.
 signal resource_changed(current: float, maximum: float)
-## Emitted when a basic attack hit is resolved.
-signal basic_attack_resolved(target, damage_amount: float)
+## Emitted when a basic attack hit is resolved. Carries the post-mitigation resolved damage outcome.
+signal basic_attack_resolved(target, raw: float, final: float, damage_type: int, was_crit: bool)
 
 ## Typed failure reason for activation checks.
 enum ActivationFailure {
@@ -227,6 +227,10 @@ func apply_damage(damage: MobaDamage) -> void:
 	# This private hook receives the final amount and returns it unchanged.
 	# It exists as a placeholder for future shield implementations.
 	final = _apply_shield_seam(final)
+
+	# Populate post-resolution fields on the damage packet for listeners
+	damage.final_amount = final
+	damage.was_crit = was_crit
 
 	# Reduce health
 	_current_health -= final
@@ -622,4 +626,4 @@ func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 		get_stat(MobaStatBlock.ARMOR_PEN_PERCENT)
 	)
 	_attack_target.apply_damage(damage)
-	basic_attack_resolved.emit(_attack_target, total_damage)
+	basic_attack_resolved.emit(_attack_target, damage.amount, damage.final_amount, damage.damage_type, damage.was_crit)
