@@ -196,5 +196,11 @@ static func basic_attack_damage(weapon_damage: float, attack_damage: float) -> f
 ##
 ## Returns:
 ##     Effective duration after Tenacity reduction (in seconds)
+##
+## Known extension point (§60): diminishing returns on repeated crowd control
+## is deliberately not implemented here. Adding it means scaling `base_duration`
+## by the target's recent crowd control history before the Tenacity reduction
+## below, which needs per-target state this pure function does not and should
+## not carry -- the caller would supply an already-scaled `base_duration`.
 static func crowd_control_duration(base_duration: float, tenacity: float) -> float:
 	return base_duration * (1.0 - tenacity)

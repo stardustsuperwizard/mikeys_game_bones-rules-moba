@@ -161,69 +161,72 @@ static func _test_blocks_ability_all_types() -> Array[String]:
 	return violations
 
 
-## Test that a missing CC type is detected at load time.
-static func _test_malformed_table_missing_row() -> Array[String]:
+
+## Build a complete, valid table: every CCType row with all three columns.
+##
+## The malformed-table tests below each start from this and introduce exactly
+## one defect. Building a full table matters: the row-count check runs before
+## any per-column check, so a short table is rejected for its row count and
+## the column and boolean validation never runs at all.
+static func _valid_table() -> Dictionary:
+	var table := {}
+	for cc_type_name in MobaCrowdControlSpec.CCType.keys():
+		table[cc_type_name] = {
+			"blocks_move": false,
+			"blocks_basic_attack": false,
+			"blocks_ability": false,
+		}
+	return table
+
+
+## Assert that `bad_data` fails validation for the reason `expected_fragment`
+## names, rather than tripping some earlier check by accident.
+static func _expect_rejected(
+	label: String, bad_data: Dictionary, expected_fragment: String
+) -> Array[String]:
 	var violations: Array[String] = []
 
-	# Reset state before testing
 	MobaCrowdControl._reset_for_testing()
 
-	# Hand-build a malformed table with a missing CC type
-	var bad_data = {
-		"STUN": {"blocks_move": true, "blocks_basic_attack": true, "blocks_ability": true},
-		# Missing ROOT intentionally
-	}
+	# Check the reason first: _first_cc_table_error reports without push_error,
+	# so this keeps the expected-failure noise out of the validation log.
+	var error_message := MobaCrowdControl._first_cc_table_error(bad_data)
+	if error_message == "":
+		violations.append("Malformed table (%s) should fail validation" % label)
+	elif expected_fragment not in error_message:
+		violations.append(
+			"Malformed table (%s) rejected for the wrong reason: expected an error containing '%s', got '%s'"
+			% [label, expected_fragment, error_message]
+		)
 
 	if MobaCrowdControl._parse_cc_table(bad_data):
-		violations.append("Malformed table (missing row) should fail validation")
+		violations.append("Malformed table (%s) should fail validation" % label)
 
 	if not MobaCrowdControl.load_failed:
-		violations.append("Malformed table (missing row) should set load_failed flag")
+		violations.append("Malformed table (%s) should set load_failed flag" % label)
 
 	return violations
+
+
+## Test that a missing CC type is detected at load time.
+static func _test_malformed_table_missing_row() -> Array[String]:
+	var bad_data := _valid_table()
+	bad_data.erase("ROOT")
+
+	return _expect_rejected("missing row", bad_data, "expected 11 CC types")
 
 
 ## Test that a missing column is detected at load time.
 static func _test_malformed_table_missing_column() -> Array[String]:
-	var violations: Array[String] = []
+	var bad_data := _valid_table()
+	bad_data["STUN"].erase("blocks_ability")
 
-	# Reset state before testing
-	MobaCrowdControl._reset_for_testing()
-
-	# Hand-build a malformed table with a missing column
-	var bad_data = {
-		"STUN": {"blocks_move": true, "blocks_basic_attack": true},
-		# Missing blocks_ability intentionally
-		"ROOT": {"blocks_move": true, "blocks_basic_attack": false, "blocks_ability": false},
-	}
-
-	if MobaCrowdControl._parse_cc_table(bad_data):
-		violations.append("Malformed table (missing column) should fail validation")
-
-	if not MobaCrowdControl.load_failed:
-		violations.append("Malformed table (missing column) should set load_failed flag")
-
-	return violations
+	return _expect_rejected("missing column", bad_data, "missing column 'blocks_ability'")
 
 
 ## Test that a non-boolean value is detected at load time.
 static func _test_malformed_table_non_boolean() -> Array[String]:
-	var violations: Array[String] = []
+	var bad_data := _valid_table()
+	bad_data["STUN"]["blocks_move"] = "yes"
 
-	# Reset state before testing
-	MobaCrowdControl._reset_for_testing()
-
-	# Hand-build a malformed table with a non-boolean value
-	var bad_data = {
-		"STUN": {"blocks_move": "yes", "blocks_basic_attack": true, "blocks_ability": true},
-		# "yes" is not a boolean; should be true/false
-		"ROOT": {"blocks_move": true, "blocks_basic_attack": false, "blocks_ability": false},
-	}
-
-	if MobaCrowdControl._parse_cc_table(bad_data):
-		violations.append("Malformed table (non-boolean value) should fail validation")
-
-	if not MobaCrowdControl.load_failed:
-		violations.append("Malformed table (non-boolean value) should set load_failed flag")
-
-	return violations
+	return _expect_rejected("non-boolean value", bad_data, "value must be bool")
