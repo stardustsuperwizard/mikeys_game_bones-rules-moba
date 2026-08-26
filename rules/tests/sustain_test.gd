@@ -886,64 +886,71 @@ static func _test_force_barrier_shield_application() -> Array[String]:
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
-	# Register the ability
 	caster_combatant.register_ability(force_barrier_ability)
 
-	# Activate Force Barrier
+	# Expectations are read from the authored resource, never restated here.
+	var expected_shield: float = force_barrier_ability.shield_amount
+	var expected_duration: float = force_barrier_ability.duration
+	var starting_resource: float = caster_combatant.current_resource
+	var starting_health: float = caster_combatant.current_health
+
 	var result = _activate_ability(caster, &"force_barrier")
 	if not result.success:
 		violations.append(
 			"force_barrier_shield: activation should succeed, got: %s" % result.reason
 		)
 
-	# Verify shield was applied (should be 100.0)
 	var shield_total = caster_combatant.total_shield()
-	if not _approx_equal(shield_total, 100.0):
+	if not _approx_equal(shield_total, expected_shield):
 		violations.append(
-			"force_barrier_shield: total shield should be 100.0, got %f" % shield_total
+			"force_barrier_shield: total shield should be %f, got %f"
+			% [expected_shield, shield_total]
 		)
 
-	# Verify the shield is from the force_barrier ability
 	if caster_combatant._active_shields.size() != 1:
 		violations.append(
 			"force_barrier_shield: should have exactly 1 shield, got %d"
 			% caster_combatant._active_shields.size()
 		)
+		MobaAbilityLibrary._reset()
+		return violations
 
-	# Verify the shield duration is 4.0 seconds
 	var shield = caster_combatant._active_shields[0] as MobaShield
-	if not _approx_equal(shield.remaining, 4.0):
+	if not _approx_equal(shield.remaining, expected_duration):
 		violations.append(
-			"force_barrier_shield: shield duration should be 4.0, got %f" % shield.remaining
+			"force_barrier_shield: shield duration should be %f, got %f"
+			% [expected_duration, shield.remaining]
 		)
 
-	# Verify resource was spent (40.0)
-	var expected_resource = 100.0 - 40.0  # 100 baseline - 40 cost
+	# The cost is spent through the ordinary activation path, not a special case.
+	var expected_resource: float = starting_resource - force_barrier_ability.resource_cost
 	if not _approx_equal(caster_combatant.current_resource, expected_resource):
 		violations.append(
 			(
-				"force_barrier_shield: resource should be spent (60.0), got %f"
-				% caster_combatant.current_resource
+				"force_barrier_shield: resource should be spent down to %f, got %f"
+				% [expected_resource, caster_combatant.current_resource]
 			)
 		)
 
-	# Verify shield absorbs damage as expected: apply 80 damage, should reduce shield by 80
-	var damage := MobaDamage.new(80.0, MobaDamage.DamageType.TRUE)
+	# The shield absorbs damage exactly as any other shield does.
+	var damage_amount := 80.0
+	var damage := MobaDamage.new(damage_amount, MobaDamage.DamageType.TRUE)
 	caster_combatant.apply_damage(damage)
 
-	if not _approx_equal(caster_combatant.total_shield(), 20.0):
+	var expected_remaining_shield: float = expected_shield - damage_amount
+	if not _approx_equal(caster_combatant.total_shield(), expected_remaining_shield):
 		violations.append(
 			(
-				"force_barrier_shield: shield should be 20.0 after 80 damage, got %f"
-				% caster_combatant.total_shield()
+				"force_barrier_shield: shield should be %f after %f damage, got %f"
+				% [expected_remaining_shield, damage_amount, caster_combatant.total_shield()]
 			)
 		)
 
-	if not _approx_equal(caster_combatant.current_health, 500.0):
+	if not _approx_equal(caster_combatant.current_health, starting_health):
 		violations.append(
 			(
-				"force_barrier_shield: health should be unchanged at 500.0, got %f"
-				% caster_combatant.current_health
+				"force_barrier_shield: health should be unchanged at %f, got %f"
+				% [starting_health, caster_combatant.current_health]
 			)
 		)
 
@@ -970,39 +977,45 @@ static func _test_field_dressing_healing_application() -> Array[String]:
 	var caster = caster_data["actor"]
 	var caster_combatant = caster_data["combatant"]
 
-	# Register the ability
 	caster_combatant.register_ability(field_dressing_ability)
 
-	# Reduce health to 400 so healing can apply
-	caster_combatant._current_health = 400.0
+	var max_health: float = caster_combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.HEALTH
+	)
+	var expected_heal: float = field_dressing_ability.heal_amount
 
-	# Activate Field Dressing
+	# Wound the caster by more than the heal so the heal is not clamped.
+	var missing_health: float = expected_heal + 50.0
+	caster_combatant._current_health = max_health - missing_health
+
+	var starting_resource: float = caster_combatant.current_resource
+	var wounded_health: float = caster_combatant.current_health
+
 	var result = _activate_ability(caster, &"field_dressing")
 	if not result.success:
 		violations.append(
 			"field_dressing_heal: activation should succeed, got: %s" % result.reason
 		)
 
-	# Verify healing was applied (100 heal into 400/500 = 500 clamped)
-	if not _approx_equal(caster_combatant.current_health, 500.0):
+	var expected_health: float = minf(wounded_health + expected_heal, max_health)
+	if not _approx_equal(caster_combatant.current_health, expected_health):
 		violations.append(
 			(
-				"field_dressing_heal: health should be 500.0 after heal, got %f"
-				% caster_combatant.current_health
+				"field_dressing_heal: health should be %f after heal, got %f"
+				% [expected_health, caster_combatant.current_health]
 			)
 		)
 
-	# Verify resource was spent (40.0)
-	var expected_resource = 100.0 - 40.0  # 100 baseline - 40 cost
+	# The cost is spent through the ordinary activation path, not a special case.
+	var expected_resource: float = starting_resource - field_dressing_ability.resource_cost
 	if not _approx_equal(caster_combatant.current_resource, expected_resource):
 		violations.append(
 			(
-				"field_dressing_heal: resource should be spent (60.0), got %f"
-				% caster_combatant.current_resource
+				"field_dressing_heal: resource should be spent down to %f, got %f"
+				% [expected_resource, caster_combatant.current_resource]
 			)
 		)
 
-	# Verify no shield was applied
 	if caster_combatant.total_shield() > 0.0:
 		violations.append(
 			(
@@ -1010,34 +1023,31 @@ static func _test_field_dressing_healing_application() -> Array[String]:
 			)
 		)
 
-	# Test: healing clamped at max when at full health
+	# Healing at full health is clamped at maximum rather than overhealing.
 	var caster_data2 = _create_caster_for_ability()
 	var caster2 = caster_data2["actor"]
 	var caster_combatant2 = caster_data2["combatant"]
 	caster_combatant2.register_ability(field_dressing_ability)
 
-	# Verify health is at max (500)
-	if not _approx_equal(caster_combatant2.current_health, 500.0):
+	if not _approx_equal(caster_combatant2.current_health, max_health):
 		violations.append(
 			(
-				"field_dressing_heal: caster2 should start at 500 health, got %f"
-				% caster_combatant2.current_health
+				"field_dressing_heal: caster2 should start at %f health, got %f"
+				% [max_health, caster_combatant2.current_health]
 			)
 		)
 
-	# Activate Field Dressing at full health
 	var result2 = _activate_ability(caster2, &"field_dressing")
 	if not result2.success:
 		violations.append(
 			"field_dressing_heal: activation at full health should succeed, got: %s" % result2.reason
 		)
 
-	# Verify health is still at max
-	if not _approx_equal(caster_combatant2.current_health, 500.0):
+	if not _approx_equal(caster_combatant2.current_health, max_health):
 		violations.append(
 			(
-				"field_dressing_heal: health should remain at 500.0 at full, got %f"
-				% caster_combatant2.current_health
+				"field_dressing_heal: health should remain at %f at full, got %f"
+				% [max_health, caster_combatant2.current_health]
 			)
 		)
 
