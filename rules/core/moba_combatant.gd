@@ -391,28 +391,27 @@ func apply_crowd_control(spec: MobaCrowdControlSpec, source: MobaCombatant) -> v
 
 ## Query whether the combatant can perform an action right now, accounting for active crowd control.
 ##
-## Active hard-CC entries are consulted directly -- independent of current_state -- so a
-## combatant that leaves CROWD_CONTROLLED via some other try_enter() (e.g. completing a
-## basic-attack cycle that an unblocked CC type permitted) does not silently lose the
-## restrictions of an entry that is still live; the union (OR) of restrictions from all
-## active hard-CC entries, per MobaCrowdControl's per-effect flags, still applies as long
-## as at least one entry remains active. DEAD is terminal and always overrides: it delegates
-## to state_machine.can(action), which answers false for every action. Every other action,
-## and every case with no active entries, delegates straight to state_machine.can(action).
+## While CROWD_CONTROLLED, a CC-gated action's answer REPLACES the state table's
+## conservative per_cc -> false with the precise union (OR) of active hard-CC entries'
+## per-effect flags, per MobaCrowdControl -- this is the whole reason MobaStateMachine.can()
+## deliberately stays generic there. Outside CROWD_CONTROLLED, a live entry can still exist
+## if some other try_enter() (e.g. completing a basic-attack cycle a non-blocking CC type
+## like BLIND permitted) moved the combatant out while it was ticking; there the CC union
+## is INTERSECTED with, not substituted for, the current real state's own legality, so e.g.
+## a new attack mid-windup is still forbidden regardless of what CC allows. Every other
+## action, and every case with no active entries, delegates straight to state_machine.can(action).
 func can_perform_action(action: StringName) -> bool:
 	var state_machine := _get_state_machine()
-	var result := false
-	if state_machine != null:
-		var cc_gates_action := (
-			action in _CC_GATED_ACTIONS
-			and not _active_cc_entries.is_empty()
-			and state_machine.current_state != MobaState.DEAD
-		)
-		if cc_gates_action:
-			result = not _active_cc_blocks(action)
-		else:
-			result = state_machine.can(action)
-	return result
+	if state_machine == null:
+		return false
+
+	if state_machine.current_state == MobaState.CROWD_CONTROLLED and action in _CC_GATED_ACTIONS:
+		return not _active_cc_blocks(action)
+
+	if action in _CC_GATED_ACTIONS and not _active_cc_entries.is_empty():
+		return state_machine.can(action) and not _active_cc_blocks(action)
+
+	return state_machine.can(action)
 
 
 ## Whether any active hard-CC entry blocks `action`. Only called for the
@@ -815,6 +814,9 @@ func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 	if _attack_target == null or not _attack_target.is_alive():
 		return
 
+	var attack_damage := get_stat(MobaStatBlock.ATTACK_DAMAGE)
+	var total_damage := MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
+
 	# Check for BLIND miss: the attacker's own BLIND entry impairs its accuracy,
 	# rolled against that entry's magnitude as a miss chance.
 	var blind_type = MobaCrowdControlSpec.CCType.BLIND
@@ -824,14 +826,14 @@ func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
 			var blind_roll := MobaRules.roll_blind()
 			var miss_chance: float = blind_spec.magnitude
 			if blind_roll < miss_chance:
-				# Miss: skip apply_damage entirely; attack cycle still runs
+				# Miss: skip apply_damage entirely; attack cycle still runs. Report
+				# the same computed raw amount a hit would have, so listeners see a
+				# consistent pre-mitigation figure regardless of miss/hit.
 				basic_attack_resolved.emit(
-					_attack_target, weapon.damage, 0.0, weapon.damage_type, false
+					_attack_target, total_damage, 0.0, weapon.damage_type, false
 				)
 				return
 
-	var attack_damage := get_stat(MobaStatBlock.ATTACK_DAMAGE)
-	var total_damage := MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
 	var damage := MobaDamage.new(
 		total_damage,
 		weapon.damage_type,

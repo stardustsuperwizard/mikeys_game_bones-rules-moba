@@ -33,6 +33,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_crowd_control_refused_while_dashing())
 	all_violations.append_array(_test_blind_causes_attacker_miss())
 	all_violations.append_array(_test_blind_zero_magnitude_never_misses())
+	all_violations.append_array(_test_cc_intersects_with_state_outside_crowd_controlled())
 
 	if all_violations.is_empty():
 		return true
@@ -538,6 +539,55 @@ static func _test_blind_zero_magnitude_never_misses() -> Array[String]:
 	if target_combatant.current_health >= target_health_before:
 		violations.append(
 			"blind_zero_magnitude_never_misses: a 0.0-magnitude BLIND should never cause a miss"
+		)
+
+	return violations
+
+
+## Regression test: can_perform_action() must INTERSECT the current real state's
+## legality with active CC restrictions once current_state has drifted away from
+## CROWD_CONTROLLED, not substitute the CC union for it. BLIND doesn't block
+## basic_attack, so applying it and starting an attack succeeds and enters
+## BASIC_ATTACK_WINDUP; but mid-windup, the state table alone already forbids a
+## NEW attack (BASIC_ATTACK_WINDUP's basic_attack policy is "no"). If
+## can_perform_action() ever substituted the CC union for the real state's
+## answer instead of intersecting with it, this would wrongly report true.
+static func _test_cc_intersects_with_state_outside_crowd_controlled() -> Array[String]:
+	var violations: Array[String] = []
+
+	var data = _create_attacker_and_target()
+	var attacker_combatant: MobaCombatant = data["attacker_combatant"]
+	var target_combatant: MobaCombatant = data["target_combatant"]
+	var attacker_state_machine: MobaStateMachine = data["attacker_state_machine"]
+
+	var spec = MobaCrowdControlSpec.new()
+	spec.type = MobaCrowdControlSpec.CCType.BLIND
+	spec.duration = 5.0
+	spec.magnitude = 1.0
+	spec.affected_by_tenacity = false
+	attacker_combatant.apply_crowd_control(spec, attacker_combatant)
+
+	if not attacker_combatant.basic_attack(target_combatant):
+		violations.append(
+			"cc_intersects_with_state: basic_attack should succeed while only BLIND is active"
+		)
+		return violations
+
+	if attacker_state_machine.current_state != MobaState.BASIC_ATTACK_WINDUP:
+		violations.append(
+			(
+				"cc_intersects_with_state: attacker should be in BASIC_ATTACK_WINDUP"
+				+ " after basic_attack()"
+			)
+		)
+		return violations
+
+	if attacker_combatant.can_perform_action(&"basic_attack"):
+		violations.append(
+			(
+				"cc_intersects_with_state: mid-windup should still forbid a new attack even"
+				+ " though the only active CC entry (BLIND) doesn't block basic_attack"
+			)
 		)
 
 	return violations
