@@ -71,10 +71,7 @@ func _run() -> void:
 # that ignored fear and used input would return the opposite vector, not a
 # merely different one.
 func _run_fear_scenario(
-	controller: PlayerController3D,
-	combatant: MobaCombatant,
-	player: Actor,
-	enemy: Actor
+	controller: PlayerController3D, combatant: MobaCombatant, player: Actor, enemy: Actor
 ) -> bool:
 	if not is_instance_valid(enemy):
 		_fail("fear: no Enemy in the scene to stand in as the fear source")
@@ -123,8 +120,10 @@ func _run_fear_scenario(
 	var alignment := feared_move.normalized().dot(-toward)
 	if alignment < 0.9:
 		_fail(
-			"fear: expected flight away from the source (%v), got %v"
-			% [-toward, feared_move.normalized()]
+			(
+				"fear: expected flight away from the source (%v), got %v"
+				% [-toward, feared_move.normalized()]
+			)
 		)
 		Input.action_release("move_forward")
 		return false
@@ -150,10 +149,7 @@ func _run_fear_scenario(
 
 	var feared_and_stunned := controller.get_move_direction()
 	if feared_and_stunned != Vector3.ZERO:
-		_fail(
-			"fear+stun: a stunned player kept fleeing the fear source: %v"
-			% feared_and_stunned
-		)
+		_fail("fear+stun: a stunned player kept fleeing the fear source: %v" % feared_and_stunned)
 		Input.action_release("move_forward")
 		return false
 
@@ -174,8 +170,10 @@ func _run_fear_scenario(
 	var resumed_move := controller.get_move_direction()
 	if resumed_move.normalized().dot(toward) < 0.9:
 		_fail(
-			"fear: input did not resume once the fear expired -- expected %v, got %v"
-			% [toward, resumed_move.normalized()]
+			(
+				"fear: input did not resume once the fear expired -- expected %v, got %v"
+				% [toward, resumed_move.normalized()]
+			)
 		)
 		Input.action_release("move_forward")
 		return false
@@ -190,9 +188,7 @@ func _run_fear_scenario(
 # Test: a stunned player's held movement input produces no movement.
 # Test: once the stun expires, the same held input produces movement again.
 func _run_stun_scenarios(
-	controller: PlayerController3D,
-	combatant: MobaCombatant,
-	body: CharacterBody3D
+	controller: PlayerController3D, combatant: MobaCombatant, body: CharacterBody3D
 ) -> bool:
 	# --- stunned player with held movement input produces Vector3.ZERO ----
 	if _actors_lost("stun movement gate", [body, controller, combatant]):
@@ -231,9 +227,7 @@ func _run_stun_scenarios(
 	# Verify: movement should be blocked while stunned
 	var stunned_move := controller.get_move_direction()
 	if stunned_move != Vector3.ZERO:
-		_fail(
-			"stun movement: held move_forward produced movement while stunned: %v" % stunned_move
-		)
+		_fail("stun movement: held move_forward produced movement while stunned: %v" % stunned_move)
 		Input.action_release("move_forward")
 		return false
 
@@ -248,9 +242,7 @@ func _run_stun_scenarios(
 	# Verify: movement should resume once stun expires
 	var resumed_move := controller.get_move_direction()
 	if resumed_move == Vector3.ZERO:
-		_fail(
-			"stun movement: held move_forward produced no movement after stun expired"
-		)
+		_fail("stun movement: held move_forward produced no movement after stun expired")
 		Input.action_release("move_forward")
 		return false
 
