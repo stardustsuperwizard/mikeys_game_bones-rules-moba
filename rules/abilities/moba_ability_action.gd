@@ -3,12 +3,13 @@
 ## MobaAbilityAction executes the full ability activation pipeline:
 ## 1. Legality: state machine can(&"ability")
 ## 2. Legality: cooldown/charges/resource via MobaCombatant.can_activate()
-## 3. Legality: silenced seam (Batch 2, empty for now)
+## 3. Legality: silenced seam
 ## 4. Target resolution (self, targeted, or unimplemented)
 ## 5. Resource and cooldown commitment
 ## 6. State machine transition into ABILITY_CAST if cast_time > 0
-## 7. Damage application (if not cast_time-delayed to Batch 2)
-## 8. Effects seam (crowd control/buffs/debuffs, Batch 2, empty for now)
+## 7. Resolution -- damage, then effects (crowd control/buffs/debuffs/heal/shield)
+##    via resolve(). Immediate when cast_time == 0; deferred to
+##    MobaCastTracker when cast_time > 0, which calls the same resolve().
 ##
 ## Failure reasons returned as StringName:
 ## - unknown_ability: ability_id not found in library
@@ -79,27 +80,33 @@ func execute() -> ActionResult:
 	if commit_failure != &"":
 		return ActionResult.new(false, commit_failure)
 
-	# Step 7: Enter ABILITY_CAST state if cast_time > 0
-	if state_machine != null and ability.cast_time > 0.0:
-		state_machine.try_enter(MobaState.ABILITY_CAST, ability.cast_time)
+	# Step 7: For cast_time > 0, defer damage/effects to resolution time.
+	# For cast_time == 0, apply immediately (instant abilities).
+	if ability.cast_time > 0.0:
+		# Enter ABILITY_CAST state
+		if state_machine != null:
+			state_machine.try_enter(MobaState.ABILITY_CAST, ability.cast_time)
 
-	# Steps 8-9: Apply damage and effects, guarded against the target having
-	# evaporated between commit (step 6) and this resolution step. The
-	# resource spend and cooldown start committed above are never refunded
-	# if that happens -- resolution just safely no-ops.
-	if resolved_target != null and is_instance_valid(resolved_target):
-		# Step 8: Apply damage (Batch 2 will defer this if cast_time > 0)
-		# For now, apply immediately
-		_apply_damage(ability, resolved_target, combatant)
-
-		# Step 9: Apply effects (crowd control, buffs, debuffs) - Batch 2 seam
-		_apply_effects_seam(ability, resolved_target)
+		# Start the cast: damage and effects will be applied when it resolves via tick().
+		# start_cast() -> MobaCastTracker.start() -> _CastInProgress._init() all take
+		# a typed Node parameter, so a target freed between commit (step 6) and here
+		# would fault at that boundary rather than no-opping. Substitute null in that
+		# case: MobaCastTracker._resolve() and resolve() already guard a null target,
+		# and the cast still gets registered so tick()/cancel() have something to act on.
+		var cast_target: Node = resolved_target if is_instance_valid(resolved_target) else null
+		combatant.start_cast(ability_id, ability, cast_target, ability.cast_time)
+	else:
+		# Instant ability: steps 8-9 run now, through the same resolve() the
+		# deferred cast path uses. A target that evaporated between commit
+		# (step 6) and here makes resolution a safe no-op; the resource spend
+		# and cooldown start committed above are never refunded.
+		resolve(ability, resolved_target, combatant)
 
 	return ActionResult.new(true)
 
 
 ## Find a combatant's MobaCombatant child node.
-func _get_combatant(node: Node) -> MobaCombatant:
+static func _get_combatant(node: Node) -> MobaCombatant:
 	return node.get_node_or_null("MobaCombatant") as MobaCombatant
 
 
@@ -185,10 +192,43 @@ func _commit_activation(combatant: MobaCombatant) -> StringName:
 	return failure
 
 
+## Apply an ability's damage and then its effects to a resolved target.
+##
+## This is the one resolution implementation, shared by both activation paths:
+## MobaAbilityAction.execute() calls it directly for an instant ability
+## (cast_time == 0), and MobaCastTracker._resolve() calls it when a deferred
+## cast (cast_time > 0) reaches its resolution point. Keeping it in one place
+## is what stops the instant and cast-time paths silently diverging.
+##
+## Safe to call with a null/freed target: resolution no-ops rather than
+## refunding the resource and cooldown already committed.
+##
+## `target` is deliberately untyped. A Node freed between commit and this call
+## fails GDScript's typed-argument check *before* any guard in the body could
+## run, which would abort execute() instead of no-opping -- so the parameter
+## stays Variant and narrows to Node only after is_instance_valid() passes.
+static func resolve(ability: MobaAbility, target, caster_combatant: MobaCombatant) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+
+	var target_node := target as Node
+	if target_node == null:
+		return
+
+	_apply_damage(ability, target_node, caster_combatant)
+	_apply_effects_seam(ability, target_node, caster_combatant)
+
+
 ## Apply the ability's damage to the resolved target, if any.
-## Safe to call with an invalid/freed target (guards with is_instance_valid()) --
-## already-committed resource/cooldown cost is never refunded in that case.
-func _apply_damage(ability: MobaAbility, target: Node, caster_combatant: MobaCombatant) -> void:
+##
+## `target` is typed Node here, unlike resolve()'s untyped parameter: this is
+## only reachable through resolve(), which already narrows to Node via
+## is_instance_valid() before calling in. Do not call this directly with a
+## target that might be freed -- the typed argument faults at the call
+## boundary before the body's own is_instance_valid() guard ever runs.
+static func _apply_damage(
+	ability: MobaAbility, target: Node, caster_combatant: MobaCombatant
+) -> void:
 	if target == null or not is_instance_valid(target):
 		return
 
@@ -215,7 +255,7 @@ func _apply_damage(ability: MobaAbility, target: Node, caster_combatant: MobaCom
 ## formula, so it is not a MobaFormulas concern per that file's own docstring --
 ## MobaFormulas.physical_damage()/magical_damage()/etc. are still the only place
 ## mitigation math happens, inside MobaCombatant.apply_damage().
-func _compute_scaled_damage(ability: MobaAbility, caster_combatant: MobaCombatant) -> float:
+static func _compute_scaled_damage(ability: MobaAbility, caster_combatant: MobaCombatant) -> float:
 	var amount := ability.base_damage
 	if caster_combatant == null:
 		return amount
@@ -226,7 +266,7 @@ func _compute_scaled_damage(ability: MobaAbility, caster_combatant: MobaCombatan
 
 
 ## Map MobaAbility.DamageType to MobaDamage.DamageType
-func _damage_type_to_moba(damage_type: int) -> int:
+static func _damage_type_to_moba(damage_type: int) -> int:
 	match damage_type:
 		MobaAbility.DamageType.PHYSICAL:
 			return MobaDamage.DamageType.PHYSICAL
@@ -260,8 +300,9 @@ func _check_silenced_seam(combatant: MobaCombatant) -> bool:
 
 ## Seam for applying effects.
 ## Applies crowd control, buffs, debuffs, healing, and shielding from the ability.
-func _apply_effects_seam(ability: MobaAbility, target: Node) -> void:
-	var caster_combatant := _get_combatant(actor)
+static func _apply_effects_seam(
+	ability: MobaAbility, target: Node, caster_combatant: MobaCombatant
+) -> void:
 	var target_combatant := _get_combatant(target)
 
 	# Apply crowd control from ability.crowd_control to the target

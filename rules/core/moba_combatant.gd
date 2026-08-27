@@ -171,6 +171,10 @@ var _active_shields: Array[MobaShield] = []
 ## _invalidate_stat_cache().
 var _stat_cache: Dictionary = {}
 
+## In-progress cast ledger. Created on first use so it is available whether or
+## not _ready() has run. Advanced from tick(), like the MobaCooldowns ledger.
+var _cast_tracker: MobaCastTracker = null
+
 
 func _ready() -> void:
 	# Duplicate the stat block before any mutation
@@ -525,6 +529,13 @@ func _apply_displacement(
 func _apply_hard_cc(
 	spec: MobaCrowdControlSpec, source: MobaCombatant, state_machine: MobaStateMachine
 ) -> void:
+	# If we're in ABILITY_CAST and the current ability is cancellable_by_hard_cc,
+	# cancel the cast before applying the CC.
+	if state_machine != null and state_machine.current_state == MobaState.ABILITY_CAST:
+		var casting := _get_cast_tracker()
+		if casting.is_casting() and casting.current_ability().cancellable_by_hard_cc:
+			cancel_cast()
+
 	# Consult state machine policy for hard-CC types
 	var policy := state_machine.hard_cc_policy() if state_machine != null else &"no"
 	if policy == &"no" or policy == &"displacement_only":
@@ -831,6 +842,38 @@ func commit_activate(ability_id: StringName) -> int:
 	return ActivationFailure.OK
 
 
+## The in-progress cast ledger for this combatant, created on first use.
+func _get_cast_tracker() -> MobaCastTracker:
+	if _cast_tracker == null:
+		_cast_tracker = MobaCastTracker.new(self)
+	return _cast_tracker
+
+
+## True while this combatant has a cast in progress.
+func is_casting() -> bool:
+	return _get_cast_tracker().is_casting()
+
+
+## Start a cast that will resolve after its cast_time elapses via tick().
+## Called by MobaAbilityAction when an ability with cast_time > 0 is activated.
+func start_cast(
+	ability_id: StringName, ability: MobaAbility, resolved_target: Node, cast_time: float
+) -> void:
+	_get_cast_tracker().start(ability_id, ability, resolved_target, cast_time)
+
+
+## Cancel an in-progress cast and apply the on_cancel outcome (resource refund,
+## cooldown change). A no-op if no cast is in progress. Returns without error.
+func cancel_cast() -> void:
+	_get_cast_tracker().cancel()
+
+
+## Reverse the cooldown started at commit for one ability, as if it never started.
+## Used by the cast tracker when an interrupted cast's on_cancel undoes the cooldown.
+func cancel_cooldown(ability_id: StringName) -> void:
+	_cooldowns.cancel(ability_id)
+
+
 ## Advance time by delta seconds.
 ## Accumulates resource and health regeneration continuously (not gated by one-second intervals).
 ## Health regeneration clamps at maximum and emits health_changed.
@@ -838,6 +881,11 @@ func commit_activate(ability_id: StringName) -> int:
 ## Resource regeneration always occurs (dead or alive).
 ## Also advances all active cooldowns and crowd control durations.
 func tick(delta: float) -> void:
+	# Advance in-progress cast and resolve if it reaches its expiry point.
+	# Resolution wins ties: if a cast reaches resolution during this tick(),
+	# it resolves synchronously before anything else observes it as in progress.
+	_get_cast_tracker().tick(delta)
+
 	# Advance cooldowns
 	_cooldowns.tick(delta)
 
