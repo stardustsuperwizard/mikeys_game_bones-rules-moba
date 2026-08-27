@@ -87,8 +87,14 @@ func execute() -> ActionResult:
 		if state_machine != null:
 			state_machine.try_enter(MobaState.ABILITY_CAST, ability.cast_time)
 
-		# Start the cast: damage and effects will be applied when it resolves via tick()
-		combatant.start_cast(ability_id, ability, resolved_target, ability.cast_time)
+		# Start the cast: damage and effects will be applied when it resolves via tick().
+		# start_cast() -> MobaCastTracker.start() -> _CastInProgress._init() all take
+		# a typed Node parameter, so a target freed between commit (step 6) and here
+		# would fault at that boundary rather than no-opping. Substitute null in that
+		# case: MobaCastTracker._resolve() and resolve() already guard a null target,
+		# and the cast still gets registered so tick()/cancel() have something to act on.
+		var cast_target: Node = resolved_target if is_instance_valid(resolved_target) else null
+		combatant.start_cast(ability_id, ability, cast_target, ability.cast_time)
 	else:
 		# Instant ability: steps 8-9 run now, through the same resolve() the
 		# deferred cast path uses. A target that evaporated between commit
@@ -214,8 +220,12 @@ static func resolve(ability: MobaAbility, target, caster_combatant: MobaCombatan
 
 
 ## Apply the ability's damage to the resolved target, if any.
-## Safe to call with an invalid/freed target (guards with is_instance_valid()) --
-## already-committed resource/cooldown cost is never refunded in that case.
+##
+## `target` is typed Node here, unlike resolve()'s untyped parameter: this is
+## only reachable through resolve(), which already narrows to Node via
+## is_instance_valid() before calling in. Do not call this directly with a
+## target that might be freed -- the typed argument faults at the call
+## boundary before the body's own is_instance_valid() guard ever runs.
 static func _apply_damage(
 	ability: MobaAbility, target: Node, caster_combatant: MobaCombatant
 ) -> void:

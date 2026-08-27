@@ -40,6 +40,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_hard_cc_cancels_cast())
 	all_violations.append_array(_test_resolution_wins_ties())
 	all_violations.append_array(_test_cast_target_freed_before_resolution())
+	all_violations.append_array(_test_cast_target_freed_during_commit())
 	all_violations.append_array(_test_cataclysm_ability_data())
 
 	# Several cases above inject synthetic abilities into the shared library
@@ -687,6 +688,67 @@ static func _test_cast_target_freed_before_resolution() -> Array[String]:
 		)
 	if cooldown_after_resolve > cooldown_after_commit:
 		violations.append("cast_target_freed: cooldown should not be extended by resolution")
+
+	return violations
+
+
+## Test: a target freed synchronously during commit -- before start_cast() is even
+## called -- must not fault the cast_time > 0 path the way it does the instant one.
+##
+## Mirrors ability_activation_test.gd::_test_target_freed_after_commit's technique:
+## commit_activate() emits resource_changed synchronously, and a handler on that
+## signal frees the target before execute() reaches start_cast(). Unlike the
+## already-freed-before-tick case covered by _test_cast_target_freed_before_resolution
+## above, this exercises the commit -> start_cast window itself, where the resolved
+## target is still passed to a chain of typed Node parameters
+## (MobaCombatant.start_cast -> MobaCastTracker.start -> _CastInProgress._init).
+static func _test_cast_target_freed_during_commit() -> Array[String]:
+	var violations: Array[String] = []
+
+	_ensure_all_test_abilities_loaded()
+	var test_actor = _create_test_actor()
+	var actor = test_actor["actor"]
+	var combatant := test_actor["combatant"] as MobaCombatant
+	var target = _create_target_with_combatant()
+	target.global_position = Vector3(1, 0, 0)
+
+	var free_on_commit := func(_current: float, _maximum: float):
+		if is_instance_valid(target):
+			target.free()
+
+	combatant.resource_changed.connect(free_on_commit)
+
+	var context = MobaCastContext.new(actor, target)
+	var result = MobaAbilityCaster.new().activate(&"cast_time_ability", context)
+
+	combatant.resource_changed.disconnect(free_on_commit)
+
+	if result == null:
+		violations.append("cast_target_freed_during_commit: execute() should not return null")
+		return violations
+
+	if not result.success:
+		violations.append(
+			(
+				"cast_target_freed_during_commit: activation should still report success, got: %s"
+				% result.reason
+			)
+		)
+
+	# The cast must still be registered -- not left stranded in ABILITY_CAST with
+	# nothing for tick()/cancel() to find.
+	if not combatant.is_casting():
+		violations.append(
+			"cast_target_freed_during_commit: cast should still be registered after commit"
+		)
+
+	# Resolution must complete without faulting when the tick fires.
+	combatant.tick(0.5)
+
+	if combatant.is_casting():
+		violations.append(
+			"cast_target_freed_during_commit: cast should be finished after the resolving tick"
+		)
 
 	return violations
 
