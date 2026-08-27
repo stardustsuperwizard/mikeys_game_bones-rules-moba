@@ -41,6 +41,7 @@ var _expected_suites: Array[String] = [
 	"Loadout Test",
 	"HUD Slot Test",
 	"HUD Test",
+	"Death Test",
 ]
 
 
@@ -76,6 +77,7 @@ func _ready() -> void:
 	_check("Loadout Test", LoadoutTest.run())
 	_check("HUD Slot Test", HudSlotTest.run())
 	_check("HUD Test", HudTest.run())
+	_check("Death Test", DeathTest.run())
 
 
 ## Record and announce one suite's result.

@@ -329,15 +329,13 @@ static func _apply_effects_seam(
 
 	# Apply buffs to the caster's combatant
 	if caster_combatant != null:
-		var caster_effects := caster_combatant.get_effect_container()
 		for buff in ability.buffs:
-			caster_effects.apply_modifier(buff, StringName(ability.id))
+			caster_combatant.apply_stat_modifier(buff, StringName(ability.id))
 
 	# Apply debuffs to the resolved target's combatant
 	if target_combatant != null:
-		var target_effects := target_combatant.get_effect_container()
 		for debuff in ability.debuffs:
-			target_effects.apply_modifier(debuff, StringName(ability.id))
+			target_combatant.apply_stat_modifier(debuff, StringName(ability.id))
 
 	# Apply healing to the caster's combatant
 	if caster_combatant != null and ability.heal_amount > 0.0:

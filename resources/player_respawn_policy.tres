@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="MobaRespawnPolicy" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://rules/core/moba_respawn_policy.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/player_respawn_spawn_point.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+respawns = true
+respawn_delay = 3.0
+spawn_point = ExtResource("2")

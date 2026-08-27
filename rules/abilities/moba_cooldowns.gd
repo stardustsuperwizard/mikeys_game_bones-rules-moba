@@ -209,3 +209,13 @@ func cancel(ability_id: StringName) -> void:
 		state.timer_duration = 0.0
 
 	state.timer_started_by_last_start = false
+
+
+## Clear all active cooldowns and restore all abilities to maximum charges.
+## Called on respawn to reset ability availability.
+func clear_all_cooldowns() -> void:
+	for state: _AbilityState in _ability_states.values():
+		state.available_charges = state.max_charges
+		state.timer_remaining = 0.0
+		state.timer_duration = 0.0
+		state.timer_started_by_last_start = false

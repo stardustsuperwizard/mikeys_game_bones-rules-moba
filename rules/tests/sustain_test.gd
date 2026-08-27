@@ -126,15 +126,15 @@ static func _test_shield_application() -> Array[String]:
 
 	combatant.apply_shield(75.0, &"shield_source", 10.0)
 
-	if combatant._active_shields.size() != 1:
+	if combatant.get_active_shields().size() != 1:
 		violations.append(
 			(
 				"shield_application: expected 1 active shield, got %d"
-				% combatant._active_shields.size()
+				% combatant.get_active_shields().size()
 			)
 		)
 
-	var shield = combatant._active_shields[0] as MobaShield
+	var shield = combatant.get_active_shields()[0] as MobaShield
 	if not _approx_equal(shield.amount, 75.0):
 		violations.append("shield_application: expected shield amount 75.0, got %f" % shield.amount)
 	if shield.source != &"shield_source":
@@ -272,16 +272,19 @@ static func _test_shield_consumption_two_shields() -> Array[String]:
 	combatant.apply_damage(damage)
 
 	# Verify: 1s shield fully consumed, 5s shield reduced by 10
-	if combatant._active_shields.size() != 1:
+	if combatant.get_active_shields().size() != 1:
 		violations.append(
-			"two_shields: expected 1 shield remaining, got %d" % combatant._active_shields.size()
+			(
+				"two_shields: expected 1 shield remaining, got %d"
+				% combatant.get_active_shields().size()
+			)
 		)
 
 	if not _approx_equal(combatant.total_shield(), 90.0):
 		violations.append("two_shields: total should be 90.0, got %f" % combatant.total_shield())
 
 	# Verify the remaining shield is the 5s one
-	var remaining = combatant._active_shields[0] as MobaShield
+	var remaining = combatant.get_active_shields()[0] as MobaShield
 	if not _approx_equal(remaining.amount, 90.0):
 		violations.append(
 			"two_shields: remaining shield amount should be 90.0, got %f" % remaining.amount
@@ -363,11 +366,11 @@ static func _test_shield_no_op_on_zero_amount() -> Array[String]:
 	# Try to apply shield with 0 amount
 	combatant.apply_shield(0.0, &"test", 5.0)
 
-	if combatant._active_shields.size() != 0:
+	if combatant.get_active_shields().size() != 0:
 		violations.append(
 			(
 				"no_op_zero: shield list should be empty, got %d shields"
-				% combatant._active_shields.size()
+				% combatant.get_active_shields().size()
 			)
 		)
 
@@ -377,11 +380,11 @@ static func _test_shield_no_op_on_zero_amount() -> Array[String]:
 	# Try to apply shield with negative amount
 	combatant.apply_shield(-50.0, &"test", 5.0)
 
-	if combatant._active_shields.size() != 0:
+	if combatant.get_active_shields().size() != 0:
 		violations.append(
 			(
 				"no_op_zero: shield list should still be empty, got %d shields"
-				% combatant._active_shields.size()
+				% combatant.get_active_shields().size()
 			)
 		)
 
@@ -912,17 +915,17 @@ static func _test_force_barrier_shield_application() -> Array[String]:
 			)
 		)
 
-	if caster_combatant._active_shields.size() != 1:
+	if caster_combatant.get_active_shields().size() != 1:
 		violations.append(
 			(
 				"force_barrier_shield: should have exactly 1 shield, got %d"
-				% caster_combatant._active_shields.size()
+				% caster_combatant.get_active_shields().size()
 			)
 		)
 		MobaAbilityLibrary._reset()
 		return violations
 
-	var shield = caster_combatant._active_shields[0] as MobaShield
+	var shield = caster_combatant.get_active_shields()[0] as MobaShield
 	if not _approx_equal(shield.remaining, expected_duration):
 		violations.append(
 			(
