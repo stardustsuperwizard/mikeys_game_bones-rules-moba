@@ -90,12 +90,10 @@ func execute() -> ActionResult:
 		# Start the cast: damage and effects will be applied when it resolves via tick()
 		combatant.start_cast(ability_id, ability, resolved_target, ability.cast_time)
 	else:
-		# Instant ability: apply damage and effects immediately
-		# Steps 8-9: Apply damage and effects, guarded against the target having
-		# evaporated between commit (step 6) and this resolution step. The
-		# resource spend and cooldown start committed above are never refunded
-		# if that happens -- resolution just safely no-ops.
-		# Steps 8-9 both live in resolve(), shared with the deferred cast path.
+		# Instant ability: steps 8-9 run now, through the same resolve() the
+		# deferred cast path uses. A target that evaporated between commit
+		# (step 6) and here makes resolution a safe no-op; the resource spend
+		# and cooldown start committed above are never refunded.
 		resolve(ability, resolved_target, combatant)
 
 	return ActionResult.new(true)
@@ -198,12 +196,21 @@ func _commit_activation(combatant: MobaCombatant) -> StringName:
 ##
 ## Safe to call with a null/freed target: resolution no-ops rather than
 ## refunding the resource and cooldown already committed.
-static func resolve(ability: MobaAbility, target: Node, caster_combatant: MobaCombatant) -> void:
+##
+## `target` is deliberately untyped. A Node freed between commit and this call
+## fails GDScript's typed-argument check *before* any guard in the body could
+## run, which would abort execute() instead of no-opping -- so the parameter
+## stays Variant and narrows to Node only after is_instance_valid() passes.
+static func resolve(ability: MobaAbility, target, caster_combatant: MobaCombatant) -> void:
 	if target == null or not is_instance_valid(target):
 		return
 
-	_apply_damage(ability, target, caster_combatant)
-	_apply_effects_seam(ability, target, caster_combatant)
+	var target_node := target as Node
+	if target_node == null:
+		return
+
+	_apply_damage(ability, target_node, caster_combatant)
+	_apply_effects_seam(ability, target_node, caster_combatant)
 
 
 ## Apply the ability's damage to the resolved target, if any.

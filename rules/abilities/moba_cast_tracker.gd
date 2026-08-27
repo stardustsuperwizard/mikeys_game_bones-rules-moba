@@ -140,7 +140,11 @@ func _resolve() -> void:
 		return
 
 	var ability := _cast_in_progress.ability
-	var resolved_target := _cast_in_progress.resolved_target
+
+	# Left untyped on purpose: the target may have been freed while the cast
+	# was in flight, and narrowing a freed object into a Node-typed local
+	# would fault here rather than no-opping inside resolve().
+	var resolved_target = _cast_in_progress.resolved_target
 
 	# Clear the in-progress cast BEFORE resolving effects, so a cancel() call
 	# made within any effect application finds nothing in progress (per Scope's

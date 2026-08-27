@@ -39,6 +39,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_on_cancel_cooldown_still_applies())
 	all_violations.append_array(_test_hard_cc_cancels_cast())
 	all_violations.append_array(_test_resolution_wins_ties())
+	all_violations.append_array(_test_cast_target_freed_before_resolution())
 	all_violations.append_array(_test_cataclysm_ability_data())
 
 	# Several cases above inject synthetic abilities into the shared library
@@ -577,8 +578,7 @@ static func _test_resolution_wins_ties() -> Array[String]:
 	_ensure_all_test_abilities_loaded()
 	var test_actor = _create_test_actor()
 	var actor = test_actor["actor"]
-	var combatant = test_actor["combatant"]
-	var state_machine = test_actor["state_machine"]
+	var combatant := test_actor["combatant"] as MobaCombatant
 	var target = _create_target_with_combatant()
 	var target_combatant = target.get_node("MobaCombatant") as MobaCombatant
 
@@ -603,10 +603,10 @@ static func _test_resolution_wins_ties() -> Array[String]:
 	# Now call cancel() after resolution - should be a no-op in BOTH halves of
 	# the outcome: no refund, and no change to the cooldown started at commit.
 	var resource_before_cancel = combatant._current_resource
-	var cooldown_before_cancel = combatant.cooldown_remaining(&"cast_time_ability")
+	var cooldown_before_cancel = combatant.get_cooldown_remaining(&"cast_time_ability")
 	combatant.cancel_cast()
 	var resource_after_cancel = combatant._current_resource
-	var cooldown_after_cancel = combatant.cooldown_remaining(&"cast_time_ability")
+	var cooldown_after_cancel = combatant.get_cooldown_remaining(&"cast_time_ability")
 
 	if not is_equal_approx(resource_before_cancel, resource_after_cancel):
 		violations.append("resolution_wins_ties: cancel after resolution should not refund")
@@ -622,6 +622,71 @@ static func _test_resolution_wins_ties() -> Array[String]:
 				)
 			)
 		)
+
+	return violations
+
+
+## Test: a target freed while the cast is in flight makes resolution a safe
+## no-op instead of a runtime fault.
+##
+## The deferred path narrows the stored target only after is_instance_valid(),
+## for the same reason the instant path does (see
+## ability_activation_test.gd::_test_target_freed_after_commit): passing a
+## freed object into a Node-typed parameter faults before any guard can run.
+##
+## A target that evaporated is not a cancellation, so the resource and cooldown
+## committed at activation stay spent.
+static func _test_cast_target_freed_before_resolution() -> Array[String]:
+	var violations: Array[String] = []
+
+	_ensure_all_test_abilities_loaded()
+	var test_actor = _create_test_actor()
+	var actor = test_actor["actor"]
+	var combatant := test_actor["combatant"] as MobaCombatant
+	var target = _create_target_with_combatant()
+
+	var context = MobaCastContext.new(actor, target)
+	var result = MobaAbilityCaster.new().activate(&"cast_time_ability", context)
+	if not result.success:
+		violations.append("cast_target_freed: activation should succeed, got %s" % result.reason)
+		return violations
+
+	var resource_after_commit = combatant._current_resource
+	var cooldown_after_commit = combatant.get_cooldown_remaining(&"cast_time_ability")
+
+	# The target evaporates mid-cast.
+	target.free()
+
+	# Resolution must complete without faulting.
+	combatant.tick(0.5)
+
+	if combatant.is_casting():
+		violations.append("cast_target_freed: cast should be finished after the resolving tick")
+
+	# tick() also accrues resource regeneration, so the resource legitimately
+	# rises a little across the resolving tick. What must not happen is a
+	# refund, which would return the whole resource_cost at once.
+	var resource_gain: float = combatant._current_resource - resource_after_commit
+	var ability := MobaAbilityLibrary.get_ability(&"cast_time_ability")
+	if resource_gain >= ability.resource_cost:
+		violations.append(
+			(
+				"cast_target_freed: resource should stay spent, gained %f of a %f cost"
+				% [resource_gain, ability.resource_cost]
+			)
+		)
+
+	# The sharp assertion: cast_time_ability is on_cancel = no_refund, which
+	# undoes the cooldown. So a cooldown still running proves the freed target
+	# resolved (and safely no-opped) rather than being routed through
+	# cancellation, which nothing about a vanished target should trigger.
+	var cooldown_after_resolve := combatant.get_cooldown_remaining(&"cast_time_ability")
+	if cooldown_after_resolve <= 0.0:
+		violations.append(
+			"cast_target_freed: cooldown should still be running, not undone as a cancel"
+		)
+	if cooldown_after_resolve > cooldown_after_commit:
+		violations.append("cast_target_freed: cooldown should not be extended by resolution")
 
 	return violations
 
