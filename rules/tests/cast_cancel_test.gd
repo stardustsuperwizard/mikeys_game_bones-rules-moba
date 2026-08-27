@@ -138,7 +138,12 @@ static func _test_cast_time_defers_resolution() -> Array[String]:
 
 	# Should be in ABILITY_CAST state
 	if state_machine.current_state != MobaState.ABILITY_CAST:
-		violations.append("cast_time_defers: should be in ABILITY_CAST state, got %d" % state_machine.current_state)
+		violations.append(
+			(
+				"cast_time_defers: should be in ABILITY_CAST state, got %d"
+				% state_machine.current_state
+			)
+		)
 
 	# Damage should not be applied yet
 	if not is_equal_approx(target_combatant._current_health, initial_target_health):
@@ -254,8 +259,10 @@ static func _test_on_cancel_full_refund() -> Array[String]:
 	var resource_after_cancel = combatant._current_resource
 	if not is_equal_approx(resource_after_cancel, initial_resource):
 		violations.append(
-			"full_refund: resource should be fully refunded after cancel, expected %f, got %f"
-			% [initial_resource, resource_after_cancel]
+			(
+				"full_refund: resource should be fully refunded after cancel, expected %f, got %f"
+				% [initial_resource, resource_after_cancel]
+			)
 		)
 
 	var cooldown_after_cancel = combatant._cooldowns.remaining(&"full_refund_test")
@@ -299,7 +306,9 @@ static func _test_on_cancel_partial_refund() -> Array[String]:
 	var action = MobaAbilityAction.new(actor, &"partial_refund_test", context)
 	var result = ActionRunner.run(action)
 	if not result.success:
-		violations.append("partial_refund: activation should succeed, got failure: %s" % result.reason)
+		violations.append(
+			"partial_refund: activation should succeed, got failure: %s" % result.reason
+		)
 		return violations
 
 	var resource_after_commit = combatant._current_resource
@@ -314,8 +323,10 @@ static func _test_on_cancel_partial_refund() -> Array[String]:
 	var expected_after_cancel = expected_after_commit + (40.0 * 0.5)  # Refund 50%
 	if not is_equal_approx(resource_after_cancel, expected_after_cancel):
 		violations.append(
-			"partial_refund: resource should be partially refunded, expected %f, got %f"
-			% [expected_after_cancel, resource_after_cancel]
+			(
+				"partial_refund: resource should be partially refunded, expected %f, got %f"
+				% [expected_after_cancel, resource_after_cancel]
+			)
 		)
 
 	var cooldown_after_cancel = combatant._cooldowns.remaining(&"partial_refund_test")
@@ -372,8 +383,10 @@ static func _test_on_cancel_no_refund() -> Array[String]:
 	var resource_after_cancel = combatant._current_resource
 	if not is_equal_approx(resource_after_cancel, expected_after_commit):
 		violations.append(
-			"no_refund: resource should not be refunded, expected %f, got %f"
-			% [expected_after_commit, resource_after_cancel]
+			(
+				"no_refund: resource should not be refunded, expected %f, got %f"
+				% [expected_after_commit, resource_after_cancel]
+			)
 		)
 
 	var cooldown_after_cancel = combatant._cooldowns.remaining(&"no_refund_test")
@@ -416,7 +429,9 @@ static func _test_on_cancel_cooldown_still_applies() -> Array[String]:
 	var action = MobaAbilityAction.new(actor, &"cooldown_still_applies_test", context)
 	var result = ActionRunner.run(action)
 	if not result.success:
-		violations.append("cooldown_still_applies: activation should succeed, got failure: %s" % result.reason)
+		violations.append(
+			"cooldown_still_applies: activation should succeed, got failure: %s" % result.reason
+		)
 		return violations
 
 	var resource_after_commit = combatant._current_resource
@@ -434,8 +449,10 @@ static func _test_on_cancel_cooldown_still_applies() -> Array[String]:
 	var resource_after_cancel = combatant._current_resource
 	if not is_equal_approx(resource_after_cancel, expected_after_commit):
 		violations.append(
-			"cooldown_still_applies: resource should not be refunded, expected %f, got %f"
-			% [expected_after_commit, resource_after_cancel]
+			(
+				"cooldown_still_applies: resource should not be refunded, expected %f, got %f"
+				% [expected_after_commit, resource_after_cancel]
+			)
 		)
 
 	var cooldown_after_cancel = combatant._cooldowns.remaining(&"cooldown_still_applies_test")
@@ -480,7 +497,9 @@ static func _test_hard_cc_cancels_cast() -> Array[String]:
 	var action = MobaAbilityAction.new(actor, &"cc_cancel_test", context)
 	var result = ActionRunner.run(action)
 	if not result.success:
-		violations.append("hard_cc_cancel: activation should succeed, got failure: %s" % result.reason)
+		violations.append(
+			"hard_cc_cancel: activation should succeed, got failure: %s" % result.reason
+		)
 		return violations
 
 	var resource_after_commit = combatant._current_resource
@@ -504,9 +523,14 @@ static func _test_hard_cc_cancels_cast() -> Array[String]:
 	var expected_after_cc = expected_after_commit + (40.0 * 0.25)  # Partial refund
 
 	if not is_equal_approx(resource_after_cc, expected_after_cc):
-		violations.append(
-			"hard_cc_cancel: resource should be partially refunded by CC interrupt, expected %f, got %f"
-			% [expected_after_cc, resource_after_cc]
+		(
+			violations
+			. append(
+				(
+					"hard_cc_cancel: resource should be partially refunded by CC interrupt, expected %f, got %f"
+					% [expected_after_cc, resource_after_cc]
+				)
+			)
 		)
 
 	var cooldown_after_cc = combatant._cooldowns.remaining(&"cc_cancel_test")

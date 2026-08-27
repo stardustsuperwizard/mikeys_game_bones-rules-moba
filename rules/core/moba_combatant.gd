@@ -171,6 +171,7 @@ var _active_shields: Array[MobaShield] = []
 ## _invalidate_stat_cache().
 var _stat_cache: Dictionary = {}
 
+
 ## In-progress cast tracking. Holds data for a cast that is currently resolving.
 ## null when no cast is in progress.
 class _CastInProgress:
@@ -179,11 +180,14 @@ class _CastInProgress:
 	var resolved_target: Node
 	var remaining_time: float
 
-	func _init(p_ability_id: StringName, p_ability: MobaAbility, p_target: Node, p_time: float) -> void:
+	func _init(
+		p_ability_id: StringName, p_ability: MobaAbility, p_target: Node, p_time: float
+	) -> void:
 		ability_id = p_ability_id
 		ability = p_ability
 		resolved_target = p_target
 		remaining_time = p_time
+
 
 var _cast_in_progress: _CastInProgress = null
 
@@ -861,7 +865,9 @@ func commit_activate(ability_id: StringName) -> int:
 ##     ability: The resolved MobaAbility resource
 ##     resolved_target: The target (may be null; guards with is_instance_valid in resolution)
 ##     cast_time: Remaining time until resolution, in seconds
-func start_cast(ability_id: StringName, ability: MobaAbility, resolved_target: Node, cast_time: float) -> void:
+func start_cast(
+	ability_id: StringName, ability: MobaAbility, resolved_target: Node, cast_time: float
+) -> void:
 	_cast_in_progress = _CastInProgress.new(ability_id, ability, resolved_target, cast_time)
 
 
@@ -968,9 +974,7 @@ func _apply_cast_damage(ability: MobaAbility, target: Node) -> void:
 	if target_combatant == null:
 		return
 
-	var damage := MobaDamage.new(
-		raw_amount, _damage_type_to_moba(ability.damage_type), self
-	)
+	var damage := MobaDamage.new(raw_amount, _damage_type_to_moba(ability.damage_type), self)
 	target_combatant.apply_damage(damage)
 
 
