@@ -1049,15 +1049,13 @@ static func _test_on_channel_break_no_effect_remaining() -> Array[String]:
 
 	# Check that debuff was applied to target
 	var target_container := target_combatant.get_effect_container()
-	var debuff_count_before = target_container.active_effects.size()
-	if debuff_count_before == 0:
+	if not target_container.has_modifier(&"suppressing_fire", &"movement_speed"):
 		violations.append("on_channel_break_no_effect: debuff should be applied")
 
 	# Break the channel (which should remove the debuff since on_channel_break = NO_EFFECT_REMAINING)
 	MobaAbilityCaster.new().cancel(actor)
 
-	var debuff_count_after = target_container.active_effects.size()
-	if debuff_count_after >= debuff_count_before:
+	if target_container.has_modifier(&"suppressing_fire", &"movement_speed"):
 		violations.append("on_channel_break_no_effect: debuff should be removed on channel break")
 
 	return violations
@@ -1092,7 +1090,8 @@ static func _test_on_channel_break_partial_effect_already_applied() -> Array[Str
 	slow_modifier.amount = -0.3
 	slow_modifier.is_percentage = true
 	slow_modifier.duration = 2.0
-	ability.debuffs = [slow_modifier]
+	var debuff_list: Array[MobaStatModifier] = [slow_modifier]
+	ability.debuffs = debuff_list
 
 	combatant.register_ability(ability)
 	MobaAbilityLibrary._cache[StringName(ability.id)] = ability
@@ -1113,15 +1112,13 @@ static func _test_on_channel_break_partial_effect_already_applied() -> Array[Str
 
 	# Check that debuff was applied
 	var target_container := target_combatant.get_effect_container()
-	var debuff_count_before = target_container.active_effects.size()
-	if debuff_count_before == 0:
+	if not target_container.has_modifier(&"partial_effect_channel_test", &"movement_speed"):
 		violations.append("partial_effect: debuff should be applied")
 
 	# Break the channel (which should leave the debuff since on_channel_break = PARTIAL_EFFECT_ALREADY_APPLIED)
 	combatant.break_channel()
 
-	var debuff_count_after = target_container.active_effects.size()
-	if debuff_count_after < debuff_count_before:
+	if not target_container.has_modifier(&"partial_effect_channel_test", &"movement_speed"):
 		violations.append("partial_effect: debuff should remain on channel break")
 
 	return violations

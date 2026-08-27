@@ -843,8 +843,11 @@ func commit_activate(ability_id: StringName) -> int:
 
 	var ability: MobaAbility = _abilities[ability_id]
 
-	# Spend resource
-	spend_resource(ability.resource_cost)
+	# For a channeled ability, resource_cost is the per-tick cost: each tick
+	# (including the first, at t = 0) spends it independently, so commit must
+	# not also spend it here or the first tick would be charged twice.
+	if ability.channel_duration <= 0.0:
+		spend_resource(ability.resource_cost)
 
 	# Start cooldown with current haste
 	var haste: float = get_stat(MobaStatBlock.ABILITY_HASTE)

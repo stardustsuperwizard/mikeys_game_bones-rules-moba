@@ -45,4 +45,4 @@ cancellable_by_movement = true
 cancellable_by_hard_cc = true
 refund_resource_on_cancel = 0.5
 on_cancel = 1
-on_channel_break = 1
+on_channel_break = 0
