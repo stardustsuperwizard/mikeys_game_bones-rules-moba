@@ -58,7 +58,8 @@ func activate_slot(index: int, context: MobaCastContext) -> ActionResult:
 
 
 ## Cancel an in-progress cast or break an in-progress channel for the given caster.
-## If the caster has no in-progress cast or channel, this is a harmless no-op and returns without error.
+## If the caster has no in-progress cast or channel, this is a harmless no-op
+## and returns without error.
 ##
 ## The caster can be identified by:
 ## - An Actor, from which the MobaCombatant child is discovered

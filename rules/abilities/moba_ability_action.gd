@@ -165,36 +165,29 @@ func _resolve_target(ability: MobaAbility) -> Dictionary:
 		MobaAbility.TargetingType.SELF:
 			return {"target": actor, "failure": &""}
 		MobaAbility.TargetingType.TARGETED:
-			# Targeted abilities require explicit_target
-			if context.explicit_target == null:
-				return {"target": null, "failure": FAILURE_INVALID_TARGET}
-			# Guard against freed/invalid targets
-			if not is_instance_valid(context.explicit_target):
-				return {"target": null, "failure": FAILURE_INVALID_TARGET}
-			# Check range
-			var caster_pos: Vector3 = _get_position(actor)
-			var target_pos: Vector3 = _get_position(context.explicit_target)
-			var distance: float = caster_pos.distance_to(target_pos)
-			if distance > ability.range:
-				return {"target": null, "failure": FAILURE_OUT_OF_RANGE}
-			return {"target": context.explicit_target, "failure": &""}
+			return _resolve_targeted_or_channeled_target(ability)
 		MobaAbility.TargetingType.CHANNELED:
-			# Channeled abilities resolve targeting the same way targeted abilities do
-			if context.explicit_target == null:
-				return {"target": null, "failure": FAILURE_INVALID_TARGET}
-			# Guard against freed/invalid targets
-			if not is_instance_valid(context.explicit_target):
-				return {"target": null, "failure": FAILURE_INVALID_TARGET}
-			# Check range
-			var caster_pos: Vector3 = _get_position(actor)
-			var target_pos: Vector3 = _get_position(context.explicit_target)
-			var distance: float = caster_pos.distance_to(target_pos)
-			if distance > ability.range:
-				return {"target": null, "failure": FAILURE_OUT_OF_RANGE}
-			return {"target": context.explicit_target, "failure": &""}
+			return _resolve_targeted_or_channeled_target(ability)
 		_:
 			# All other targeting types not implemented in Batch 1
 			return {"target": null, "failure": FAILURE_TARGETING_NOT_IMPLEMENTED}
+
+
+## Resolve a targeted or channeled ability's target, checking validity and range.
+func _resolve_targeted_or_channeled_target(ability: MobaAbility) -> Dictionary:
+	# Targeted/channeled abilities require explicit_target
+	if context.explicit_target == null:
+		return {"target": null, "failure": FAILURE_INVALID_TARGET}
+	# Guard against freed/invalid targets
+	if not is_instance_valid(context.explicit_target):
+		return {"target": null, "failure": FAILURE_INVALID_TARGET}
+	# Check range
+	var caster_pos: Vector3 = _get_position(actor)
+	var target_pos: Vector3 = _get_position(context.explicit_target)
+	var distance: float = caster_pos.distance_to(target_pos)
+	if distance > ability.range:
+		return {"target": null, "failure": FAILURE_OUT_OF_RANGE}
+	return {"target": context.explicit_target, "failure": &""}
 
 
 ## Commit activation (spend resource and start cooldown).

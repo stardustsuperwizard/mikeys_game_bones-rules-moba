@@ -1120,7 +1120,8 @@ static func _test_on_channel_break_partial_effect_already_applied() -> Array[Str
 	if not target_container.has_modifier(&"partial_effect_channel_test", &"movement_speed"):
 		violations.append("partial_effect: debuff should be applied")
 
-	# Break the channel (which should leave the debuff since on_channel_break = PARTIAL_EFFECT_ALREADY_APPLIED)
+	# Break the channel (which should leave the debuff since
+	# on_channel_break = PARTIAL_EFFECT_ALREADY_APPLIED)
 	combatant.break_channel()
 
 	if not target_container.has_modifier(&"partial_effect_channel_test", &"movement_speed"):
