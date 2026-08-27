@@ -10,8 +10,22 @@ const MobaDamage = preload("res://rules/core/moba_damage.gd")
 const MobaState = preload("res://rules/state/moba_state.gd")
 const MobaCrowdControlSpec = preload("res://rules/effects/moba_crowd_control_spec.gd")
 const MobaStatModifier = preload("res://rules/effects/moba_stat_modifier.gd")
+const MobaRespawnPolicy = preload("res://rules/core/moba_respawn_policy.gd")
 const _BASELINE_STAT_BLOCK = preload("res://rules/data/stat_blocks/baseline.tres")
-const _PLAYER_RESPAWN_POLICY = preload("res://rules/data/respawn/player_respawn_policy.tres")
+
+
+## Build a respawn policy for tests without referencing production scene/resource
+## data (rules/ files may not reference res://resources/ or res://scenes/ --
+## see extraction_contract_test.gd). A bare SpawnPoint with only a transform
+## is all respawn() reads.
+static func _make_test_respawn_policy() -> MobaRespawnPolicy:
+	var spawn_point = SpawnPoint.new()
+	spawn_point.transform = Transform3D.IDENTITY
+	var policy = MobaRespawnPolicy.new()
+	policy.respawns = true
+	policy.respawn_delay = 3.0
+	policy.spawn_point = spawn_point
+	return policy
 
 
 ## Run the death/respawn test suite.
@@ -275,7 +289,7 @@ static func _test_respawn_restores_state() -> Array[String]:
 
 	var combatant = MobaCombatant.new()
 	combatant.stat_block = _BASELINE_STAT_BLOCK
-	combatant.respawn_policy = _PLAYER_RESPAWN_POLICY
+	combatant.respawn_policy = _make_test_respawn_policy()
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
@@ -329,7 +343,7 @@ static func _test_respawn_clears_cooldowns() -> Array[String]:
 
 	var combatant = MobaCombatant.new()
 	combatant.stat_block = _BASELINE_STAT_BLOCK
-	combatant.respawn_policy = _PLAYER_RESPAWN_POLICY
+	combatant.respawn_policy = _make_test_respawn_policy()
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 
@@ -369,7 +383,7 @@ static func _test_effects_cleared_on_respawn() -> Array[String]:
 
 	var combatant = MobaCombatant.new()
 	combatant.stat_block = _BASELINE_STAT_BLOCK
-	combatant.respawn_policy = _PLAYER_RESPAWN_POLICY
+	combatant.respawn_policy = _make_test_respawn_policy()
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 
@@ -429,7 +443,7 @@ static func _test_respawn_on_living_refused() -> Array[String]:
 
 	var combatant = MobaCombatant.new()
 	combatant.stat_block = _BASELINE_STAT_BLOCK
-	combatant.respawn_policy = _PLAYER_RESPAWN_POLICY
+	combatant.respawn_policy = _make_test_respawn_policy()
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 

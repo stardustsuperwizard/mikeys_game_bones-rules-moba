@@ -8,7 +8,7 @@
 [ext_resource type="Resource" path="res://rules/data/loadouts/melee_bruiser.tres" id="6"]
 [ext_resource type="Script" path="res://rules/state/moba_state_machine.gd" id="7"]
 [ext_resource type="Script" path="res://rules/abilities/moba_ability_caster.gd" id="8"]
-[ext_resource type="Resource" path="res://rules/data/respawn/enemy_respawn_policy.tres" id="9"]
+[ext_resource type="Resource" path="res://resources/enemy_respawn_policy.tres" id="9"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 height = 2.0
