@@ -129,6 +129,16 @@ func remove_modifiers_from(source_ability_id: StringName) -> void:
 		effect_expired.emit(entry.source_ability_id, entry.stat)
 
 
+## Remove every active effect entry, emitting effect_expired for each.
+## Called when a combatant enters DEAD state to clear all active modifiers.
+func clear_all() -> void:
+	var keys_to_remove: Array = _entries.keys()
+	for key in keys_to_remove:
+		var entry: _Entry = _entries[key]
+		_entries.erase(key)
+		effect_expired.emit(entry.source_ability_id, entry.stat)
+
+
 ## Sum of the flat (non-percentage) magnitudes active on a stat.
 func get_flat_bonus(stat: StringName) -> float:
 	var total := 0.0

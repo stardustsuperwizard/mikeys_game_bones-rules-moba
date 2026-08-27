@@ -40,9 +40,11 @@ func _ready() -> void:
 	_refresh_tooltip()
 
 
-## The bound combatant can be freed at any time (Actor.die() calls
-## queue_free()), so the binding is dropped as soon as it goes invalid rather
-## than being read again next frame.
+## The bound combatant's actor node is never freed: MobaCombatant intercepts
+## death and enters DEAD state instead (per #240), keeping the actor in the
+## scene tree for respawn. The binding is retained across death. The validity
+## check here is a legacy safeguard, now harmless: the combatant object
+## remains valid even while the actor is dead.
 func _process(_delta: float) -> void:
 	if _combatant != null and not is_instance_valid(_combatant):
 		unbind()

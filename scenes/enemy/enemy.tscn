@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://addons/mikeys_game_bones/actors/actor.gd" id="1"]
 [ext_resource type="Script" path="res://addons/mikeys_game_bones/actors/bodies/actor_body_3d.gd" id="2"]
@@ -8,6 +8,7 @@
 [ext_resource type="Resource" path="res://rules/data/loadouts/melee_bruiser.tres" id="6"]
 [ext_resource type="Script" path="res://rules/state/moba_state_machine.gd" id="7"]
 [ext_resource type="Script" path="res://rules/abilities/moba_ability_caster.gd" id="8"]
+[ext_resource type="Resource" path="res://rules/data/respawn/enemy_respawn_policy.tres" id="9"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 height = 2.0
@@ -51,6 +52,7 @@ script = ExtResource("3")
 [node name="MobaCombatant" type="Node" parent="."]
 script = ExtResource("5")
 loadout = ExtResource("6")
+respawn_policy = ExtResource("9")
 
 [node name="MobaStateMachine" type="Node" parent="."]
 script = ExtResource("7")

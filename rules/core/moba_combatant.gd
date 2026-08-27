@@ -127,6 +127,11 @@ class _DisplacementEntry:
 		if loadout != null:
 			_register_loadout_abilities()
 
+## Respawn policy controlling auto-respawn behavior, delay, and spawn location.
+## Left unassigned (null) means the combatant never auto-respawns. The policy
+## is read-only after assignment; respawn() may be called manually regardless.
+@export var respawn_policy: MobaRespawnPolicy = null
+
 # Property accessors for current_resource, maximum_resource, current_health, and maximum_health
 var current_resource: float:
 	get:
@@ -178,6 +183,10 @@ var _cast_tracker: MobaCastTracker = null
 ## In-progress channel ledger. Created on first use so it is available whether or
 ## not _ready() has run. Advanced from tick(), like the MobaCooldowns ledger.
 var _channel_tracker: MobaChannelTracker = null
+
+## Countdown timer for auto-respawn when DEAD. Only decrements if the policy allows
+## auto-respawn. Advanced from tick() when in DEAD state.
+var _respawn_countdown: float = 0.0
 
 
 func _ready() -> void:
@@ -280,7 +289,8 @@ func _get_modified_stat(stat: StringName) -> float:
 
 ## Apply damage to the combatant via a MobaDamage packet.
 ##
-## Resolution order (pinned per Architecture Constraints):
+## Returns early and emits nothing if the combatant is not alive (DEAD state).
+## Otherwise, resolution order (pinned per Architecture Constraints):
 ## 1. Raw amount
 ## 2. Crit roll and multiplier (if can_crit)
 ## 3. Damage-type routing (PHYSICAL/MAGICAL/TRUE)
@@ -289,8 +299,14 @@ func _get_modified_stat(stat: StringName) -> float:
 ## 6. Final amount
 ## 7. Shield consumption (shortest-remaining-duration first, before health)
 ##
-## Emits damage_resolved once per packet.
+## Emits damage_resolved once per packet (if not dead).
 func apply_damage(damage: MobaDamage) -> void:
+	# Refuse damage on dead combatants: this is what makes "two lethal hits in one
+	# physics frame" fire death exactly once (the first hit transitions to DEAD,
+	# the second is refused by the alive check here, not by comparing health magnitude).
+	if not is_alive():
+		return
+
 	var raw: float = damage.amount
 	var final: float = raw
 	var was_crit: bool = false
@@ -385,6 +401,141 @@ func apply_damage(damage: MobaDamage) -> void:
 
 	# Emit damage_resolved
 	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source)
+
+
+## Clear all active effects, modifiers, shields, crowd control, and displacement
+## when entering DEAD state. Also cancels in-progress casts and breaks in-progress channels.
+##
+## This is called exactly once when death is finalized to ensure nothing carries
+## into the next life. The combatant must not survive death with an active buff,
+## stun, shield, or other effect that would carry over if respawned.
+func _clear_on_death() -> void:
+	# Cancel in-progress cast
+	if is_casting():
+		cancel_cast()
+
+	# Break in-progress channel
+	if is_channeling():
+		break_channel()
+
+	# Clear all active modifiers from the effect container
+	get_effect_container().clear_all()
+
+	# Clear all active shields
+	_active_shields.clear()
+	shield_changed.emit(0.0)
+
+	# Clear all active hard-CC entries
+	_active_cc_entries.clear()
+
+	# Clear active displacement
+	_active_displacement = null
+
+	# Apply minimal visual death representation: darken the mesh
+	_apply_death_visual()
+
+
+## Apply minimal visual death representation to the body.
+## Darkens the mesh material to indicate the body is dead, without animation.
+func _apply_death_visual() -> void:
+	var parent := get_parent()
+	if parent == null:
+		return
+
+	var body := parent.get_node_or_null("Body") as Node3D
+	if body == null:
+		return
+
+	# Darken the main mesh by reducing its albedo color's brightness
+	var mesh_instance := body.get_node_or_null("MeshInstance3D") as MeshInstance3D
+	if mesh_instance != null:
+		var material = mesh_instance.get_active_material(0)
+		if material != null and material is StandardMaterial3D:
+			# Create a unique material instance for this body so we don't affect other actors
+			var unique_material = material.duplicate() as StandardMaterial3D
+			# Darken the albedo color significantly to show death
+			unique_material.albedo_color = unique_material.albedo_color * Color(0.3, 0.3, 0.3, 1.0)
+			mesh_instance.set_surface_override_material(0, unique_material)
+
+
+## Restore the visual representation when respawning (restore full color).
+func _restore_death_visual() -> void:
+	var parent := get_parent()
+	if parent == null:
+		return
+
+	var body := parent.get_node_or_null("Body") as Node3D
+	if body == null:
+		return
+
+	# Restore the mesh to its original material
+	var mesh_instance := body.get_node_or_null("MeshInstance3D") as MeshInstance3D
+	if mesh_instance != null:
+		# Clear the override to return to the original material
+		mesh_instance.set_surface_override_material(0, null)
+
+
+## Restore the combatant from DEAD to full health/resource and clear all cooldowns.
+## Moves the body to the policy's spawn point and returns to IDLE.
+##
+## Returns false if not currently DEAD (no state change). Returns false if no policy
+## is assigned or the policy's spawn_point is null (cannot respawn without a location).
+## Otherwise restores state and returns true.
+##
+## Called automatically after a delay if respawn_policy.respawns is true; can also
+## be called manually regardless of policy.
+func respawn() -> bool:
+	var state_machine := _get_state_machine()
+	if state_machine == null or state_machine.current_state != MobaState.DEAD:
+		return false
+
+	if respawn_policy == null or respawn_policy.spawn_point == null:
+		return false
+
+	# Restore health and resource to maximum
+	_current_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	_current_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
+
+	# Clear all cooldowns
+	_cooldowns.clear_all_cooldowns()
+
+	# Clear any leftover effects/shields/CC (defensive; _clear_on_death should
+	# have already done this, but be thorough here in case of edge cases)
+	get_effect_container().clear_all()
+	_active_shields.clear()
+	_active_cc_entries.clear()
+	_active_displacement = null
+
+	# Move the body to the spawn point
+	var parent := get_parent()
+	if parent != null:
+		var body = parent.get_node_or_null("Body") as Node3D
+		if body != null:
+			body.transform = respawn_policy.spawn_point.transform
+
+	# Reset death flag to allow death to fire again in the next life
+	_has_died = false
+
+	# Reset respawn countdown for next death
+	_respawn_countdown = 0.0
+
+	# Restore the visual representation (remove the darkened death appearance)
+	_restore_death_visual()
+
+	# Emit health/resource changed signals to update HUD
+	var max_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	health_changed.emit(_current_health, max_health)
+	var max_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
+	resource_changed.emit(_current_resource, max_resource)
+	shield_changed.emit(0.0)
+
+	# Mirror to parent Actor's character sheet
+	var parent_actor := parent as Actor
+	if parent_actor != null:
+		parent_actor.character_sheet.current_hp = int(_current_health)
+
+	# Transition to IDLE via revive()
+	return state_machine.revive()
 
 
 ## Consume shields in order of shortest-remaining-duration first.
@@ -705,11 +856,15 @@ func _update_health() -> void:
 	var max_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	health_changed.emit(_current_health, max_health)
 
-	# Handle death: call Actor.die() exactly once
+	# Handle death: transition to DEAD state exactly once
+	# This replaces the old Actor.die() call, intercepting death at the MobaCombatant
+	# level so the actor node is never freed and respawn can restore it.
 	if _current_health <= 0.0 and not _has_died:
 		_has_died = true
-		if parent_actor != null:
-			parent_actor.die()
+		var state_machine := _get_state_machine()
+		if state_machine != null:
+			if state_machine.try_enter(MobaState.DEAD):
+				_clear_on_death()
 
 
 ## Spend resource from the pool.
@@ -920,7 +1075,14 @@ func break_channel() -> void:
 ## A dead combatant does not regenerate health.
 ## Resource regeneration always occurs (dead or alive).
 ## Also advances all active cooldowns and crowd control durations.
+## While DEAD, advances the auto-respawn countdown if the policy allows it.
 func tick(delta: float) -> void:
+	var state_machine := _get_state_machine()
+
+	# Advance auto-respawn countdown if DEAD and policy allows auto-respawn
+	if state_machine != null and state_machine.current_state == MobaState.DEAD:
+		_tick_respawn_countdown(delta)
+
 	# Advance in-progress cast and resolve if it reaches its expiry point.
 	# Resolution wins ties: if a cast reaches resolution during this tick(),
 	# it resolves synchronously before anything else observes it as in progress.
@@ -1036,6 +1198,26 @@ func _tick_crowd_control(delta: float) -> void:
 					# Apply any queued follow-up effect on landing
 					if queued_effect != null:
 						apply_crowd_control(queued_effect, queued_effect_source)
+
+
+## Advance the auto-respawn countdown while DEAD. Called from tick() when
+## the combatant is in DEAD state. Triggers respawn() when the countdown expires
+## if the respawn policy permits auto-respawn.
+func _tick_respawn_countdown(delta: float) -> void:
+	# Only count down if the policy exists and allows auto-respawn
+	if respawn_policy == null or not respawn_policy.respawns:
+		return
+
+	# Initialize countdown on first tick in DEAD state
+	var state_machine := _get_state_machine()
+	if state_machine != null and state_machine.current_state == MobaState.DEAD:
+		if _respawn_countdown == 0.0:
+			_respawn_countdown = respawn_policy.respawn_delay
+
+		# Decrement and trigger respawn when done
+		_respawn_countdown -= delta
+		if _respawn_countdown <= 0.0:
+			respawn()
 
 
 ## Whether basic_attack() may be called right now to start a new cycle: the
