@@ -21,6 +21,11 @@ class _AbilityState:
 	var timer_duration: float  # Effective cooldown (after haste applied at start time)
 	var timer_remaining: float  # Current time left on the active timer
 
+	# True when the most recent start() is the call that began the running
+	# timer, rather than consuming a charge while an earlier recharge timer
+	# was already in flight. cancel() undoes a timer only in that case.
+	var timer_started_by_last_start: bool = false
+
 
 # Dictionary mapping ability_id to _AbilityState
 var _ability_states: Dictionary = {}
@@ -57,6 +62,11 @@ func start(ability_id: StringName, base_cooldown: float, haste: float, max_charg
 	if state.timer_remaining <= 0.0:
 		state.timer_duration = MobaFormulas.effective_cooldown(base_cooldown, haste)
 		state.timer_remaining = state.timer_duration
+		state.timer_started_by_last_start = true
+	else:
+		# A recharge timer for an earlier activation is still running; this
+		# start() only spent a charge, so there is no timer of its own to undo.
+		state.timer_started_by_last_start = false
 
 
 ## Get the remaining cooldown time for the given ability.
@@ -170,8 +180,16 @@ func maximum_charges(ability_id: StringName) -> int:
 	return state.max_charges
 
 
-## Undo the cooldown and charge state that start() established.
-## Restores the consumed charge and clears the running timer (as if start was never called).
+## Undo the cooldown and charge state that the most recent start() established.
+## Restores the consumed charge, and clears the timer only if that start() is
+## what began it (as if start was never called).
+##
+## On a multi-charge ability a second activation spends a charge while the
+## first activation's recharge timer is still running. Cancelling that second
+## activation must leave the in-flight timer alone: clearing it would strand
+## the ability below max charges forever, since tick() only advances a timer
+## that is still above zero.
+##
 ## A no-op if the ability has never been started.
 ##
 ## Args:
@@ -185,5 +203,9 @@ func cancel(ability_id: StringName) -> void:
 	# Restore the consumed charge
 	state.available_charges = mini(state.available_charges + 1, state.max_charges)
 
-	# Clear the running timer
-	state.timer_remaining = 0.0
+	# Clear the timer only when this start() is the call that began it.
+	if state.timer_started_by_last_start:
+		state.timer_remaining = 0.0
+		state.timer_duration = 0.0
+
+	state.timer_started_by_last_start = false

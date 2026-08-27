@@ -33,15 +33,14 @@ class _CastInProgress:
 		remaining_time = p_time
 
 
-## The owning combatant. Typed as Node rather than MobaCombatant so this file
-## carries no cyclic class dependency back to the combatant that owns it.
-var _combatant: Node = null
+## The combatant this tracker belongs to.
+var _combatant: MobaCombatant = null
 
 ## The cast currently in progress, or null when none is.
 var _cast_in_progress: _CastInProgress = null
 
 
-func _init(p_combatant: Node) -> void:
+func _init(p_combatant: MobaCombatant) -> void:
 	_combatant = p_combatant
 
 
@@ -131,7 +130,11 @@ func _undo_cooldown_only(ability_id: StringName) -> void:
 
 
 ## Resolve a cast that has expired: apply damage and effects to the target.
-## Guards against freed/invalid targets with is_instance_valid().
+##
+## Resolution runs through MobaAbilityAction.resolve() -- the same
+## implementation an instant ability uses -- so a cast_time ability and an
+## instant one cannot resolve differently. It guards a null/freed target
+## itself, leaving the already-committed resource and cooldown spent.
 func _resolve() -> void:
 	if _cast_in_progress == null:
 		return
@@ -144,86 +147,4 @@ func _resolve() -> void:
 	# "resolution wins ties" guarantee).
 	_cast_in_progress = null
 
-	# Guard against freed/invalid targets
-	if resolved_target == null or not is_instance_valid(resolved_target):
-		return
-
-	# Apply damage and effects
-	_apply_damage_and_effects(ability, resolved_target)
-
-
-## Apply damage and effects from a resolved cast.
-## This is the deferred resolution step for cast_time > 0 abilities.
-func _apply_damage_and_effects(ability: MobaAbility, target: Node) -> void:
-	# Step 1: Apply damage
-	_apply_damage(ability, target)
-
-	# Step 2: Apply effects (crowd control, buffs, debuffs)
-	_apply_effects(ability, target)
-
-
-## Apply damage from a resolved cast.
-func _apply_damage(ability: MobaAbility, target: Node) -> void:
-	if target == null or not is_instance_valid(target):
-		return
-
-	var raw_amount := _compute_scaled_damage(ability)
-	if raw_amount <= 0.0:
-		return
-
-	var target_combatant := target.get_node_or_null("MobaCombatant")
-	if target_combatant == null:
-		return
-
-	var damage := MobaDamage.new(raw_amount, _damage_type_to_moba(ability.damage_type), _combatant)
-	target_combatant.apply_damage(damage)
-
-
-## Compute the raw damage amount for a cast: base_damage plus ability.scaling ratios.
-func _compute_scaled_damage(ability: MobaAbility) -> float:
-	var amount := ability.base_damage
-	for stat_name in ability.scaling:
-		var ratio: float = ability.scaling[stat_name]
-		amount += ratio * _combatant.get_stat(StringName(stat_name))
-	return amount
-
-
-## Map MobaAbility.DamageType to MobaDamage.DamageType
-func _damage_type_to_moba(damage_type: int) -> int:
-	match damage_type:
-		MobaAbility.DamageType.PHYSICAL:
-			return MobaDamage.DamageType.PHYSICAL
-		MobaAbility.DamageType.MAGICAL:
-			return MobaDamage.DamageType.MAGICAL
-		MobaAbility.DamageType.TRUE:
-			return MobaDamage.DamageType.TRUE
-		_:
-			return MobaDamage.DamageType.PHYSICAL
-
-
-## Apply effects from a resolved cast.
-func _apply_effects(ability: MobaAbility, target: Node) -> void:
-	var target_combatant := target.get_node_or_null("MobaCombatant")
-
-	# Apply crowd control from ability.crowd_control to the target
-	if ability.crowd_control != null and target_combatant != null:
-		target_combatant.apply_crowd_control(ability.crowd_control, _combatant)
-
-	# Apply buffs to the caster's combatant (self)
-	var caster_effects: MobaEffectContainer = _combatant.get_effect_container()
-	for buff in ability.buffs:
-		caster_effects.apply_modifier(buff, StringName(ability.id))
-
-	# Apply debuffs to the resolved target's combatant
-	if target_combatant != null:
-		var target_effects: MobaEffectContainer = target_combatant.get_effect_container()
-		for debuff in ability.debuffs:
-			target_effects.apply_modifier(debuff, StringName(ability.id))
-
-	# Apply healing to the caster
-	if ability.heal_amount > 0.0:
-		_combatant.apply_healing(ability.heal_amount)
-
-	# Apply shield to the caster
-	if ability.shield_amount > 0.0:
-		_combatant.apply_shield(ability.shield_amount, StringName(ability.id), ability.duration)
+	MobaAbilityAction.resolve(ability, resolved_target, _combatant)

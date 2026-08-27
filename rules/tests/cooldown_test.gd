@@ -1,7 +1,9 @@
 ## Test suite for cooldown and activation mechanics.
 ##
 ## Covers: can_activate() failure reasons, commit_activate() atomicity,
-## haste scaling, charge refill timing, and resource spend atomicity.
+## haste scaling, charge refill timing, resource spend atomicity, and
+## MobaCooldowns.cancel() reversing a start() on single- and multi-charge
+## abilities.
 class_name CooldownTest
 
 const MobaStatBlock = preload("res://rules/core/moba_stat_block.gd")
@@ -28,6 +30,8 @@ static func run() -> bool:
 	all_violations.append_array(_test_multi_charge_no_charges())
 	all_violations.append_array(_test_large_cost_refused())
 	all_violations.append_array(_test_hud_getters())
+	all_violations.append_array(_test_cancel_single_charge())
+	all_violations.append_array(_test_cancel_multi_charge_keeps_running_timer())
 
 	if all_violations.is_empty():
 		return true
@@ -537,6 +541,97 @@ static func _test_hud_getters() -> Array[String]:
 			(
 				"hud_getters: passive id should be test_passive, got %s"
 				% combatant.get_passive_slot_id()
+			)
+		)
+
+	return violations
+
+
+## MobaCooldowns.cancel() undoes a single-charge start() completely: the charge
+## comes back and the timer it began is cleared, as if start() never ran.
+static func _test_cancel_single_charge() -> Array[String]:
+	var violations: Array[String] = []
+
+	var cooldowns := MobaCooldowns.new()
+	cooldowns.start(&"single", 10.0, 0.0, 1)
+
+	if cooldowns.charges(&"single") != 0:
+		violations.append(
+			"cancel_single: start() should spend the charge, got %d" % cooldowns.charges(&"single")
+		)
+	if not _approx_equal(cooldowns.remaining(&"single"), 10.0):
+		violations.append(
+			(
+				"cancel_single: start() should begin a 10s timer, got %f"
+				% cooldowns.remaining(&"single")
+			)
+		)
+
+	cooldowns.cancel(&"single")
+
+	if cooldowns.charges(&"single") != 1:
+		violations.append(
+			"cancel_single: charge should be restored, got %d" % cooldowns.charges(&"single")
+		)
+	if cooldowns.remaining(&"single") > 0.0:
+		violations.append(
+			"cancel_single: timer should be cleared, got %f" % cooldowns.remaining(&"single")
+		)
+
+	return violations
+
+
+## On a multi-charge ability, a second start() spends a charge while the first
+## activation's recharge timer is still running -- start() deliberately does not
+## restart it. Cancelling that second activation must restore the charge and
+## leave the in-flight timer alone.
+##
+## Clearing it instead would strand the ability below max charges permanently,
+## because tick() only advances a timer that is still above zero.
+static func _test_cancel_multi_charge_keeps_running_timer() -> Array[String]:
+	var violations: Array[String] = []
+
+	var cooldowns := MobaCooldowns.new()
+
+	# First activation: 2 -> 1 charges, starts a 10s recharge timer.
+	cooldowns.start(&"multi", 10.0, 0.0, 2)
+	cooldowns.tick(3.0)
+
+	# Second activation: 1 -> 0 charges, joins the timer already in flight.
+	cooldowns.start(&"multi", 10.0, 0.0, 2)
+	if cooldowns.charges(&"multi") != 0:
+		violations.append(
+			"cancel_multi: second start() should spend to 0, got %d" % cooldowns.charges(&"multi")
+		)
+	if not _approx_equal(cooldowns.remaining(&"multi"), 7.0):
+		violations.append(
+			(
+				"cancel_multi: the first timer should keep running, got %f"
+				% cooldowns.remaining(&"multi")
+			)
+		)
+
+	cooldowns.cancel(&"multi")
+
+	if cooldowns.charges(&"multi") != 1:
+		violations.append(
+			"cancel_multi: charge should be restored to 1, got %d" % cooldowns.charges(&"multi")
+		)
+	if not _approx_equal(cooldowns.remaining(&"multi"), 7.0):
+		violations.append(
+			(
+				"cancel_multi: cancel must not clear the unrelated recharge timer, got %f"
+				% cooldowns.remaining(&"multi")
+			)
+		)
+
+	# The surviving timer still recharges the ability back to full.
+	cooldowns.tick(7.0)
+	if cooldowns.charges(&"multi") != 2:
+		violations.append(
+			(
+				"cancel_multi: ability should recharge to 2 charges, got %d"
+				% cooldowns.charges(&"multi")
 			)
 		)
 

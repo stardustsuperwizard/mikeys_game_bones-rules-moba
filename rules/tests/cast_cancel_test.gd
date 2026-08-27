@@ -23,6 +23,7 @@ const _ALL_ABILITY_IDS: Array[StringName] = [
 	&"cast_time_ability",
 	&"self_ability",
 	&"cataclysm",
+	&"power_strike",
 ]
 
 
@@ -40,6 +41,11 @@ static func run() -> bool:
 	all_violations.append_array(_test_resolution_wins_ties())
 	all_violations.append_array(_test_cataclysm_ability_data())
 
+	# Several cases above inject synthetic abilities into the shared library
+	# cache. Reset once here so none of them reach the suites that run after
+	# this one, matching how ability_activation_test.gd leaves the library.
+	MobaAbilityLibrary._reset()
+
 	if all_violations.is_empty():
 		return true
 
@@ -50,7 +56,13 @@ static func run() -> bool:
 	return false
 
 
+## Load the shipped abilities plus this suite's fixtures into the library.
+##
+## Resets first so each case starts from a clean cache: several cases inject
+## synthetic abilities directly, and any of them can return early on a
+## violation before it would have cleaned up after itself.
 static func _ensure_all_test_abilities_loaded() -> void:
+	MobaAbilityLibrary._reset()
 	MobaAbilityLibrary._ensure_loaded("res://rules/data/abilities/")
 
 	var fixtures_dir = "res://rules/tests/fixtures/abilities/"
@@ -171,18 +183,35 @@ static func _test_instant_ability_resolves_immediately() -> Array[String]:
 
 	var initial_target_health = target_combatant._current_health
 
-	# Activate self_ability (cast_time = 0) - it's a self-targeted ability, so use actor as target
-	var context = MobaCastContext.new(actor, actor)
+	# power_strike is targeted with cast_time = 0.0 and base_damage = 100.0, so
+	# "resolved instantly" is observable as damage rather than merely assumed.
+	# self_ability would deal none and could not tell resolution from a no-op.
+	var context = MobaCastContext.new(actor, target)
 
-	var result = MobaAbilityCaster.new().activate(&"self_ability", context)
+	var result = MobaAbilityCaster.new().activate(&"power_strike", context)
 	if not result.success:
 		violations.append("instant_ability: activation should succeed, got %s" % result.reason)
 		return violations
 
-	# For self_ability (self-targeted, no damage), verify it resolves
-	# instantly without entering ABILITY_CAST
-	# self_ability has cast_time = 0, so it should not enter ABILITY_CAST state
-	# We can verify this by checking no cast is in progress after activation
+	# Resolution happens on activation: damage lands with no tick() at all.
+	if is_equal_approx(target_combatant._current_health, initial_target_health):
+		violations.append(
+			(
+				"instant_ability: damage should apply immediately, health still %f"
+				% target_combatant._current_health
+			)
+		)
+
+	# AC 2: an instant ability never enters ABILITY_CAST.
+	if state_machine.current_state == MobaState.ABILITY_CAST:
+		violations.append(
+			(
+				"instant_ability: should never enter ABILITY_CAST, got state %d"
+				% state_machine.current_state
+			)
+		)
+
+	# ...and leaves nothing for the cast tracker to resolve or cancel.
 	if combatant.is_casting():
 		violations.append("instant_ability: should not have in-progress cast for instant ability")
 
@@ -571,13 +600,28 @@ static func _test_resolution_wins_ties() -> Array[String]:
 		violations.append("resolution_wins_ties: cast should resolve at exactly 0.5s")
 		return violations
 
-	# Now call cancel() after resolution - should be a no-op
+	# Now call cancel() after resolution - should be a no-op in BOTH halves of
+	# the outcome: no refund, and no change to the cooldown started at commit.
 	var resource_before_cancel = combatant._current_resource
+	var cooldown_before_cancel = combatant.cooldown_remaining(&"cast_time_ability")
 	combatant.cancel_cast()
 	var resource_after_cancel = combatant._current_resource
+	var cooldown_after_cancel = combatant.cooldown_remaining(&"cast_time_ability")
 
 	if not is_equal_approx(resource_before_cancel, resource_after_cancel):
-		violations.append("resolution_wins_ties: cancel after resolution should be a no-op")
+		violations.append("resolution_wins_ties: cancel after resolution should not refund")
+
+	# Catches a stray cancel_cooldown() on the already-resolved path.
+	if not is_equal_approx(cooldown_before_cancel, cooldown_after_cancel):
+		(
+			violations
+			. append(
+				(
+					"resolution_wins_ties: cancel after resolution should not touch the cooldown, %f -> %f"
+					% [cooldown_before_cancel, cooldown_after_cancel]
+				)
+			)
+		)
 
 	return violations
 
