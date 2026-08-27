@@ -959,10 +959,13 @@ static func _test_channel_break_via_cancel() -> Array[String]:
 
 	var resource_after_break = combatant._current_resource
 	if not is_equal_approx(resource_after_break, resource_after_commit):
-		violations.append(
-			(
-				"channel_break_cancel: resource should not be refunded on channel break, expected %f, got %f"
-				% [resource_after_commit, resource_after_break]
+		(
+			violations
+			. append(
+				(
+					"channel_break_cancel: resource should not be refunded on channel break, expected %f, got %f"
+					% [resource_after_commit, resource_after_break]
+				)
 			)
 		)
 
@@ -1017,7 +1020,9 @@ static func _test_hard_cc_breaks_channel() -> Array[String]:
 
 	var cooldown_after_cc = combatant._cooldowns.remaining(&"suppressing_fire")
 	if not is_equal_approx(cooldown_after_cc, cooldown_after_commit):
-		violations.append("hard_cc_break_channel: cooldown should still be running after CC interrupt")
+		violations.append(
+			"hard_cc_break_channel: cooldown should still be running after CC interrupt"
+		)
 
 	if combatant.is_channeling():
 		violations.append("hard_cc_break_channel: channel should be broken by CC interrupt")

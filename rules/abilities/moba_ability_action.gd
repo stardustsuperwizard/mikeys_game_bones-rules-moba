@@ -104,9 +104,7 @@ func execute() -> ActionResult:
 
 		# Start the channel: ticks (including the first tick at t = 0) will be applied
 		# via tick(). Like the cast path, guard against a freed target.
-		var channel_target: Node = (
-			resolved_target if is_instance_valid(resolved_target) else null
-		)
+		var channel_target: Node = resolved_target if is_instance_valid(resolved_target) else null
 		combatant.start_channel(ability_id, ability, channel_target, ability.channel_duration)
 	else:
 		# Instant ability: steps 8-9 run now, through the same resolve() the

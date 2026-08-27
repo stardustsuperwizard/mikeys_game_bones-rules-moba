@@ -192,9 +192,7 @@ func _apply_channel_break_outcome(ability_id: StringName, ability: MobaAbility) 
 
 			# Also remove from target if it has a combatant
 			var resolved_target = (
-				_channel_in_progress.resolved_target
-				if _channel_in_progress != null
-				else null
+				_channel_in_progress.resolved_target if _channel_in_progress != null else null
 			)
 			if resolved_target != null and is_instance_valid(resolved_target):
 				var target_combatant := (
