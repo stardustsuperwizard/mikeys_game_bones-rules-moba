@@ -44,7 +44,6 @@ const _UNIMPLEMENTED_TYPE_ABILITIES: Dictionary = {
 	&"ground_ability": "GROUND",
 	&"area_ability": "AREA",
 	&"toggle_ability": "TOGGLE",
-	&"channeled_ability": "CHANNELED",
 }
 
 
