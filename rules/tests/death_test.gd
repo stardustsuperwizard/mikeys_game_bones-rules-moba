@@ -99,20 +99,34 @@ static func _test_death_fires_once() -> Array[String]:
 	combatant.add_to_group("test")
 
 	# Apply lethal damage
-	var damage = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	combatant.apply_damage(damage)
 
 	if state_machine.current_state != MobaState.DEAD:
-		violations.append("death_fires_once: expected state DEAD, got %d" % state_machine.current_state)
+		violations.append(
+			"death_fires_once: expected state DEAD, got %d" % state_machine.current_state
+		)
 
 	# Apply lethal damage again - should be refused
-	var damage2 = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var damage2 = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	var health_before = combatant.current_health
 	combatant.apply_damage(damage2)
 	var health_after = combatant.current_health
 
 	if health_before != health_after:
-		violations.append("death_fires_once: second lethal damage should not change health (before=%f, after=%f)" % [health_before, health_after])
+		(
+			violations
+			. append(
+				(
+					"death_fires_once: second lethal damage should not change health (before=%f, after=%f)"
+					% [health_before, health_after]
+				)
+			)
+		)
 
 	parent.queue_free()
 	return violations
@@ -136,21 +150,29 @@ static func _test_dead_refuses_damage() -> Array[String]:
 	parent.add_child(combatant)
 
 	# Kill the combatant
-	var lethal_damage = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var lethal_damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	combatant.apply_damage(lethal_damage)
 
 	# Try to apply damage to dead combatant
 	var health_when_dead = combatant.current_health
-	var damage = MobaDamage.new(10.0, MobaDamage.DamageType.PHYSICAL, combatant, false, 0.0, 0.0, false)
+	var damage = MobaDamage.new(
+		10.0, MobaDamage.DamageType.PHYSICAL, combatant, false, 0.0, 0.0, false
+	)
 
 	# damage_resolved should NOT be emitted
 	var damage_resolved_emitted = false
-	combatant.damage_resolved.connect(func(_raw, _final, _type, _crit, _source): damage_resolved_emitted = true)
+	combatant.damage_resolved.connect(
+		func(_raw, _final, _type, _crit, _source): damage_resolved_emitted = true
+	)
 
 	combatant.apply_damage(damage)
 
 	if combatant.current_health != health_when_dead:
-		violations.append("dead_refuses_damage: health changed when applying damage to dead combatant")
+		violations.append(
+			"dead_refuses_damage: health changed when applying damage to dead combatant"
+		)
 
 	if damage_resolved_emitted:
 		violations.append("dead_refuses_damage: damage_resolved was emitted for a dead combatant")
@@ -177,14 +199,18 @@ static func _test_dead_refuses_healing() -> Array[String]:
 	parent.add_child(combatant)
 
 	# Kill the combatant
-	var lethal_damage = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var lethal_damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	combatant.apply_damage(lethal_damage)
 
 	# Try to heal dead combatant
 	var heal_amount = combatant.apply_healing(100.0)
 
 	if heal_amount != 0.0:
-		violations.append("dead_refuses_healing: apply_healing returned %f, expected 0.0" % heal_amount)
+		violations.append(
+			"dead_refuses_healing: apply_healing returned %f, expected 0.0" % heal_amount
+		)
 
 	if combatant.current_health > 0.0:
 		violations.append("dead_refuses_healing: health increased on dead combatant")
@@ -211,7 +237,9 @@ static func _test_dead_refuses_actions() -> Array[String]:
 	parent.add_child(combatant)
 
 	# Kill the combatant
-	var lethal_damage = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var lethal_damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	combatant.apply_damage(lethal_damage)
 
 	# Test move, basic_attack, ability all return false
@@ -264,7 +292,9 @@ static func _test_clear_on_death() -> Array[String]:
 	combatant.apply_crowd_control(cc_spec, combatant)
 
 	# Kill the combatant
-	var lethal_damage = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var lethal_damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	combatant.apply_damage(lethal_damage)
 
 	# Check that modifiers are cleared
@@ -273,7 +303,9 @@ static func _test_clear_on_death() -> Array[String]:
 
 	# Check that shields are cleared
 	if combatant.total_shield() > 0.0:
-		violations.append("clear_on_death: shields not cleared on death (remaining=%f)" % combatant.total_shield())
+		violations.append(
+			"clear_on_death: shields not cleared on death (remaining=%f)" % combatant.total_shield()
+		)
 
 	# Check that CC is cleared
 	if not combatant._active_cc_entries.is_empty():
@@ -292,7 +324,9 @@ static func _test_respawn_restores_state() -> Array[String]:
 	combatant.respawn_policy = _make_test_respawn_policy()
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
+	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(
+		MobaStatBlock.RESOURCE
+	)
 
 	var max_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	var max_resource = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
@@ -312,7 +346,9 @@ static func _test_respawn_restores_state() -> Array[String]:
 	parent.add_child(combatant)
 
 	# Kill the combatant
-	var lethal_damage = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var lethal_damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	combatant.apply_damage(lethal_damage)
 
 	if state_machine.current_state != MobaState.DEAD:
@@ -325,13 +361,28 @@ static func _test_respawn_restores_state() -> Array[String]:
 		violations.append("respawn_restores_state: respawn() returned false")
 
 	if combatant.current_health != max_health:
-		violations.append("respawn_restores_state: health not restored to maximum (expected=%f, actual=%f)" % [max_health, combatant.current_health])
+		violations.append(
+			(
+				"respawn_restores_state: health not restored to maximum (expected=%f, actual=%f)"
+				% [max_health, combatant.current_health]
+			)
+		)
 
 	if combatant.current_resource != max_resource:
-		violations.append("respawn_restores_state: resource not restored to maximum (expected=%f, actual=%f)" % [max_resource, combatant.current_resource])
+		violations.append(
+			(
+				"respawn_restores_state: resource not restored to maximum (expected=%f, actual=%f)"
+				% [max_resource, combatant.current_resource]
+			)
+		)
 
 	if state_machine.current_state != MobaState.IDLE:
-		violations.append("respawn_restores_state: state is not IDLE after respawn (state=%d)" % state_machine.current_state)
+		violations.append(
+			(
+				"respawn_restores_state: state is not IDLE after respawn (state=%d)"
+				% state_machine.current_state
+			)
+		)
 
 	parent.queue_free()
 	return violations
@@ -364,14 +415,21 @@ static func _test_respawn_clears_cooldowns() -> Array[String]:
 	combatant._cooldowns.start(&"test_ability", 5.0, 0.0, 1)
 
 	# Kill and respawn
-	var lethal_damage = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var lethal_damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	combatant.apply_damage(lethal_damage)
 	combatant.respawn()
 
 	# Check that cooldown is cleared
 	var remaining = combatant.get_cooldown_remaining(&"test_ability")
 	if remaining > 0.0:
-		violations.append("respawn_clears_cooldowns: cooldown not cleared after respawn (remaining=%f)" % remaining)
+		violations.append(
+			(
+				"respawn_clears_cooldowns: cooldown not cleared after respawn (remaining=%f)"
+				% remaining
+			)
+		)
 
 	parent.queue_free()
 	return violations
@@ -419,7 +477,9 @@ static func _test_effects_cleared_on_respawn() -> Array[String]:
 	combatant.apply_crowd_control(cc_spec, combatant)
 
 	# Kill and respawn
-	var lethal_damage = MobaDamage.new(1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false)
+	var lethal_damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
 	combatant.apply_damage(lethal_damage)
 	combatant.respawn()
 
@@ -428,7 +488,12 @@ static func _test_effects_cleared_on_respawn() -> Array[String]:
 		violations.append("effects_cleared_on_respawn: modifiers not cleared on respawn")
 
 	if combatant.total_shield() > 0.0:
-		violations.append("effects_cleared_on_respawn: shields not cleared on respawn (remaining=%f)" % combatant.total_shield())
+		violations.append(
+			(
+				"effects_cleared_on_respawn: shields not cleared on respawn (remaining=%f)"
+				% combatant.total_shield()
+			)
+		)
 
 	if not combatant._active_cc_entries.is_empty():
 		violations.append("effects_cleared_on_respawn: CC entries not cleared on respawn")
@@ -467,7 +532,15 @@ static func _test_respawn_on_living_refused() -> Array[String]:
 		violations.append("respawn_on_living_refused: respawn() returned true for living combatant")
 
 	if state_machine.current_state != MobaState.IDLE:
-		violations.append("respawn_on_living_refused: state changed when calling respawn on living combatant (state=%d)" % state_machine.current_state)
+		(
+			violations
+			. append(
+				(
+					"respawn_on_living_refused: state changed when calling respawn on living combatant (state=%d)"
+					% state_machine.current_state
+				)
+			)
+		)
 
 	parent.queue_free()
 	return violations

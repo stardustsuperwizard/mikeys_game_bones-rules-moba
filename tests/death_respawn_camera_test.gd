@@ -42,12 +42,7 @@ func _run() -> void:
 	var combatant := player.get_node_or_null("MobaCombatant") as MobaCombatant
 	var state_machine := player.get_node_or_null("MobaStateMachine") as MobaStateMachine
 	if body == null or combatant == null or state_machine == null:
-		_fail(
-			(
-				"setup: body=%s combatant=%s state_machine=%s"
-				% [body, combatant, state_machine]
-			)
-		)
+		_fail("setup: body=%s combatant=%s state_machine=%s" % [body, combatant, state_machine])
 		return _finish()
 
 	if camera._target != body:
@@ -100,10 +95,7 @@ func _run() -> void:
 	var camera_to_pivot := (pivot - camera.global_position).length()
 	if camera_to_pivot > camera.max_distance + 1.0:
 		_fail(
-			(
-				"respawn: camera is not framing the respawned target (distance=%.2f)"
-				% camera_to_pivot
-			)
+			"respawn: camera is not framing the respawned target (distance=%.2f)" % camera_to_pivot
 		)
 	else:
 		print("PASS respawn -> camera target survives and keeps framing the player")
