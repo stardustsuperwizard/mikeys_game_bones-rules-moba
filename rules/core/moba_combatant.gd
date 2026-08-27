@@ -37,77 +37,6 @@ const _EFFECT_CONTAINER_NAME := "MobaEffectContainer"
 ## Positive floor applied to attack_speed after modifiers.
 const _MINIMUM_ATTACK_SPEED := 0.01
 
-## The seven hard-CC types that enter/hold CROWD_CONTROLLED. SLOW (a stat-modifier
-## debuff per #219) is deliberately excluded: apply_crowd_control() refuses it.
-const _HARD_CC_TYPES := [
-	MobaCrowdControlSpec.CCType.STUN,
-	MobaCrowdControlSpec.CCType.ROOT,
-	MobaCrowdControlSpec.CCType.SILENCE,
-	MobaCrowdControlSpec.CCType.DISARM,
-	MobaCrowdControlSpec.CCType.FEAR,
-	MobaCrowdControlSpec.CCType.TAUNT,
-	MobaCrowdControlSpec.CCType.BLIND,
-]
-
-## The three displacement types: one-shot forced moves via _apply_displacement(),
-## never subject to the hard-CC max(remaining, new) stacking rule (#221).
-const _DISPLACEMENT_TYPES := [
-	MobaCrowdControlSpec.CCType.KNOCKBACK,
-	MobaCrowdControlSpec.CCType.PULL,
-	MobaCrowdControlSpec.CCType.KNOCK_UP,
-]
-
-## Actions gated by active hard-CC entries in can_perform_action().
-const _CC_GATED_ACTIONS := [&"move", &"basic_attack", &"ability"]
-
-
-## Internal entry for an active crowd control effect.
-class _CCEntry:
-	var type: int  # CCType enum value
-	var remaining: float  # Time left in seconds
-	var source: MobaCombatant  # The combatant who applied this CC
-	var spec: MobaCrowdControlSpec  # The effect spec (carries magnitude for BLIND/SLOW)
-
-	func _init(
-		p_type: int, p_remaining: float, p_source: MobaCombatant, p_spec: MobaCrowdControlSpec
-	) -> void:
-		type = p_type
-		remaining = p_remaining
-		source = p_source
-		spec = p_spec
-
-
-## Internal entry for an active displacement effect (KNOCKBACK, PULL, KNOCK_UP).
-class _DisplacementEntry:
-	var type: int  # CCType enum value (KNOCKBACK, PULL, or KNOCK_UP)
-	var remaining: float  # Time left in seconds
-	var source: MobaCombatant  # The combatant who applied this displacement
-	var spec: MobaCrowdControlSpec  # The effect spec
-	var direction: Vector3  # The direction to move (normalized)
-	var speed: float  # The speed in units per second
-	var queued_effect: MobaCrowdControlSpec  # Optional follow-up effect (for KNOCK_UP)
-	var queued_effect_source: MobaCombatant  # Source for the queued effect
-
-	func _init(
-		p_type: int,
-		p_remaining: float,
-		p_source: MobaCombatant,
-		p_spec: MobaCrowdControlSpec,
-		p_direction: Vector3,
-		p_speed: float,
-		p_queued_effect: MobaCrowdControlSpec = null,
-		p_queued_effect_source: MobaCombatant = null,
-	) -> void:
-		type = p_type
-		remaining = p_remaining
-		source = p_source
-		spec = p_spec
-		direction = p_direction
-		speed = p_speed
-		queued_effect = p_queued_effect
-		queued_effect_source = p_queued_effect_source
-
-
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
 
 ## Registers the loadout's action abilities as soon as it is assigned, so a
@@ -155,12 +84,9 @@ var _current_resource: float = 0.0
 var _cooldowns: MobaCooldowns = MobaCooldowns.new()
 var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
 var _effect_container: MobaEffectContainer = null
-## Active crowd control entries keyed by CCType. Maps int (CCType) to _CCEntry.
-## Multiple entries of different types can exist simultaneously; only one per type.
-var _active_cc_entries: Dictionary = {}
-## Active displacement entry (KNOCKBACK, PULL, or KNOCK_UP). Only one displacement
-## can be active at a time. null when no displacement is active.
-var _active_displacement: _DisplacementEntry = null
+## Crowd control ledger: hard-CC entries and the active displacement.
+## Created on first use, like the trackers below.
+var _crowd_control_tracker: MobaCrowdControlTracker = null
 ## Per-stat cache of the modifier bonuses (flat, percent), NOT the final
 ## value: the base is always re-read live from _runtime_stat_block so a
 ## direct mutation of the runtime stat block (as several existing test
@@ -460,8 +386,7 @@ func revive_state() -> bool:
 func clear_all_active_effects() -> void:
 	get_effect_container().clear_all()
 	_get_shield_tracker().clear()
-	_active_cc_entries.clear()
-	_active_displacement = null
+	_get_crowd_control_tracker().clear()
 
 
 ## Restore health and resource to maximum. Used by MobaDeathHandler.respawn().
@@ -569,77 +494,43 @@ func apply_stat_modifier(modifier: MobaStatModifier, source_ability_id: StringNa
 	return get_effect_container().apply_modifier(modifier, source_ability_id)
 
 
+## The crowd control ledger for this combatant, created on first use.
+func _get_crowd_control_tracker() -> MobaCrowdControlTracker:
+	if _crowd_control_tracker == null:
+		_crowd_control_tracker = MobaCrowdControlTracker.new(self)
+	return _crowd_control_tracker
+
+
 ## Apply crowd control to this combatant from a source.
 ##
-## Routes the three displacement types (KNOCKBACK/PULL/KNOCK_UP) to
-## _apply_displacement() and the seven hard-CC types (STUN/ROOT/SILENCE/DISARM/
-## FEAR/TAUNT/BLIND) to _apply_hard_cc(). SLOW is a stat-modifier debuff (#219)
-## and any other type is refused. Refuses outright if DEAD (terminal per #25).
+## Routes the three displacement types (KNOCKBACK/PULL/KNOCK_UP) and the seven
+## hard-CC types (STUN/ROOT/SILENCE/DISARM/FEAR/TAUNT/BLIND) through
+## MobaCrowdControlTracker. SLOW is a stat-modifier debuff (#219) and any other
+## type is refused. Refuses outright if DEAD (terminal per #25).
 ##
 ## Both paths respect affected_by_tenacity via MobaFormulas.crowd_control_duration().
 ## Hard CC tracks per-CCType entries under the max(remaining, new_duration) rule
 ## and lives in CROWD_CONTROLLED; displacement is a one-shot forced move that is
-## never subject to that stacking rule -- see _apply_displacement() and
-## _apply_hard_cc() for the rest of each path's contract.
+## never subject to that stacking rule -- see MobaCrowdControlTracker for the
+## rest of each path's contract.
 func apply_crowd_control(spec: MobaCrowdControlSpec, source: MobaCombatant) -> void:
 	if not is_alive():
 		return
 
+	_get_crowd_control_tracker().apply(spec, source)
+
+
+## Cancel an in-progress cast or channel when hard CC lands, if the ability in
+## progress declares itself cancellable_by_hard_cc.
+##
+## Called by MobaCrowdControlTracker before it applies a hard-CC entry. The
+## tracker owns the CC ledger, but reaching into the cast and channel trackers
+## is this combatant's business -- every other extracted tracker talks to it
+## through its public methods only (see MobaDeathHandler), so the interrupt
+## stays here behind one seam rather than becoming a second way in.
+func interrupt_for_hard_crowd_control() -> void:
 	var state_machine := get_state_machine()
 
-	if spec.type in _DISPLACEMENT_TYPES:
-		_apply_displacement(spec, source, state_machine)
-	elif spec.type in _HARD_CC_TYPES:
-		_apply_hard_cc(spec, source, state_machine)
-	# SLOW and any unrecognized type are refused.
-
-
-## Apply a displacement crowd control effect (KNOCKBACK, PULL, KNOCK_UP).
-##
-## Replaces any existing displacement outright (last write wins; unlike hard CC,
-## displacement is never subject to the max(remaining, new) stacking rule since
-## it resolves as a one-shot forced move, not a held duration).
-##
-## spec.magnitude is a validated 0.0-1.0 fraction (rules/tools/validate_ability_data.gd),
-## the same "fraction of full effect" semantics SLOW already applies to movement_speed.
-## Here it is a fraction of the body's own ActorBody3D.SPEED, so a 0.0 magnitude
-## means no forced movement rather than an unexplained default speed.
-##
-## KNOCK_UP additionally enters AIRBORNE with cause KNOCK_UP. KNOCKBACK/PULL
-## instead interrupt a "displacement_only" state (currently only DASHING) by
-## cutting it short into IDLE -- that state leaving is the interrupt itself,
-## since only displacement is ever accepted against that policy (#220).
-func _apply_displacement(
-	spec: MobaCrowdControlSpec, source: MobaCombatant, state_machine: MobaStateMachine
-) -> void:
-	var final_duration := spec.duration
-	if spec.affected_by_tenacity:
-		var tenacity := get_stat(MobaStatBlock.TENACITY)
-		final_duration = MobaFormulas.crowd_control_duration(spec.duration, tenacity)
-
-	var away := spec.type != MobaCrowdControlSpec.CCType.PULL
-	var direction := _compute_displacement_direction(source, away)
-	var speed := spec.magnitude * ActorBody3D.SPEED
-
-	_active_displacement = _DisplacementEntry.new(
-		spec.type, final_duration, source, spec, direction, speed
-	)
-
-	if state_machine == null:
-		return
-
-	if spec.type == MobaCrowdControlSpec.CCType.KNOCK_UP:
-		state_machine.try_enter(
-			MobaState.AIRBORNE, final_duration, MobaState.AirborneCause.KNOCK_UP
-		)
-	elif state_machine.hard_cc_policy() == &"displacement_only":
-		state_machine.try_enter(MobaState.IDLE)
-
-
-## Apply a hard crowd control effect (STUN, ROOT, SILENCE, DISARM, FEAR, TAUNT, BLIND).
-func _apply_hard_cc(
-	spec: MobaCrowdControlSpec, source: MobaCombatant, state_machine: MobaStateMachine
-) -> void:
 	# If we're in ABILITY_CAST and the current ability is cancellable_by_hard_cc,
 	# cancel the cast before applying the CC.
 	if state_machine != null and state_machine.current_state == MobaState.ABILITY_CAST:
@@ -653,54 +544,6 @@ func _apply_hard_cc(
 		var channeling := _get_channel_tracker()
 		if channeling.is_channeling() and channeling.current_ability().cancellable_by_hard_cc:
 			break_channel()
-
-	# Consult state machine policy for hard-CC types
-	var policy := state_machine.hard_cc_policy() if state_machine != null else &"no"
-	if policy == &"no" or policy == &"displacement_only":
-		return
-
-	# Enter CROWD_CONTROLLED (durationless state) if not already there
-	# "yes" and "breaks_channel" both permit entry
-	if state_machine != null:
-		if state_machine.current_state != MobaState.CROWD_CONTROLLED:
-			state_machine.try_enter(MobaState.CROWD_CONTROLLED)
-
-	# Compute final duration
-	var final_duration := spec.duration
-	if spec.affected_by_tenacity:
-		var tenacity := get_stat(MobaStatBlock.TENACITY)
-		final_duration = MobaFormulas.crowd_control_duration(spec.duration, tenacity)
-
-	# Track the entry (max(remaining, new_duration) rule for same CCType)
-	var cc_type := spec.type
-	if cc_type in _active_cc_entries:
-		var existing_entry = _active_cc_entries[cc_type]
-		existing_entry.remaining = maxf(existing_entry.remaining, final_duration)
-		existing_entry.source = source
-		existing_entry.spec = spec
-	else:
-		var new_entry = _CCEntry.new(cc_type, final_duration, source, spec)
-		_active_cc_entries[cc_type] = new_entry
-
-
-## Compute a normalized displacement direction between this combatant and source:
-## away=true points from source to this (KNOCKBACK/KNOCK_UP), away=false points
-## from this to source (PULL). Falls back to Vector3.BACK/FORWARD respectively
-## when either position cannot be determined or the two positions coincide.
-func _compute_displacement_direction(source: MobaCombatant, away: bool) -> Vector3:
-	var default := Vector3.BACK if away else Vector3.FORWARD
-	var this_pos = _get_parent_position(self)
-	var source_pos = _get_parent_position(source)
-
-	if this_pos == null or source_pos == null:
-		return default
-
-	var delta: Vector3 = (
-		(this_pos as Vector3) - (source_pos as Vector3)
-		if away
-		else (source_pos as Vector3) - (this_pos as Vector3)
-	)
-	return delta.normalized() if delta.length() > 0.0 else default
 
 
 ## Query whether the combatant can perform an action right now, accounting for active crowd control.
@@ -719,54 +562,46 @@ func can_perform_action(action: StringName) -> bool:
 	if state_machine == null:
 		return false
 
-	if state_machine.current_state == MobaState.CROWD_CONTROLLED and action in _CC_GATED_ACTIONS:
-		return not _active_cc_blocks(action)
+	var crowd_control := _get_crowd_control_tracker()
+	var gated := crowd_control.gates_action(action)
 
-	if action in _CC_GATED_ACTIONS and not _active_cc_entries.is_empty():
-		return state_machine.can(action) and not _active_cc_blocks(action)
+	if state_machine.current_state == MobaState.CROWD_CONTROLLED and gated:
+		return not crowd_control.blocks_action(action)
+
+	if gated and not crowd_control.is_empty():
+		return state_machine.can(action) and not crowd_control.blocks_action(action)
 
 	return state_machine.can(action)
-
-
-## Whether any active hard-CC entry blocks `action`. Only called for the
-## CC-gated actions (move/basic_attack/ability) with at least one active entry.
-func _active_cc_blocks(action: StringName) -> bool:
-	var blocked := false
-	match action:
-		&"move":
-			for cc_entry in _active_cc_entries.values():
-				blocked = blocked or MobaCrowdControl.blocks_move(cc_entry.type)
-		&"basic_attack":
-			for cc_entry in _active_cc_entries.values():
-				blocked = blocked or MobaCrowdControl.blocks_basic_attack(cc_entry.type)
-		&"ability":
-			for cc_entry in _active_cc_entries.values():
-				blocked = blocked or MobaCrowdControl.blocks_ability(cc_entry.type)
-	return blocked
 
 
 ## Check if this combatant currently has an active crowd control entry of a given type.
 ## Returns true if the type is active, false otherwise.
 func has_crowd_control(cc_type: int) -> bool:
-	return cc_type in _active_cc_entries
+	return _get_crowd_control_tracker().has(cc_type)
+
+
+## Whether any hard-CC entry at all is active, for read-only inspection
+## (e.g. tests asserting that death cleared crowd control).
+func has_any_crowd_control() -> bool:
+	return not _get_crowd_control_tracker().is_empty()
 
 
 ## Get the source combatant of an active crowd control entry.
 ## Returns the source MobaCombatant, or null if the type is not active.
 func get_crowd_control_source(cc_type: int) -> MobaCombatant:
-	if cc_type not in _active_cc_entries:
-		return null
-	var entry = _active_cc_entries[cc_type]
-	return entry.source
+	return _get_crowd_control_tracker().get_source(cc_type)
 
 
 ## Get the spec of an active crowd control entry.
 ## Returns the MobaCrowdControlSpec, or null if the type is not active.
 func get_crowd_control_spec(cc_type: int) -> MobaCrowdControlSpec:
-	if cc_type not in _active_cc_entries:
-		return null
-	var entry = _active_cc_entries[cc_type]
-	return entry.spec
+	return _get_crowd_control_tracker().get_spec(cc_type)
+
+
+## Whether a displacement (KNOCKBACK, PULL, or KNOCK_UP) is currently active,
+## for read-only inspection (e.g. tests).
+func has_displacement() -> bool:
+	return _get_crowd_control_tracker().has_displacement()
 
 
 ## Forced movement direction/magnitude while a displacement is active, scaled by
@@ -775,10 +610,7 @@ func get_crowd_control_spec(cc_type: int) -> MobaCrowdControlSpec:
 ## over the authored duration, not always base walking speed. Vector3.ZERO
 ## when no displacement is active. A Controller consumes this directly (#222).
 func get_forced_move_direction() -> Vector3:
-	if _active_displacement == null:
-		return Vector3.ZERO
-
-	return _active_displacement.direction * (_active_displacement.speed / ActorBody3D.SPEED)
+	return _get_crowd_control_tracker().forced_move_direction()
 
 
 ## Queue a follow-up crowd control effect applied when a knock-up lands (e.g.
@@ -786,14 +618,7 @@ func get_forced_move_direction() -> Vector3:
 func queue_follow_up_effect_for_displacement(
 	effect_spec: MobaCrowdControlSpec, source: MobaCombatant
 ) -> void:
-	if (
-		_active_displacement == null
-		or _active_displacement.type != MobaCrowdControlSpec.CCType.KNOCK_UP
-	):
-		return
-
-	_active_displacement.queued_effect = effect_spec
-	_active_displacement.queued_effect_source = source
+	_get_crowd_control_tracker().queue_follow_up_effect(effect_spec, source)
 
 
 ## Check if the combatant is alive.
@@ -1060,7 +885,7 @@ func tick(delta: float) -> void:
 	_get_shield_tracker().tick(delta)
 
 	# Advance crowd control durations and expire entries
-	_tick_crowd_control(delta)
+	_get_crowd_control_tracker().tick(delta)
 
 	# Advance the sibling state machine and the basic-attack cycle together.
 	# MobaCombatant.tick() is the single driver of MobaStateMachine.tick() for
@@ -1099,46 +924,6 @@ func tick(delta: float) -> void:
 			_update_health()
 
 
-## Advance crowd control durations and expire entries.
-## For hard CC: Returns to IDLE once the last active entry expires.
-## For displacement: Expires displacement when duration is reached, and for KNOCK_UP,
-## applies any queued follow-up effect when transitioning from AIRBORNE to IDLE.
-func _tick_crowd_control(delta: float) -> void:
-	var state_machine := get_state_machine()
-
-	# Advance all hard CC entries
-	for cc_type in _active_cc_entries.keys():
-		var entry = _active_cc_entries[cc_type]
-		entry.remaining -= delta
-		if entry.remaining <= 0.0:
-			_active_cc_entries.erase(cc_type)
-
-	# If no hard CC entries remain, return to IDLE (if we're in CROWD_CONTROLLED)
-	if _active_cc_entries.is_empty() and state_machine != null:
-		if state_machine.current_state == MobaState.CROWD_CONTROLLED:
-			state_machine.try_enter(MobaState.IDLE)
-
-	# Advance displacement entry
-	if _active_displacement != null:
-		_active_displacement.remaining -= delta
-		if _active_displacement.remaining <= 0.0:
-			# Displacement is expiring
-			var was_knock_up := _active_displacement.type == MobaCrowdControlSpec.CCType.KNOCK_UP
-			var queued_effect := _active_displacement.queued_effect
-			var queued_effect_source := _active_displacement.queued_effect_source
-			_active_displacement = null
-
-			# For KNOCK_UP, handle landing logic
-			if was_knock_up and state_machine != null:
-				if state_machine.current_state == MobaState.AIRBORNE:
-					# Transition to IDLE (the state machine handles this)
-					state_machine.try_enter(MobaState.IDLE)
-
-					# Apply any queued follow-up effect on landing
-					if queued_effect != null:
-						apply_crowd_control(queued_effect, queued_effect_source)
-
-
 ## The basic-attack wind-up/recovery cycle for this combatant, created on
 ## first use.
 func _get_basic_attack_cycle() -> MobaBasicAttackCycle:
@@ -1171,10 +956,3 @@ func get_state_machine() -> MobaStateMachine:
 	if parent == null:
 		return null
 	return parent.get_node_or_null("MobaStateMachine") as MobaStateMachine
-
-
-func _get_parent_position(combatant: MobaCombatant) -> Variant:
-	var parent := combatant.get_parent()
-	if parent == null:
-		return null
-	return parent.get("global_position")

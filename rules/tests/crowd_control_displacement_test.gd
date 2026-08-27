@@ -178,7 +178,7 @@ static func _test_knockback_honors_affected_by_tenacity_false() -> Array[String]
 	# We can verify this by checking that the displacement is still active after 0.99 seconds
 	target.tick(0.99)
 
-	if target._active_displacement == null:
+	if not target.has_displacement():
 		(
 			violations
 			. append(
@@ -188,7 +188,7 @@ static func _test_knockback_honors_affected_by_tenacity_false() -> Array[String]
 
 	# After 1.01 seconds, it should expire
 	target.tick(0.02)
-	if target._active_displacement != null:
+	if target.has_displacement():
 		violations.append(
 			"knockback_honors_affected_by_tenacity_false: displacement should have expired at 1.01s"
 		)
@@ -223,7 +223,7 @@ static func _test_knockback_honors_affected_by_tenacity_true() -> Array[String]:
 	# Duration should be reduced to 0.5 seconds
 	# Tick 0.49 seconds - should still be active
 	target.tick(0.49)
-	if target._active_displacement == null:
+	if not target.has_displacement():
 		(
 			violations
 			. append(
@@ -233,7 +233,7 @@ static func _test_knockback_honors_affected_by_tenacity_true() -> Array[String]:
 
 	# Tick 0.02 more seconds (0.51 total) - should expire
 	target.tick(0.02)
-	if target._active_displacement != null:
+	if target.has_displacement():
 		violations.append(
 			(
 				"knockback_honors_affected_by_tenacity_true: displacement should have expired at "
@@ -272,7 +272,7 @@ static func _test_displacement_interrupts_dashing() -> Array[String]:
 	target.apply_crowd_control(spec, source)
 
 	# Knockback should be applied (displacement is accepted against displacement_only policy)
-	if target._active_displacement == null:
+	if not target.has_displacement():
 		violations.append("displacement_interrupts_dashing: knockback should be applied")
 
 	# DASHING itself should be interrupted -- displacement is the one thing that
