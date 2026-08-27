@@ -227,17 +227,56 @@ static func _test_cancel_no_op_when_no_cast_in_progress() -> Array[String]:
 	_ensure_all_test_abilities_loaded()
 	var test_actor = _create_test_actor()
 	var actor = test_actor["actor"]
-	var combatant = test_actor["combatant"]
+	var combatant := test_actor["combatant"] as MobaCombatant
 
-	# Call cancel with nothing in progress - should not error
+	var initial_resource = combatant._current_resource
+	var initial_cooldown = combatant.get_cooldown_remaining(&"cast_time_ability")
+
+	# Call cancel with nothing in progress via the Actor dispatch branch -
+	# should not error, and must not mutate resource, cooldown, or casting state.
 	MobaAbilityCaster.new().cancel(actor)
 	MobaAbilityCaster.new().cancel(actor)  # Call again to ensure it's safe
 
-	# Also test with MobaCastContext
+	if combatant.is_casting():
+		violations.append("cancel_no_op: should not be casting after a speculative cancel")
+
+	if not is_equal_approx(combatant._current_resource, initial_resource):
+		(
+			violations
+			. append(
+				(
+					"cancel_no_op: resource should be unchanged by a speculative cancel, expected %f, got %f"
+					% [initial_resource, combatant._current_resource]
+				)
+			)
+		)
+
+	if not is_equal_approx(
+		combatant.get_cooldown_remaining(&"cast_time_ability"), initial_cooldown
+	):
+		violations.append("cancel_no_op: cooldown should be unchanged by a speculative cancel")
+
+	# Also test with MobaCastContext - the other dispatch branch
 	var context = MobaCastContext.new(actor, null)
 	MobaAbilityCaster.new().cancel(context)
 
-	# If we get here without crashing, the test passes
+	if combatant.is_casting():
+		violations.append(
+			"cancel_no_op: should not be casting after a speculative cancel via context"
+		)
+
+	if not is_equal_approx(combatant._current_resource, initial_resource):
+		violations.append(
+			"cancel_no_op: resource should be unchanged by a speculative cancel via context"
+		)
+
+	if not is_equal_approx(
+		combatant.get_cooldown_remaining(&"cast_time_ability"), initial_cooldown
+	):
+		violations.append(
+			"cancel_no_op: cooldown should be unchanged by a speculative cancel via context"
+		)
+
 	return violations
 
 
@@ -285,8 +324,9 @@ static func _test_on_cancel_full_refund() -> Array[String]:
 	if cooldown_after_commit <= 0.0:
 		violations.append("full_refund: cooldown should be started at commit")
 
-	# Cancel the cast
-	combatant.cancel_cast()
+	# Cancel the cast through the public API this task adds, routed via the
+	# Actor dispatch branch of MobaAbilityCaster.cancel().
+	MobaAbilityCaster.new().cancel(actor)
 
 	var resource_after_cancel = combatant._current_resource
 	if not is_equal_approx(resource_after_cancel, initial_resource):
@@ -348,8 +388,9 @@ static func _test_on_cancel_partial_refund() -> Array[String]:
 	if not is_equal_approx(resource_after_commit, expected_after_commit):
 		violations.append("partial_refund: resource should be spent at commit")
 
-	# Cancel the cast
-	combatant.cancel_cast()
+	# Cancel the cast through the public API this task adds, routed via the
+	# MobaCastContext dispatch branch of MobaAbilityCaster.cancel().
+	MobaAbilityCaster.new().cancel(context)
 
 	var resource_after_cancel = combatant._current_resource
 	var expected_after_cancel = expected_after_commit + (40.0 * 0.5)  # Refund 50%
@@ -748,6 +789,39 @@ static func _test_cast_target_freed_during_commit() -> Array[String]:
 	if combatant.is_casting():
 		violations.append(
 			"cast_target_freed_during_commit: cast should be finished after the resolving tick"
+		)
+
+	# Control case: a target that survives the same commit -> resolve path must
+	# actually take damage on the resolving tick. Without this, the freed-target
+	# assertions above cannot distinguish "resolution no-opped correctly on the
+	# freed target" from "resolution silently faulted and returned before doing
+	# anything" -- both look identical from the freed-target case alone.
+	var control_wrapper = _create_test_actor()
+	var control_actor = control_wrapper["actor"]
+	var control_combatant := control_wrapper["combatant"] as MobaCombatant
+	var control_target = _create_target_with_combatant()
+	var control_target_combatant = control_target.get_node("MobaCombatant") as MobaCombatant
+	var control_initial_health = control_target_combatant._current_health
+
+	var control_context = MobaCastContext.new(control_actor, control_target)
+	var control_result = MobaAbilityCaster.new().activate(&"cast_time_ability", control_context)
+	if not control_result.success:
+		violations.append(
+			(
+				"cast_target_freed_during_commit: control activation should succeed, got %s"
+				% control_result.reason
+			)
+		)
+		return violations
+
+	control_combatant.tick(0.5)
+
+	if is_equal_approx(control_target_combatant._current_health, control_initial_health):
+		violations.append(
+			(
+				"cast_target_freed_during_commit: control case with a surviving target should"
+				+ " take damage on resolution, not silently no-op"
+			)
 		)
 
 	return violations
