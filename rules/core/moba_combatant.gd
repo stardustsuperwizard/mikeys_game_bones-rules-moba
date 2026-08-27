@@ -175,6 +175,10 @@ var _stat_cache: Dictionary = {}
 ## not _ready() has run. Advanced from tick(), like the MobaCooldowns ledger.
 var _cast_tracker: MobaCastTracker = null
 
+## In-progress channel ledger. Created on first use so it is available whether or
+## not _ready() has run. Advanced from tick(), like the MobaCooldowns ledger.
+var _channel_tracker: MobaChannelTracker = null
+
 
 func _ready() -> void:
 	# Duplicate the stat block before any mutation
@@ -536,6 +540,13 @@ func _apply_hard_cc(
 		if casting.is_casting() and casting.current_ability().cancellable_by_hard_cc:
 			cancel_cast()
 
+	# If we're in ABILITY_CHANNEL and the current ability is cancellable_by_hard_cc,
+	# break the channel before applying the CC.
+	if state_machine != null and state_machine.current_state == MobaState.ABILITY_CHANNEL:
+		var channeling := _get_channel_tracker()
+		if channeling.is_channeling() and channeling.current_ability().cancellable_by_hard_cc:
+			break_channel()
+
 	# Consult state machine policy for hard-CC types
 	var policy := state_machine.hard_cc_policy() if state_machine != null else &"no"
 	if policy == &"no" or policy == &"displacement_only":
@@ -832,8 +843,11 @@ func commit_activate(ability_id: StringName) -> int:
 
 	var ability: MobaAbility = _abilities[ability_id]
 
-	# Spend resource
-	spend_resource(ability.resource_cost)
+	# For a channeled ability, resource_cost is the per-tick cost: each tick
+	# (including the first, at t = 0) spends it independently, so commit must
+	# not also spend it here or the first tick would be charged twice.
+	if ability.channel_duration <= 0.0:
+		spend_resource(ability.resource_cost)
 
 	# Start cooldown with current haste
 	var haste: float = get_stat(MobaStatBlock.ABILITY_HASTE)
@@ -874,6 +888,32 @@ func cancel_cooldown(ability_id: StringName) -> void:
 	_cooldowns.cancel(ability_id)
 
 
+## The in-progress channel ledger for this combatant, created on first use.
+func _get_channel_tracker() -> MobaChannelTracker:
+	if _channel_tracker == null:
+		_channel_tracker = MobaChannelTracker.new(self)
+	return _channel_tracker
+
+
+## True while this combatant has a channel in progress.
+func is_channeling() -> bool:
+	return _get_channel_tracker().is_channeling()
+
+
+## Start a channel that will tick according to channel_tick_interval via tick().
+## Called by MobaAbilityAction when an ability with channel_duration > 0 is activated.
+func start_channel(
+	ability_id: StringName, ability: MobaAbility, resolved_target: Node, channel_duration: float
+) -> void:
+	_get_channel_tracker().start(ability_id, ability, resolved_target, channel_duration)
+
+
+## Break an in-progress channel and apply the on_channel_break outcome.
+## A no-op if no channel is in progress.
+func break_channel() -> void:
+	_get_channel_tracker().break_channel()
+
+
 ## Advance time by delta seconds.
 ## Accumulates resource and health regeneration continuously (not gated by one-second intervals).
 ## Health regeneration clamps at maximum and emits health_changed.
@@ -885,6 +925,10 @@ func tick(delta: float) -> void:
 	# Resolution wins ties: if a cast reaches resolution during this tick(),
 	# it resolves synchronously before anything else observes it as in progress.
 	_get_cast_tracker().tick(delta)
+
+	# Advance in-progress channel and apply ticks at their interval.
+	# Channels complete when their duration reaches zero.
+	_get_channel_tracker().tick(delta)
 
 	# Advance cooldowns
 	_cooldowns.tick(delta)

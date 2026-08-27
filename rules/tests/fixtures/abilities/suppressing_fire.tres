@@ -1,0 +1,48 @@
+[gd_resource type="Resource" script_class="MobaAbility" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://rules/abilities/moba_ability.gd" id="1"]
+[ext_resource type="Script" path="res://rules/effects/moba_stat_modifier.gd" id="2"]
+
+[sub_resource type="Resource" script_class="MobaStatModifier" id="3"]
+script = ExtResource("2")
+stat = "movement_speed"
+amount = -0.3
+is_percentage = true
+duration = 2.0
+stacking = 0
+max_stacks = 1
+
+[resource]
+script = ExtResource("1")
+id = "suppressing_fire"
+name = "Suppressing Fire"
+discipline = 0
+targeting_type = 6
+aim_assist = 3
+aim_cone_degrees = 0.0
+magnetism = 0.0
+acquisition_range = 0.0
+damage_type = 0
+base_damage = 20.0
+scaling = {}
+resource_cost = 10.0
+cooldown = 12.0
+cast_time = 0.0
+channel_duration = 2.5
+channel_tick_interval = 0.25
+range = 8.0
+projectile_speed = 0.0
+area_radius = 0.0
+duration = 0.0
+charges = 1
+usable_in_air = false
+touch_viable = true
+crowd_control = null
+buffs = []
+debuffs = [SubResource("3")]
+max_stacks = 1
+cancellable_by_movement = true
+cancellable_by_hard_cc = true
+refund_resource_on_cancel = 0.5
+on_cancel = 1
+on_channel_break = 0

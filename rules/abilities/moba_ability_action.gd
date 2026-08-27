@@ -80,8 +80,10 @@ func execute() -> ActionResult:
 	if commit_failure != &"":
 		return ActionResult.new(false, commit_failure)
 
-	# Step 7: For cast_time > 0, defer damage/effects to resolution time.
-	# For cast_time == 0, apply immediately (instant abilities).
+	# Step 7: Route based on ability timing type.
+	# - cast_time > 0: deferred to ABILITY_CAST, resolve when cast completes
+	# - channel_duration > 0: deferred to ABILITY_CHANNEL, ticks applied repeatedly
+	# - cast_time == 0 and channel_duration == 0: instant, apply immediately
 	if ability.cast_time > 0.0:
 		# Enter ABILITY_CAST state
 		if state_machine != null:
@@ -95,6 +97,15 @@ func execute() -> ActionResult:
 		# and the cast still gets registered so tick()/cancel() have something to act on.
 		var cast_target: Node = resolved_target if is_instance_valid(resolved_target) else null
 		combatant.start_cast(ability_id, ability, cast_target, ability.cast_time)
+	elif ability.channel_duration > 0.0:
+		# Enter ABILITY_CHANNEL state
+		if state_machine != null:
+			state_machine.try_enter(MobaState.ABILITY_CHANNEL, ability.channel_duration)
+
+		# Start the channel: ticks (including the first tick at t = 0) will be applied
+		# via tick(). Like the cast path, guard against a freed target.
+		var channel_target: Node = resolved_target if is_instance_valid(resolved_target) else null
+		combatant.start_channel(ability_id, ability, channel_target, ability.channel_duration)
 	else:
 		# Instant ability: steps 8-9 run now, through the same resolve() the
 		# deferred cast path uses. A target that evaporated between commit
@@ -154,22 +165,29 @@ func _resolve_target(ability: MobaAbility) -> Dictionary:
 		MobaAbility.TargetingType.SELF:
 			return {"target": actor, "failure": &""}
 		MobaAbility.TargetingType.TARGETED:
-			# Targeted abilities require explicit_target
-			if context.explicit_target == null:
-				return {"target": null, "failure": FAILURE_INVALID_TARGET}
-			# Guard against freed/invalid targets
-			if not is_instance_valid(context.explicit_target):
-				return {"target": null, "failure": FAILURE_INVALID_TARGET}
-			# Check range
-			var caster_pos: Vector3 = _get_position(actor)
-			var target_pos: Vector3 = _get_position(context.explicit_target)
-			var distance: float = caster_pos.distance_to(target_pos)
-			if distance > ability.range:
-				return {"target": null, "failure": FAILURE_OUT_OF_RANGE}
-			return {"target": context.explicit_target, "failure": &""}
+			return _resolve_targeted_or_channeled_target(ability)
+		MobaAbility.TargetingType.CHANNELED:
+			return _resolve_targeted_or_channeled_target(ability)
 		_:
 			# All other targeting types not implemented in Batch 1
 			return {"target": null, "failure": FAILURE_TARGETING_NOT_IMPLEMENTED}
+
+
+## Resolve a targeted or channeled ability's target, checking validity and range.
+func _resolve_targeted_or_channeled_target(ability: MobaAbility) -> Dictionary:
+	# Targeted/channeled abilities require explicit_target
+	if context.explicit_target == null:
+		return {"target": null, "failure": FAILURE_INVALID_TARGET}
+	# Guard against freed/invalid targets
+	if not is_instance_valid(context.explicit_target):
+		return {"target": null, "failure": FAILURE_INVALID_TARGET}
+	# Check range
+	var caster_pos: Vector3 = _get_position(actor)
+	var target_pos: Vector3 = _get_position(context.explicit_target)
+	var distance: float = caster_pos.distance_to(target_pos)
+	if distance > ability.range:
+		return {"target": null, "failure": FAILURE_OUT_OF_RANGE}
+	return {"target": context.explicit_target, "failure": &""}
 
 
 ## Commit activation (spend resource and start cooldown).
