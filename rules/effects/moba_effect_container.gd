@@ -57,7 +57,9 @@ class _Entry:
 ## Returns true when the container's state changed, false when the application
 ## was rejected (invalid stat) or was a deliberate no-op (IGNORE while active,
 ## or a weaker REPLACE_IF_STRONGER application).
-func apply_modifier(modifier: MobaStatModifier, source_ability_id: StringName, is_debuff: bool = false) -> bool:
+func apply_modifier(
+	modifier: MobaStatModifier, source_ability_id: StringName, is_debuff: bool = false
+) -> bool:
 	if modifier == null:
 		push_error(
 			"MobaEffectContainer: null modifier from source ability '%s'." % source_ability_id
@@ -216,7 +218,10 @@ static func invalid_stat_message(stat: StringName, source_ability_id: StringName
 
 
 func _make_entry(
-	modifier: MobaStatModifier, source_ability_id: StringName, stat: StringName, is_debuff: bool = false
+	modifier: MobaStatModifier,
+	source_ability_id: StringName,
+	stat: StringName,
+	is_debuff: bool = false
 ) -> _Entry:
 	var entry := _Entry.new()
 	entry.source_ability_id = source_ability_id

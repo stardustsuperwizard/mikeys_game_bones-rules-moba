@@ -12,7 +12,9 @@ signal health_changed(current: float, maximum: float)
 ## Emitted when damage is resolved. Carries both raw (pre-crit, pre-mitigation)
 ## and final (post-mitigation) amounts, plus metadata about the damage event,
 ## and the amount absorbed by shields.
-signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: bool, source, shield_absorbed: float)
+signal damage_resolved(
+	raw: float, final: float, damage_type: int, was_crit: bool, source, shield_absorbed: float
+)
 ## Emitted when healing is applied via apply_healing() and not refused.
 ## Carries the actual (post-clamp) amount applied.
 signal healing_applied(amount: float)
@@ -563,7 +565,9 @@ func apply_shield(amount: float, source: StringName, duration: float) -> void:
 ## so this is the one place "is this combatant eligible to receive effects"
 ## is decided, matching apply_damage()/apply_healing()/apply_shield()/
 ## apply_crowd_control()'s existing pattern.
-func apply_stat_modifier(modifier: MobaStatModifier, source_ability_id: StringName, is_debuff: bool = false) -> bool:
+func apply_stat_modifier(
+	modifier: MobaStatModifier, source_ability_id: StringName, is_debuff: bool = false
+) -> bool:
 	if not is_alive():
 		return false
 
@@ -770,14 +774,10 @@ func get_crowd_control_spec(cc_type: int) -> MobaCrowdControlSpec:
 	return entry.spec
 
 
-## Get the remaining duration for an active crowd control entry.
-## Returns the remaining seconds for an active hard-crowd-control entry,
-## or 0.0 when that type is not active.
+## Remaining seconds for an active hard-crowd-control entry, or 0.0 if inactive.
 func get_crowd_control_remaining(cc_type: int) -> float:
-	if cc_type not in _active_cc_entries:
-		return 0.0
-	var entry = _active_cc_entries[cc_type]
-	return entry.remaining
+	var entry = _active_cc_entries.get(cc_type)
+	return entry.remaining if entry != null else 0.0
 
 
 ## Forced movement direction/magnitude while a displacement is active, scaled by

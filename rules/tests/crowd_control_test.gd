@@ -608,7 +608,9 @@ static func _test_crowd_control_remaining_duration() -> Array[String]:
 	source._current_resource = source._runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
 
 	# Before any CC, remaining should be 0.0 for all types
-	if not is_equal_approx(target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN), 0.0):
+	if not is_equal_approx(
+		target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN), 0.0
+	):
 		violations.append("cc_remaining: should be 0.0 when no STUN active")
 
 	# Apply a 2.0 second stun
@@ -622,17 +624,16 @@ static func _test_crowd_control_remaining_duration() -> Array[String]:
 	var remaining_at_start = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN)
 	if not is_equal_approx(remaining_at_start, 2.0):
 		violations.append(
-			(
-				"cc_remaining: STUN remaining should be ~2.0 at start, got %f"
-				% remaining_at_start
-			)
+			"cc_remaining: STUN remaining should be ~2.0 at start, got %f" % remaining_at_start
 		)
 
 	# Advance 0.5 seconds
 	target.tick(0.5)
 
 	# Remaining should now be ~1.5
-	var remaining_after_half_second = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN)
+	var remaining_after_half_second = target.get_crowd_control_remaining(
+		MobaCrowdControlSpec.CCType.STUN
+	)
 	if not is_equal_approx(remaining_after_half_second, 1.5):
 		violations.append(
 			(
@@ -645,7 +646,9 @@ static func _test_crowd_control_remaining_duration() -> Array[String]:
 	target.tick(2.0)
 
 	# After expiry, should be 0.0
-	var remaining_after_expiry = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN)
+	var remaining_after_expiry = target.get_crowd_control_remaining(
+		MobaCrowdControlSpec.CCType.STUN
+	)
 	if not is_equal_approx(remaining_after_expiry, 0.0):
 		violations.append(
 			(
@@ -668,18 +671,10 @@ static func _test_crowd_control_remaining_duration() -> Array[String]:
 	# ROOT should be ~3.0, STUN should be 0.0 (expired)
 	if not is_equal_approx(root_remaining, 3.0):
 		violations.append(
-			(
-				"cc_remaining: newly applied ROOT should be ~3.0, got %f"
-				% root_remaining
-			)
+			"cc_remaining: newly applied ROOT should be ~3.0, got %f" % root_remaining
 		)
 
 	if not is_equal_approx(stun_remaining, 0.0):
-		violations.append(
-			(
-				"cc_remaining: expired STUN should be 0.0, got %f"
-				% stun_remaining
-			)
-		)
+		violations.append("cc_remaining: expired STUN should be 0.0, got %f" % stun_remaining)
 
 	return violations
