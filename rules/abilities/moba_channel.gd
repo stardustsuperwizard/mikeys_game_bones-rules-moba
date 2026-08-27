@@ -139,11 +139,18 @@ func tick(delta: float) -> void:
 		if _channel_in_progress.remaining_time > 0.0:
 			_apply_tick()
 	else:
-		# Discrete ticks at interval
-		while _channel_in_progress.time_since_last_tick >= tick_interval:
+		# Discrete ticks at interval. _apply_tick() breaks the channel (nulling
+		# _channel_in_progress) when the caster runs out of per-tick resource,
+		# so both loop conditions and the post-tick update must re-check it.
+		while (
+			_channel_in_progress != null
+			and _channel_in_progress.time_since_last_tick >= tick_interval
+		):
 			if _channel_in_progress.remaining_time <= 0.0:
 				break
 			_apply_tick()
+			if _channel_in_progress == null:
+				break
 			_channel_in_progress.time_since_last_tick -= tick_interval
 
 	# When the channel reaches its expiry point, clean it up
@@ -157,7 +164,6 @@ func _apply_tick() -> void:
 		return
 
 	var ability := _channel_in_progress.ability
-	var ability_id := _channel_in_progress.ability_id
 	var resolved_target = _channel_in_progress.resolved_target
 
 	# Spend the per-tick resource cost
@@ -192,9 +198,7 @@ func _apply_channel_break_outcome(ability_id: StringName, ability: MobaAbility) 
 
 			# Also remove from target if it has a combatant
 			var resolved_target = (
-				_channel_in_progress.resolved_target
-				if _channel_in_progress != null
-				else null
+				_channel_in_progress.resolved_target if _channel_in_progress != null else null
 			)
 			if resolved_target != null and is_instance_valid(resolved_target):
 				var target_combatant := (

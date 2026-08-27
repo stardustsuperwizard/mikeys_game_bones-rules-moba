@@ -45,6 +45,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_cast_target_freed_during_commit())
 	all_violations.append_array(_test_cataclysm_ability_data())
 	all_violations.append_array(_test_channel_ticks_apply_damage())
+	all_violations.append_array(_test_channel_breaks_when_resource_exhausted())
 	all_violations.append_array(_test_channel_break_via_cancel())
 	all_violations.append_array(_test_hard_cc_breaks_channel())
 	all_violations.append_array(_test_on_channel_break_no_effect_remaining())
@@ -922,6 +923,40 @@ static func _test_channel_ticks_apply_damage() -> Array[String]:
 	return violations
 
 
+## Test: a channel that runs out of per-tick resource mid-tick breaks safely.
+## Regression for a crash where a second tick due in the same tick(delta) call
+## dereferenced the tracker after the first had already broken the channel.
+static func _test_channel_breaks_when_resource_exhausted() -> Array[String]:
+	var violations: Array[String] = []
+
+	_ensure_all_test_abilities_loaded()
+	var test_actor = _create_test_actor()
+	var actor = test_actor["actor"]
+	var combatant = test_actor["combatant"]
+	var target = _create_target_with_combatant()
+
+	# Enough for the tick at activation (10) plus one more (10), but not a
+	# third: tick(0.5) below must break the channel mid-loop, on a tick it can
+	# no longer afford, rather than fault on the one scheduled after it.
+	combatant._current_resource = 25.0
+	var context = MobaCastContext.new(actor, target)
+
+	var result = MobaAbilityCaster.new().activate(&"suppressing_fire", context)
+	if not result.success:
+		violations.append("channel_resource_exhausted: activation should succeed")
+		return violations
+
+	combatant.tick(0.5)
+
+	if combatant.is_channeling():
+		violations.append("channel_resource_exhausted: channel should break when resource runs out")
+
+	if combatant._current_resource < 0.0:
+		violations.append("channel_resource_exhausted: resource should never go negative")
+
+	return violations
+
+
 ## Test: Breaking a channel via cancel() does not refund resource and leaves cooldown running
 static func _test_channel_break_via_cancel() -> Array[String]:
 	var violations: Array[String] = []
@@ -959,10 +994,13 @@ static func _test_channel_break_via_cancel() -> Array[String]:
 
 	var resource_after_break = combatant._current_resource
 	if not is_equal_approx(resource_after_break, resource_after_commit):
-		violations.append(
-			(
-				"channel_break_cancel: resource should not be refunded on channel break, expected %f, got %f"
-				% [resource_after_commit, resource_after_break]
+		(
+			violations
+			. append(
+				(
+					"channel_break_cancel: resource should not be refunded on channel break, expected %f, got %f"
+					% [resource_after_commit, resource_after_break]
+				)
 			)
 		)
 
@@ -1017,7 +1055,9 @@ static func _test_hard_cc_breaks_channel() -> Array[String]:
 
 	var cooldown_after_cc = combatant._cooldowns.remaining(&"suppressing_fire")
 	if not is_equal_approx(cooldown_after_cc, cooldown_after_commit):
-		violations.append("hard_cc_break_channel: cooldown should still be running after CC interrupt")
+		violations.append(
+			"hard_cc_break_channel: cooldown should still be running after CC interrupt"
+		)
 
 	if combatant.is_channeling():
 		violations.append("hard_cc_break_channel: channel should be broken by CC interrupt")
@@ -1115,7 +1155,7 @@ static func _test_on_channel_break_partial_effect_already_applied() -> Array[Str
 	if not target_container.has_modifier(&"partial_effect_channel_test", &"movement_speed"):
 		violations.append("partial_effect: debuff should be applied")
 
-	# Break the channel (which should leave the debuff since on_channel_break = PARTIAL_EFFECT_ALREADY_APPLIED)
+	# Break the channel (should leave the debuff: on_channel_break = PARTIAL_EFFECT_ALREADY_APPLIED)
 	combatant.break_channel()
 
 	if not target_container.has_modifier(&"partial_effect_channel_test", &"movement_speed"):
@@ -1137,28 +1177,20 @@ static func _test_suppressing_fire_ability_data() -> Array[String]:
 
 	if suppressing_fire.id != "suppressing_fire":
 		violations.append("suppressing_fire_data: id should be 'suppressing_fire'")
-
 	if suppressing_fire.targeting_type != MobaAbility.TargetingType.CHANNELED:
 		violations.append("suppressing_fire_data: targeting_type should be CHANNELED")
-
 	if suppressing_fire.damage_type != MobaAbility.DamageType.PHYSICAL:
 		violations.append("suppressing_fire_data: damage_type should be PHYSICAL")
-
 	if not is_equal_approx(suppressing_fire.base_damage, 20.0):
 		violations.append("suppressing_fire_data: base_damage should be 20.0")
-
 	if not is_equal_approx(suppressing_fire.resource_cost, 10.0):
 		violations.append("suppressing_fire_data: resource_cost should be 10.0 per tick")
-
 	if not is_equal_approx(suppressing_fire.cooldown, 12.0):
 		violations.append("suppressing_fire_data: cooldown should be 12.0")
-
 	if not is_equal_approx(suppressing_fire.channel_duration, 2.5):
 		violations.append("suppressing_fire_data: channel_duration should be 2.5")
-
 	if not is_equal_approx(suppressing_fire.channel_tick_interval, 0.25):
 		violations.append("suppressing_fire_data: channel_tick_interval should be 0.25")
-
 	if suppressing_fire.debuffs.size() == 0:
 		violations.append("suppressing_fire_data: should have at least one debuff")
 

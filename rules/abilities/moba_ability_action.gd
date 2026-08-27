@@ -104,9 +104,7 @@ func execute() -> ActionResult:
 
 		# Start the channel: ticks (including the first tick at t = 0) will be applied
 		# via tick(). Like the cast path, guard against a freed target.
-		var channel_target: Node = (
-			resolved_target if is_instance_valid(resolved_target) else null
-		)
+		var channel_target: Node = resolved_target if is_instance_valid(resolved_target) else null
 		combatant.start_channel(ability_id, ability, channel_target, ability.channel_duration)
 	else:
 		# Instant ability: steps 8-9 run now, through the same resolve() the
@@ -166,22 +164,9 @@ func _resolve_target(ability: MobaAbility) -> Dictionary:
 	match ability.targeting_type:
 		MobaAbility.TargetingType.SELF:
 			return {"target": actor, "failure": &""}
-		MobaAbility.TargetingType.TARGETED:
-			# Targeted abilities require explicit_target
-			if context.explicit_target == null:
-				return {"target": null, "failure": FAILURE_INVALID_TARGET}
-			# Guard against freed/invalid targets
-			if not is_instance_valid(context.explicit_target):
-				return {"target": null, "failure": FAILURE_INVALID_TARGET}
-			# Check range
-			var caster_pos: Vector3 = _get_position(actor)
-			var target_pos: Vector3 = _get_position(context.explicit_target)
-			var distance: float = caster_pos.distance_to(target_pos)
-			if distance > ability.range:
-				return {"target": null, "failure": FAILURE_OUT_OF_RANGE}
-			return {"target": context.explicit_target, "failure": &""}
-		MobaAbility.TargetingType.CHANNELED:
-			# Channeled abilities resolve targeting the same way targeted abilities do
+		MobaAbility.TargetingType.TARGETED, MobaAbility.TargetingType.CHANNELED:
+			# Targeted and channeled abilities resolve targeting identically: both
+			# require explicit_target and check ability.range.
 			if context.explicit_target == null:
 				return {"target": null, "failure": FAILURE_INVALID_TARGET}
 			# Guard against freed/invalid targets
