@@ -70,7 +70,7 @@ static func run() -> bool:
 	all_violations.append_array(respawn_on_living_violations)
 
 	# Test 10: Applying CC/shield to an already-dead combatant is refused
-	var dead_refuses_cc_and_shield_violations = _test_dead_refuses_cc_and_shield()
+	var dead_refuses_cc_and_shield_violations = _test_dead_refuses_cc_shield_and_modifier()
 	all_violations.append_array(dead_refuses_cc_and_shield_violations)
 
 	if all_violations.is_empty():
@@ -550,11 +550,12 @@ static func _test_respawn_on_living_refused() -> Array[String]:
 	return violations
 
 
-## Test: Applying crowd control or a shield to an already-dead combatant is
-## refused -- distinct from _test_clear_on_death(), which only checks that
-## pre-existing CC/shields/effects are cleared *at the moment* death fires,
-## not that further attempts to apply them while DEAD are rejected.
-static func _test_dead_refuses_cc_and_shield() -> Array[String]:
+## Test: Applying crowd control, a shield, or a stat-modifying effect to an
+## already-dead combatant is refused -- distinct from _test_clear_on_death(),
+## which only checks that pre-existing CC/shields/effects are cleared *at the
+## moment* death fires, not that further attempts to apply them while DEAD
+## are rejected.
+static func _test_dead_refuses_cc_shield_and_modifier() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant = MobaCombatant.new()
@@ -596,6 +597,23 @@ static func _test_dead_refuses_cc_and_shield() -> Array[String]:
 				% combatant.total_shield()
 			)
 		)
+
+	# Attempt to apply a stat-modifying effect (buff/debuff) to the now-dead combatant
+	var modifier = MobaStatModifier.new()
+	modifier.stat = MobaStatBlock.ATTACK_DAMAGE
+	modifier.amount = 10.0
+	modifier.is_percentage = false
+	modifier.duration = 10.0
+	modifier.stacking = MobaStatModifier.Stacking.REFRESH
+	var applied := combatant.apply_stat_modifier(modifier, &"test_ability")
+
+	if applied:
+		violations.append(
+			"dead_refuses_cc_and_shield: apply_stat_modifier() returned true for a dead combatant"
+		)
+
+	if combatant.get_effect_container().has_modifier(&"test_ability", MobaStatBlock.ATTACK_DAMAGE):
+		violations.append("dead_refuses_cc_and_shield: stat modifier applied to a dead combatant")
 
 	parent.queue_free()
 	return violations

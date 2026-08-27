@@ -551,6 +551,24 @@ func apply_shield(amount: float, source: StringName, duration: float) -> void:
 	_get_shield_tracker().apply(amount, source, duration)
 
 
+## Apply a stat-modifying effect (buff or debuff) to this combatant.
+## Returns false and mutates nothing if the combatant is dead (terminal per
+## #25; a dead combatant's modifiers were already cleared on death and must
+## not come back before respawn()). Otherwise delegates to
+## MobaEffectContainer.apply_modifier() and returns its result.
+##
+## The sole seam callers (e.g. MobaAbilityAction._apply_effects_seam()) use
+## to apply a buff/debuff -- MobaEffectContainer itself stays alive-agnostic
+## so this is the one place "is this combatant eligible to receive effects"
+## is decided, matching apply_damage()/apply_healing()/apply_shield()/
+## apply_crowd_control()'s existing pattern.
+func apply_stat_modifier(modifier: MobaStatModifier, source_ability_id: StringName) -> bool:
+	if not is_alive():
+		return false
+
+	return get_effect_container().apply_modifier(modifier, source_ability_id)
+
+
 ## Apply crowd control to this combatant from a source.
 ##
 ## Routes the three displacement types (KNOCKBACK/PULL/KNOCK_UP) to
