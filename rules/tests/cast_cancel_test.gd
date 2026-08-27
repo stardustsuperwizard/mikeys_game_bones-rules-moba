@@ -129,9 +129,7 @@ static func _test_cast_time_defers_resolution() -> Array[String]:
 	var initial_target_health = target_combatant._current_health
 
 	# Activate cast_time_ability (cast_time = 0.5)
-	var context = MobaCastContext.new()
-	context.caster = actor
-	context.explicit_target = target
+	var context = MobaCastContext.new(actor, target)
 
 	var result = MobaAbilityCaster.new().activate(&"cast_time_ability", context)
 	if not result.success:
@@ -169,9 +167,7 @@ static func _test_instant_ability_resolves_immediately() -> Array[String]:
 	var initial_target_health = target_combatant._current_health
 
 	# Activate self_ability (cast_time = 0) - it's a self-targeted ability, so use actor as target
-	var context = MobaCastContext.new()
-	context.caster = actor
-	context.explicit_target = actor
+	var context = MobaCastContext.new(actor, actor)
 
 	var result = MobaAbilityCaster.new().activate(&"self_ability", context)
 	if not result.success:
@@ -201,8 +197,7 @@ static func _test_cancel_no_op_when_no_cast_in_progress() -> Array[String]:
 	MobaAbilityCaster.new().cancel(actor)  # Call again to ensure it's safe
 
 	# Also test with MobaCastContext
-	var context = MobaCastContext.new()
-	context.caster = actor
+	var context = MobaCastContext.new(actor, null)
 	MobaAbilityCaster.new().cancel(context)
 
 	# If we get here without crashing, the test passes
@@ -226,23 +221,23 @@ static func _test_on_cancel_full_refund() -> Array[String]:
 	ability.cast_time = 1.0
 	ability.charges = 1
 	ability.on_cancel = MobaAbility.OnCancel.FULL_REFUND
+	ability.range = 10.0
 	ability.targeting_type = MobaAbility.TargetingType.TARGETED
 	ability.base_damage = 20.0
 
 	combatant.register_ability(ability)
+	MobaAbilityLibrary._cache[StringName(ability.id)] = ability
 
 	var initial_resource = combatant._current_resource
 	var target = _create_target_with_combatant()
 
 	# Start the cast
-	var context = MobaCastContext.new()
-	context.caster = actor
-	context.explicit_target = target
+	var context = MobaCastContext.new(actor, target)
 
 	var action = MobaAbilityAction.new(actor, &"full_refund_test", context)
 	var result = ActionRunner.run(action)
 	if not result.success:
-		violations.append("full_refund: activation should succeed")
+		violations.append("full_refund: activation should succeed, got failure: %s" % result.reason)
 		return violations
 
 	var resource_after_commit = combatant._current_resource
@@ -287,24 +282,24 @@ static func _test_on_cancel_partial_refund() -> Array[String]:
 	ability.cast_time = 1.0
 	ability.charges = 1
 	ability.on_cancel = MobaAbility.OnCancel.PARTIAL_REFUND
+	ability.range = 10.0
 	ability.refund_resource_on_cancel = 0.5  # Refund 50%
 	ability.targeting_type = MobaAbility.TargetingType.TARGETED
 	ability.base_damage = 20.0
 
 	combatant.register_ability(ability)
+	MobaAbilityLibrary._cache[StringName(ability.id)] = ability
 
 	var initial_resource = combatant._current_resource
 	var target = _create_target_with_combatant()
 
 	# Start the cast
-	var context = MobaCastContext.new()
-	context.caster = actor
-	context.explicit_target = target
+	var context = MobaCastContext.new(actor, target)
 
 	var action = MobaAbilityAction.new(actor, &"partial_refund_test", context)
 	var result = ActionRunner.run(action)
 	if not result.success:
-		violations.append("partial_refund: activation should succeed")
+		violations.append("partial_refund: activation should succeed, got failure: %s" % result.reason)
 		return violations
 
 	var resource_after_commit = combatant._current_resource
@@ -347,23 +342,23 @@ static func _test_on_cancel_no_refund() -> Array[String]:
 	ability.cast_time = 1.0
 	ability.charges = 1
 	ability.on_cancel = MobaAbility.OnCancel.NO_REFUND
+	ability.range = 10.0
 	ability.targeting_type = MobaAbility.TargetingType.TARGETED
 	ability.base_damage = 20.0
 
 	combatant.register_ability(ability)
+	MobaAbilityLibrary._cache[StringName(ability.id)] = ability
 
 	var initial_resource = combatant._current_resource
 	var target = _create_target_with_combatant()
 
 	# Start the cast
-	var context = MobaCastContext.new()
-	context.caster = actor
-	context.explicit_target = target
+	var context = MobaCastContext.new(actor, target)
 
 	var action = MobaAbilityAction.new(actor, &"no_refund_test", context)
 	var result = ActionRunner.run(action)
 	if not result.success:
-		violations.append("no_refund: activation should succeed")
+		violations.append("no_refund: activation should succeed, got failure: %s" % result.reason)
 		return violations
 
 	var resource_after_commit = combatant._current_resource
@@ -405,23 +400,23 @@ static func _test_on_cancel_cooldown_still_applies() -> Array[String]:
 	ability.cast_time = 1.0
 	ability.charges = 1
 	ability.on_cancel = MobaAbility.OnCancel.COOLDOWN_STILL_APPLIES
+	ability.range = 10.0
 	ability.targeting_type = MobaAbility.TargetingType.TARGETED
 	ability.base_damage = 20.0
 
 	combatant.register_ability(ability)
+	MobaAbilityLibrary._cache[StringName(ability.id)] = ability
 
 	var initial_resource = combatant._current_resource
 	var target = _create_target_with_combatant()
 
 	# Start the cast
-	var context = MobaCastContext.new()
-	context.caster = actor
-	context.explicit_target = target
+	var context = MobaCastContext.new(actor, target)
 
 	var action = MobaAbilityAction.new(actor, &"cooldown_still_applies_test", context)
 	var result = ActionRunner.run(action)
 	if not result.success:
-		violations.append("cooldown_still_applies: activation should succeed")
+		violations.append("cooldown_still_applies: activation should succeed, got failure: %s" % result.reason)
 		return violations
 
 	var resource_after_commit = combatant._current_resource
@@ -467,25 +462,25 @@ static func _test_hard_cc_cancels_cast() -> Array[String]:
 	ability.cast_time = 1.0
 	ability.charges = 1
 	ability.on_cancel = MobaAbility.OnCancel.PARTIAL_REFUND
+	ability.range = 10.0
 	ability.refund_resource_on_cancel = 0.25  # Refund 25%
 	ability.cancellable_by_hard_cc = true
 	ability.targeting_type = MobaAbility.TargetingType.TARGETED
 	ability.base_damage = 20.0
 
 	combatant.register_ability(ability)
+	MobaAbilityLibrary._cache[StringName(ability.id)] = ability
 
 	var initial_resource = combatant._current_resource
 	var target = _create_target_with_combatant()
 
 	# Start the cast
-	var context = MobaCastContext.new()
-	context.caster = actor
-	context.explicit_target = target
+	var context = MobaCastContext.new(actor, target)
 
 	var action = MobaAbilityAction.new(actor, &"cc_cancel_test", context)
 	var result = ActionRunner.run(action)
 	if not result.success:
-		violations.append("hard_cc_cancel: activation should succeed")
+		violations.append("hard_cc_cancel: activation should succeed, got failure: %s" % result.reason)
 		return violations
 
 	var resource_after_commit = combatant._current_resource
@@ -536,9 +531,7 @@ static func _test_resolution_wins_ties() -> Array[String]:
 	var initial_target_health = target_combatant._current_health
 
 	# Activate cast_time_ability with 0.5s cast time
-	var context = MobaCastContext.new()
-	context.caster = actor
-	context.explicit_target = target
+	var context = MobaCastContext.new(actor, target)
 
 	var result = MobaAbilityCaster.new().activate(&"cast_time_ability", context)
 	if not result.success:
