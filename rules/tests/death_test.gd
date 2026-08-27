@@ -168,7 +168,7 @@ static func _test_dead_refuses_damage() -> Array[String]:
 	# damage_resolved should NOT be emitted
 	var damage_resolved_emitted = false
 	combatant.damage_resolved.connect(
-		func(_raw, _final, _type, _crit, _source): damage_resolved_emitted = true
+		func(_raw, _final, _type, _crit, _source, _shield_absorbed): damage_resolved_emitted = true
 	)
 
 	combatant.apply_damage(damage)

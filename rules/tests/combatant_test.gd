@@ -559,20 +559,20 @@ static func _test_shield_absorbed_signal() -> Array[String]:
 	))
 	combatant_no_shield._runtime_stat_block.crit_chance = 0.0
 
-	var absorbed_no_shield := -1.0
+	var absorbed_no_shield := [-1.0]
 	combatant_no_shield.damage_resolved.connect(
 		func(_raw: float, _final: float, _dtype: int, _crit: bool, _src, absorbed: float):
-			absorbed_no_shield = absorbed
+			absorbed_no_shield[0] = absorbed
 	)
 
 	var initial_health_no_shield = combatant_no_shield._current_health
 	combatant_no_shield.apply_damage(MobaDamage.new(50.0, MobaDamage.DamageType.TRUE))
 
-	if not is_equal_approx(absorbed_no_shield, 0.0):
+	if not is_equal_approx(absorbed_no_shield[0], 0.0):
 		violations.append(
 			(
 				"shield_absorbed_signal: no shield active should report 0.0, got %f"
-				% absorbed_no_shield
+				% absorbed_no_shield[0]
 			)
 		)
 
@@ -590,18 +590,18 @@ static func _test_shield_absorbed_signal() -> Array[String]:
 	combatant_full._runtime_stat_block.crit_chance = 0.0
 	combatant_full.apply_shield(100.0, &"test_shield", 10.0)
 
-	var absorbed_full := -1.0
+	var absorbed_full := [-1.0]
 	combatant_full.damage_resolved.connect(
 		func(_raw: float, _final: float, _dtype: int, _crit: bool, _src, absorbed: float):
-			absorbed_full = absorbed
+			absorbed_full[0] = absorbed
 	)
 
 	var initial_health_full = combatant_full._current_health
 	combatant_full.apply_damage(MobaDamage.new(50.0, MobaDamage.DamageType.TRUE))
 
-	if not is_equal_approx(absorbed_full, 50.0):
+	if not is_equal_approx(absorbed_full[0], 50.0):
 		violations.append(
-			"shield_absorbed_signal: full absorption should report 50.0, got %f" % absorbed_full
+			"shield_absorbed_signal: full absorption should report 50.0, got %f" % absorbed_full[0]
 		)
 
 	if not is_equal_approx(combatant_full._current_health, initial_health_full):
@@ -618,20 +618,20 @@ static func _test_shield_absorbed_signal() -> Array[String]:
 	combatant_partial._runtime_stat_block.crit_chance = 0.0
 	combatant_partial.apply_shield(20.0, &"test_shield", 10.0)
 
-	var absorbed_partial := -1.0
+	var absorbed_partial := [-1.0]
 	combatant_partial.damage_resolved.connect(
 		func(_raw: float, _final: float, _dtype: int, _crit: bool, _src, absorbed: float):
-			absorbed_partial = absorbed
+			absorbed_partial[0] = absorbed
 	)
 
 	var initial_health_partial = combatant_partial._current_health
 	combatant_partial.apply_damage(MobaDamage.new(50.0, MobaDamage.DamageType.TRUE))
 
-	if not is_equal_approx(absorbed_partial, 20.0):
+	if not is_equal_approx(absorbed_partial[0], 20.0):
 		violations.append(
 			(
 				"shield_absorbed_signal: partial absorption should report 20.0, got %f"
-				% absorbed_partial
+				% absorbed_partial[0]
 			)
 		)
 

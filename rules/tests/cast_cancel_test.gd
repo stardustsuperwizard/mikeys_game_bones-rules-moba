@@ -1220,7 +1220,7 @@ static func _test_cast_time_getters() -> Array[String]:
 			"cast_time_getters: get_cast_time_remaining() should return 0.0 when not casting"
 		)
 
-	# Start a cast with 1.0 second duration
+	# Start a cast with 0.5 second duration
 	var context = MobaCastContext.new(actor, target)
 	var result = MobaAbilityCaster.new().activate(&"cast_time_ability", context)
 	if not result.success:
@@ -1240,23 +1240,23 @@ static func _test_cast_time_getters() -> Array[String]:
 			"cast_time_getters: get_casting_ability() should return the correct ability"
 		)
 
-	# Check remaining time at activation (should be close to 1.0)
+	# Check remaining time at activation (should be close to 0.5)
 	var remaining_at_start = combatant.get_cast_time_remaining()
-	if not is_equal_approx(remaining_at_start, 1.0):
+	if not is_equal_approx(remaining_at_start, 0.5):
 		(
 			violations
 			. append(
 				(
-					"cast_time_getters: get_cast_time_remaining() should be close to 1.0 at start, got %f"
+					"cast_time_getters: get_cast_time_remaining() should be close to 0.5 at start, got %f"
 					% remaining_at_start
 				)
 			)
 		)
 
-	# Advance time by 0.6 seconds
-	combatant.tick(0.6)
+	# Advance time by 0.3 seconds (still mid-cast; total cast time is 0.5)
+	combatant.tick(0.3)
 
-	# Remaining time should be around 0.4
+	# Remaining time should be around 0.2 (0.5 total - 0.3 elapsed)
 	var remaining_after_tick = combatant.get_cast_time_remaining()
 	if remaining_after_tick >= remaining_at_start:
 		(
