@@ -35,6 +35,8 @@ static func run() -> bool:
 	all_violations.append_array(_test_cast_time_defers_resolution())
 	all_violations.append_array(_test_instant_ability_resolves_immediately())
 	all_violations.append_array(_test_cancel_no_op_when_no_cast_in_progress())
+	all_violations.append_array(_test_cast_time_getters())
+	all_violations.append_array(_test_channel_time_getters())
 	all_violations.append_array(_test_on_cancel_full_refund())
 	all_violations.append_array(_test_on_cancel_partial_refund())
 	all_violations.append_array(_test_on_cancel_no_refund())
@@ -1193,5 +1195,143 @@ static func _test_suppressing_fire_ability_data() -> Array[String]:
 		violations.append("suppressing_fire_data: channel_tick_interval should be 0.25")
 	if suppressing_fire.debuffs.size() == 0:
 		violations.append("suppressing_fire_data: should have at least one debuff")
+
+	return violations
+
+
+## Test: Cast time remaining getters report correct values.
+static func _test_cast_time_getters() -> Array[String]:
+	var violations: Array[String] = []
+
+	_ensure_all_test_abilities_loaded()
+	var test_actor = _create_test_actor()
+	var actor = test_actor["actor"]
+	var combatant = test_actor["combatant"]
+	var target = _create_target_with_combatant()
+
+	# Before any cast, getters should return null/0.0
+	if combatant.get_casting_ability() != null:
+		violations.append("cast_time_getters: get_casting_ability() should return null when not casting")
+
+	if not is_equal_approx(combatant.get_cast_time_remaining(), 0.0):
+		violations.append("cast_time_getters: get_cast_time_remaining() should return 0.0 when not casting")
+
+	# Start a cast with 1.0 second duration
+	var context = MobaCastContext.new(actor, target)
+	var result = MobaAbilityCaster.new().activate(&"cast_time_ability", context)
+	if not result.success:
+		violations.append("cast_time_getters: activation should succeed, got %s" % result.reason)
+		return violations
+
+	# Immediately after activation, should have the ability
+	var casting_ability = combatant.get_casting_ability()
+	if casting_ability == null:
+		violations.append("cast_time_getters: get_casting_ability() should return ability while casting")
+		return violations
+
+	if casting_ability.id != "cast_time_ability":
+		violations.append("cast_time_getters: get_casting_ability() should return the correct ability")
+
+	# Check remaining time at activation (should be close to 1.0)
+	var remaining_at_start = combatant.get_cast_time_remaining()
+	if not is_equal_approx(remaining_at_start, 1.0):
+		violations.append(
+			(
+				"cast_time_getters: get_cast_time_remaining() should be close to 1.0 at start, got %f"
+				% remaining_at_start
+			)
+		)
+
+	# Advance time by 0.6 seconds
+	combatant.tick(0.6)
+
+	# Remaining time should be around 0.4
+	var remaining_after_tick = combatant.get_cast_time_remaining()
+	if remaining_after_tick > 0.0:
+		violations.append(
+			(
+				"cast_time_getters: after partial tick, remaining should be less than original, got %f"
+				% remaining_after_tick
+			)
+		)
+
+	# Advance to completion
+	combatant.tick(0.5)
+
+	# After completion, getters should reset
+	if combatant.get_casting_ability() != null:
+		violations.append("cast_time_getters: get_casting_ability() should return null after cast completes")
+
+	if not is_equal_approx(combatant.get_cast_time_remaining(), 0.0):
+		violations.append("cast_time_getters: get_cast_time_remaining() should return 0.0 after cast completes")
+
+	return violations
+
+
+## Test: Channel time remaining getters report correct values.
+static func _test_channel_time_getters() -> Array[String]:
+	var violations: Array[String] = []
+
+	_ensure_all_test_abilities_loaded()
+	var test_actor = _create_test_actor()
+	var actor = test_actor["actor"]
+	var combatant = test_actor["combatant"]
+	var target = _create_target_with_combatant()
+
+	# Before any channel, getters should return null/0.0
+	if combatant.get_channeling_ability() != null:
+		violations.append("channel_time_getters: get_channeling_ability() should return null when not channeling")
+
+	if not is_equal_approx(combatant.get_channel_time_remaining(), 0.0):
+		violations.append("channel_time_getters: get_channel_time_remaining() should return 0.0 when not channeling")
+
+	# Start a channel (suppressing_fire has channel_duration = 2.5)
+	var context = MobaCastContext.new(actor, target)
+	var result = MobaAbilityCaster.new().activate(&"suppressing_fire", context)
+	if not result.success:
+		violations.append("channel_time_getters: activation should succeed, got %s" % result.reason)
+		return violations
+
+	# Immediately after activation, should have the ability
+	var channeling_ability = combatant.get_channeling_ability()
+	if channeling_ability == null:
+		violations.append("channel_time_getters: get_channeling_ability() should return ability while channeling")
+		return violations
+
+	if channeling_ability.id != "suppressing_fire":
+		violations.append("channel_time_getters: get_channeling_ability() should return the correct ability")
+
+	# Check remaining time at activation (should be close to 2.5)
+	var remaining_at_start = combatant.get_channel_time_remaining()
+	if not is_equal_approx(remaining_at_start, 2.5):
+		violations.append(
+			(
+				"channel_time_getters: get_channel_time_remaining() should be close to 2.5 at start, got %f"
+				% remaining_at_start
+			)
+		)
+
+	# Advance time by 1.5 seconds
+	combatant.tick(1.5)
+
+	# Remaining time should be around 1.0
+	var remaining_after_tick = combatant.get_channel_time_remaining()
+	if remaining_after_tick >= remaining_at_start:
+		violations.append(
+			(
+				"channel_time_getters: after partial tick, remaining should be less than original, got %f"
+				% remaining_after_tick
+			)
+		)
+
+	# Advance to completion
+	combatant.tick(1.5)
+
+	# After completion, getters should reset
+	if combatant.get_channeling_ability() != null:
+		violations.append("channel_time_getters: get_channeling_ability() should return null after channel completes")
+
+	if not is_equal_approx(combatant.get_channel_time_remaining(), 0.0):
+		violations.append("channel_time_getters: get_channel_time_remaining() should return 0.0 after channel completes")
 
 	return violations

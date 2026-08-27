@@ -56,6 +56,13 @@ func current_ability() -> MobaAbility:
 	return _cast_in_progress.ability
 
 
+## Seconds remaining in the current cast, or 0.0 when not casting.
+func get_cast_time_remaining() -> float:
+	if _cast_in_progress == null:
+		return 0.0
+	return _cast_in_progress.remaining_time
+
+
 ## Start a cast that will resolve after its cast_time elapses via tick().
 ## Called by MobaAbilityAction when an ability with cast_time > 0 is activated.
 ##
