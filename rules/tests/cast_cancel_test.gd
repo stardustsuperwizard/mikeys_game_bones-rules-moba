@@ -179,9 +179,10 @@ static func _test_instant_ability_resolves_immediately() -> Array[String]:
 		violations.append("instant_ability: activation should succeed, got %s" % result.reason)
 		return violations
 
-	# For self_ability (self-targeted, no damage), verify it resolves instantly without entering ABILITY_CAST
-	# self_ability has cast_time = 0, so it should not enter ABILITY_CAST state
-	# We can verify this by checking that _cast_in_progress is null after the ability is activated
+	# For self_ability (self-targeted, no damage), verify it resolves instantly
+	# without entering ABILITY_CAST. self_ability has cast_time = 0, so it should
+	# not enter ABILITY_CAST state. We can verify this by checking that
+	# _cast_in_progress is null after the ability is activated
 	if combatant._cast_in_progress != null:
 		violations.append("instant_ability: should not have in-progress cast for instant ability")
 
