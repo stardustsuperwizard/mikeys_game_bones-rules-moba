@@ -20,6 +20,23 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	var refs := await _setup()
+	if refs.is_empty():
+		return _finish()
+
+	if not await _verify_death(refs):
+		return _finish()
+
+	if not await _verify_respawn(refs):
+		return _finish()
+
+	_finish()
+
+
+## Loads the main scene, neutralizes the enemy, and resolves the player/camera
+## references the rest of the test needs. Returns an empty Dictionary (and
+## records a failure) if any expected node is missing.
+func _setup() -> Dictionary:
 	var scene := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(scene)
 	await physics_frame
@@ -36,20 +53,37 @@ func _run() -> void:
 	var camera := scene.get_node_or_null("ThirdPersonCamera") as ThirdPersonCamera3D
 	if player == null or camera == null:
 		_fail("setup: player=%s camera=%s" % [player, camera])
-		return _finish()
+		return {}
 
 	var body := player.get_node_or_null("Body") as Node3D
 	var combatant := player.get_node_or_null("MobaCombatant") as MobaCombatant
 	var state_machine := player.get_node_or_null("MobaStateMachine") as MobaStateMachine
 	if body == null or combatant == null or state_machine == null:
 		_fail("setup: body=%s combatant=%s state_machine=%s" % [body, combatant, state_machine])
-		return _finish()
+		return {}
 
 	if camera._target != body:
 		_fail("setup: camera did not resolve target_path to the player's Body")
-		return _finish()
+		return {}
 
-	# --- kill the player through the real pipeline ---------------------
+	return {
+		"player": player,
+		"camera": camera,
+		"body": body,
+		"combatant": combatant,
+		"state_machine": state_machine,
+	}
+
+
+## Kills the player through the real damage pipeline and confirms the Actor/
+## Body node survives and the camera keeps its target reference across death.
+func _verify_death(refs: Dictionary) -> bool:
+	var player := refs["player"] as Actor
+	var camera := refs["camera"] as ThirdPersonCamera3D
+	var body := refs["body"] as Node3D
+	var combatant := refs["combatant"] as MobaCombatant
+	var state_machine := refs["state_machine"] as MobaStateMachine
+
 	var lethal := MobaDamage.new(
 		999999.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
 	)
@@ -58,34 +92,43 @@ func _run() -> void:
 
 	if state_machine.current_state != MobaState.DEAD:
 		_fail("death: expected state DEAD, got %d" % state_machine.current_state)
-		return _finish()
+		return false
 
 	if not is_instance_valid(body) or not is_instance_valid(player):
 		_fail("death: Actor/Body node was freed on death")
-		return _finish()
+		return false
 
 	if camera._target != body:
 		_fail("death: camera lost its target reference across death")
-		return _finish()
-	else:
-		print("PASS death -> Actor/Body stays in the tree, camera target unchanged")
+		return false
 
-	# --- let the configured auto-respawn delay elapse -------------------
+	print("PASS death -> Actor/Body stays in the tree, camera target unchanged")
+	return true
+
+
+## Waits out the configured auto-respawn delay and confirms the Actor/Body
+## node survives and the camera keeps tracking and framing it across respawn.
+func _verify_respawn(refs: Dictionary) -> bool:
+	var player := refs["player"] as Actor
+	var camera := refs["camera"] as ThirdPersonCamera3D
+	var body := refs["body"] as Node3D
+	var state_machine := refs["state_machine"] as MobaStateMachine
+
 	var respawned := await _wait_until(
 		func() -> bool: return state_machine.current_state == MobaState.IDLE, 600
 	)
 
 	if not respawned:
 		_fail("respawn: player never returned to IDLE within the wait window")
-		return _finish()
+		return false
 
 	if not is_instance_valid(body) or not is_instance_valid(player):
 		_fail("respawn: Actor/Body node was freed on respawn")
-		return _finish()
+		return false
 
 	if camera._target != body:
 		_fail("respawn: camera lost its target reference across respawn")
-		return _finish()
+		return false
 
 	# Confirm the camera is still actively tracking (not just holding a stale
 	# but coincidentally-valid pointer): its pivot should track the body's
@@ -97,10 +140,10 @@ func _run() -> void:
 		_fail(
 			"respawn: camera is not framing the respawned target (distance=%.2f)" % camera_to_pivot
 		)
-	else:
-		print("PASS respawn -> camera target survives and keeps framing the player")
+		return false
 
-	_finish()
+	print("PASS respawn -> camera target survives and keeps framing the player")
+	return true
 
 
 func _wait_until(predicate: Callable, max_frames: int) -> bool:

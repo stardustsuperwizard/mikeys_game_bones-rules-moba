@@ -181,29 +181,40 @@ static func _test_death_fires_once() -> Array[String]:
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
 	combatant._runtime_stat_block.crit_chance = 0.0  # Disable crit for predictable test
 
+	# _has_died is only set once the sibling state machine's DEAD transition
+	# actually succeeds (#241 review fix), so a state machine parent is
+	# required here -- a combatant with no parent can never fire death.
+	var state_machine = MobaStateMachine.new()
+	state_machine._ready()
+	var parent = Node.new()
+	parent.add_child(state_machine)
+	state_machine.name = "MobaStateMachine"
+	parent.add_child(combatant)
+
 	var death_count = 0
 	combatant.health_changed.connect(
 		func(current: float, _maximum: float):
-			if current <= 0.0 and not combatant._has_died:
+			if current <= 0.0 and not combatant.has_died():
 				# This signal will fire before _has_died is set
 				pass
 	)
 
-	# Apply first lethal damage (no parent Actor, so die() won't actually be called)
+	# Apply first lethal damage.
 	# Use 1000 raw to ensure lethal even with armor mitigation
 	var lethal_damage = MobaDamage.new(1000.0, MobaDamage.DamageType.PHYSICAL)
 	combatant.apply_damage(lethal_damage)
-	if not combatant._has_died:
+	if not combatant.has_died():
 		violations.append("death_fires_once: first damage should have killed")
 
 	# Apply second lethal damage
-	var first_death_flag = combatant._has_died
+	var first_death_flag = combatant.has_died()
 	var second_lethal = MobaDamage.new(100.0, MobaDamage.DamageType.PHYSICAL)
 	combatant.apply_damage(second_lethal)
 
-	if combatant._has_died != first_death_flag:
+	if combatant.has_died() != first_death_flag:
 		violations.append("death_fires_once: death flag should not change on second damage")
 
+	parent.queue_free()
 	return violations
 
 

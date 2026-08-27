@@ -151,12 +151,9 @@ var maximum_health: float:
 
 var _runtime_stat_block: MobaStatBlock
 var _current_health: float = 0.0
-var _has_died: bool = false
 var _current_resource: float = 0.0
 var _cooldowns: MobaCooldowns = MobaCooldowns.new()
 var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
-var _attack_target: Node = null
-var _attack_time_since_ready: float = INF
 var _effect_container: MobaEffectContainer = null
 ## Active crowd control entries keyed by CCType. Maps int (CCType) to _CCEntry.
 ## Multiple entries of different types can exist simultaneously; only one per type.
@@ -164,8 +161,6 @@ var _active_cc_entries: Dictionary = {}
 ## Active displacement entry (KNOCKBACK, PULL, or KNOCK_UP). Only one displacement
 ## can be active at a time. null when no displacement is active.
 var _active_displacement: _DisplacementEntry = null
-## Active shield pool: list of MobaShield instances, each with remaining absorption capacity.
-var _active_shields: Array[MobaShield] = []
 ## Per-stat cache of the modifier bonuses (flat, percent), NOT the final
 ## value: the base is always re-read live from _runtime_stat_block so a
 ## direct mutation of the runtime stat block (as several existing test
@@ -184,9 +179,16 @@ var _cast_tracker: MobaCastTracker = null
 ## not _ready() has run. Advanced from tick(), like the MobaCooldowns ledger.
 var _channel_tracker: MobaChannelTracker = null
 
-## Countdown timer for auto-respawn when DEAD. Only decrements if the policy allows
-## auto-respawn. Advanced from tick() when in DEAD state.
-var _respawn_countdown: float = 0.0
+## Death/respawn ledger. Created on first use so it is available whether or
+## not _ready() has run, like the cast/channel trackers above.
+var _death_handler: MobaDeathHandler = null
+
+## Shield pool ledger. Created on first use, like the trackers above.
+var _shield_tracker: MobaShieldTracker = null
+
+## Basic-attack wind-up/recovery cycle. Created on first use, like the
+## trackers above.
+var _basic_attack_cycle: MobaBasicAttackCycle = null
 
 
 func _ready() -> void:
@@ -349,7 +351,7 @@ func apply_damage(damage: MobaDamage) -> void:
 
 	# Step 7: Shield consumption (shortest-remaining-duration first)
 	var pre_shield_final := final
-	final = _consume_shields(final)
+	final = _get_shield_tracker().consume(final)
 	var post_shield_final := final
 
 	# Populate post-resolution fields on the damage packet for listeners
@@ -403,170 +405,104 @@ func apply_damage(damage: MobaDamage) -> void:
 	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source)
 
 
-## Clear all active effects, modifiers, shields, crowd control, and displacement
-## when entering DEAD state. Also cancels in-progress casts and breaks in-progress channels.
-##
-## This is called exactly once when death is finalized to ensure nothing carries
-## into the next life. The combatant must not survive death with an active buff,
-## stun, shield, or other effect that would carry over if respawned.
-func _clear_on_death() -> void:
-	# Cancel in-progress cast
-	if is_casting():
-		cancel_cast()
-
-	# Break in-progress channel
-	if is_channeling():
-		break_channel()
-
-	# Clear all active modifiers from the effect container
-	get_effect_container().clear_all()
-
-	# Clear all active shields
-	_active_shields.clear()
-	shield_changed.emit(0.0)
-
-	# Clear all active hard-CC entries
-	_active_cc_entries.clear()
-
-	# Clear active displacement
-	_active_displacement = null
-
-	# Apply minimal visual death representation: darken the mesh
-	_apply_death_visual()
+## The death/respawn ledger for this combatant, created on first use.
+func _get_death_handler() -> MobaDeathHandler:
+	if _death_handler == null:
+		_death_handler = MobaDeathHandler.new(self)
+	return _death_handler
 
 
-## Apply minimal visual death representation to the body.
-## Darkens the mesh material to indicate the body is dead, without animation.
-func _apply_death_visual() -> void:
-	var parent := get_parent()
-	if parent == null:
-		return
-
-	var body := parent.get_node_or_null("Body") as Node3D
-	if body == null:
-		return
-
-	# Darken the main mesh by reducing its albedo color's brightness
-	var mesh_instance := body.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if mesh_instance != null:
-		var material = mesh_instance.get_active_material(0)
-		if material != null and material is StandardMaterial3D:
-			# Create a unique material instance for this body so we don't affect other actors
-			var unique_material = material.duplicate() as StandardMaterial3D
-			# Darken the albedo color significantly to show death
-			unique_material.albedo_color = unique_material.albedo_color * Color(0.3, 0.3, 0.3, 1.0)
-			mesh_instance.set_surface_override_material(0, unique_material)
-
-
-## Restore the visual representation when respawning (restore full color).
-func _restore_death_visual() -> void:
-	var parent := get_parent()
-	if parent == null:
-		return
-
-	var body := parent.get_node_or_null("Body") as Node3D
-	if body == null:
-		return
-
-	# Restore the mesh to its original material
-	var mesh_instance := body.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if mesh_instance != null:
-		# Clear the override to return to the original material
-		mesh_instance.set_surface_override_material(0, null)
+## True once death has fired for the combatant's current life (reset by
+## respawn()). Exposed for MobaDeathHandler's own consumers (e.g. tests) that
+## need to observe the flag without reaching into the handler directly.
+func has_died() -> bool:
+	return _get_death_handler().has_died()
 
 
 ## Restore the combatant from DEAD to full health/resource and clear all cooldowns.
 ## Moves the body to the policy's spawn point and returns to IDLE.
 ##
-## Returns false if not currently DEAD (no state change). Returns false if no policy
-## is assigned or the policy's spawn_point is null (cannot respawn without a location).
-## Otherwise restores state and returns true.
+## Returns false if not currently DEAD (no state change); this is the only
+## refusal condition. If no respawn_policy is assigned, or its spawn_point is
+## null, the body is left at its current transform instead of being moved --
+## respawn_policy separately gates *auto*-respawn eligibility in
+## MobaDeathHandler.tick_respawn_countdown(), so a manually-triggered respawn()
+## with no assigned policy is a no-op-in-place, not a refusal.
 ##
 ## Called automatically after a delay if respawn_policy.respawns is true; can also
-## be called manually regardless of policy.
+## be called manually regardless of policy. Implemented by MobaDeathHandler.
 func respawn() -> bool:
-	var state_machine := _get_state_machine()
-	if state_machine == null or state_machine.current_state != MobaState.DEAD:
+	return _get_death_handler().respawn()
+
+
+## Whether the sibling state machine currently reports DEAD.
+## Used by MobaDeathHandler.respawn() to enforce the "must be DEAD to
+## respawn" rule without the handler reaching into the state machine wiring.
+func is_dead() -> bool:
+	var state_machine := get_state_machine()
+	return state_machine != null and state_machine.current_state == MobaState.DEAD
+
+
+## Transition the sibling state machine from DEAD back to IDLE. Returns the
+## state machine's revive() result, or false if there is no state machine.
+## Used by MobaDeathHandler.respawn() after death-cleanup state is restored.
+func revive_state() -> bool:
+	var state_machine := get_state_machine()
+	if state_machine == null:
 		return false
-
-	if respawn_policy == null or respawn_policy.spawn_point == null:
-		return false
-
-	# Restore health and resource to maximum
-	_current_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	_current_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
-
-	# Clear all cooldowns
-	_cooldowns.clear_all_cooldowns()
-
-	# Clear any leftover effects/shields/CC (defensive; _clear_on_death should
-	# have already done this, but be thorough here in case of edge cases)
-	get_effect_container().clear_all()
-	_active_shields.clear()
-	_active_cc_entries.clear()
-	_active_displacement = null
-
-	# Move the body to the spawn point
-	var parent := get_parent()
-	if parent != null:
-		var body = parent.get_node_or_null("Body") as Node3D
-		if body != null:
-			body.transform = respawn_policy.spawn_point.transform
-
-	# Reset death flag to allow death to fire again in the next life
-	_has_died = false
-
-	# Reset respawn countdown for next death
-	_respawn_countdown = 0.0
-
-	# Restore the visual representation (remove the darkened death appearance)
-	_restore_death_visual()
-
-	# Emit health/resource changed signals to update HUD
-	var max_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	health_changed.emit(_current_health, max_health)
-	var max_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
-	resource_changed.emit(_current_resource, max_resource)
-	shield_changed.emit(0.0)
-
-	# Mirror to parent Actor's character sheet
-	var parent_actor := parent as Actor
-	if parent_actor != null:
-		parent_actor.character_sheet.current_hp = int(_current_health)
-
-	# Transition to IDLE via revive()
 	return state_machine.revive()
 
 
-## Consume shields in order of shortest-remaining-duration first.
-## Returns the remaining damage after shields absorb what they can.
-## Emits shield_changed for each shield that is consumed or damaged.
-func _consume_shields(incoming_damage: float) -> float:
-	var remaining_damage: float = incoming_damage
+## Clear all active effects/modifiers, shields, crowd control, and
+## displacement, without emitting shield_changed -- callers emit that
+## themselves once, after any other changes made in the same operation.
+## Used by MobaDeathHandler for both death finalization and respawn.
+func clear_all_active_effects() -> void:
+	get_effect_container().clear_all()
+	_get_shield_tracker().clear()
+	_active_cc_entries.clear()
+	_active_displacement = null
 
-	# Sort shields by remaining duration (ascending) so we consume shortest-remaining first
-	var sorted_shields: Array[MobaShield] = _active_shields.duplicate()
-	sorted_shields.sort_custom(
-		func(a: MobaShield, b: MobaShield) -> bool: return a.remaining < b.remaining
-	)
 
-	# Consume shields in order
-	for shield in sorted_shields:
-		if remaining_damage <= 0.0:
-			break
+## Restore health and resource to maximum. Used by MobaDeathHandler.respawn().
+func restore_to_full() -> void:
+	_current_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	_current_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
 
-		if shield.amount >= remaining_damage:
-			# Shield absorbs all remaining damage
-			shield.amount -= remaining_damage
-			remaining_damage = 0.0
-			shield_changed.emit(total_shield())
-		else:
-			# Shield is fully consumed, remainder carries to next shield or health
-			remaining_damage -= shield.amount
-			_active_shields.erase(shield)
-			shield_changed.emit(total_shield())
 
-	return remaining_damage
+## Clear all active cooldowns. Used by MobaDeathHandler.respawn().
+func clear_all_cooldowns() -> void:
+	_cooldowns.clear_all_cooldowns()
+
+
+## Re-emit shield_changed with the current total. Used by MobaDeathHandler
+## after clearing shields directly (on death and on respawn), so listeners
+## see the post-mutation total.
+func notify_shield_changed() -> void:
+	shield_changed.emit(total_shield())
+
+
+## Emit health_changed and resource_changed with current/maximum values.
+## Used by MobaDeathHandler.respawn() after restoring health/resource to maximum.
+func notify_health_and_resource_changed() -> void:
+	health_changed.emit(_current_health, maximum_health)
+	resource_changed.emit(_current_resource, maximum_resource)
+
+
+## Mirror current_health into the parent Actor's character_sheet, if a parent
+## Actor is attached. Shared by _update_health() and MobaDeathHandler.respawn()
+## so both write through the same seam.
+func sync_character_sheet_hp() -> void:
+	var parent_actor := get_parent() as Actor
+	if parent_actor != null:
+		parent_actor.character_sheet.current_hp = int(_current_health)
+
+
+## The shield pool ledger for this combatant, created on first use.
+func _get_shield_tracker() -> MobaShieldTracker:
+	if _shield_tracker == null:
+		_shield_tracker = MobaShieldTracker.new(self)
+	return _shield_tracker
 
 
 ## Apply healing to the combatant.
@@ -596,21 +532,23 @@ func apply_healing(amount: float) -> float:
 
 ## Return the total absorption capacity from all active shields.
 func total_shield() -> float:
-	var total: float = 0.0
-	for shield in _active_shields:
-		total += shield.amount
-	return total
+	return _get_shield_tracker().total()
+
+
+## The live list of active shields, for read-only inspection (e.g. tests).
+func get_active_shields() -> Array[MobaShield]:
+	return _get_shield_tracker().get_shields()
 
 
 ## Apply a new shield to the combatant.
-## A no-op if amount <= 0.0. Emits shield_changed with the post-mutation total.
+## A no-op if amount <= 0.0 or the combatant is dead (terminal per #25; a dead
+## combatant's shields were already cleared on death and must not come back
+## before respawn()). Emits shield_changed with the post-mutation total.
 func apply_shield(amount: float, source: StringName, duration: float) -> void:
-	if amount <= 0.0:
+	if not is_alive():
 		return
 
-	var shield := MobaShield.new(amount, source, duration)
-	_active_shields.append(shield)
-	shield_changed.emit(total_shield())
+	_get_shield_tracker().apply(amount, source, duration)
 
 
 ## Apply crowd control to this combatant from a source.
@@ -629,7 +567,7 @@ func apply_crowd_control(spec: MobaCrowdControlSpec, source: MobaCombatant) -> v
 	if not is_alive():
 		return
 
-	var state_machine := _get_state_machine()
+	var state_machine := get_state_machine()
 
 	if spec.type in _DISPLACEMENT_TYPES:
 		_apply_displacement(spec, source, state_machine)
@@ -759,7 +697,7 @@ func _compute_displacement_direction(source: MobaCombatant, away: bool) -> Vecto
 ## a new attack mid-windup is still forbidden regardless of what CC allows. Every other
 ## action, and every case with no active entries, delegates straight to state_machine.can(action).
 func can_perform_action(action: StringName) -> bool:
-	var state_machine := _get_state_machine()
+	var state_machine := get_state_machine()
 	if state_machine == null:
 		return false
 
@@ -848,9 +786,7 @@ func is_alive() -> bool:
 ## Update health state and handle death.
 func _update_health() -> void:
 	# Mirror health into the parent Actor's character_sheet
-	var parent_actor := get_parent() as Actor
-	if parent_actor != null:
-		parent_actor.character_sheet.current_hp = int(_current_health)
+	sync_character_sheet_hp()
 
 	# Emit the health changed signal
 	var max_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
@@ -859,12 +795,16 @@ func _update_health() -> void:
 	# Handle death: transition to DEAD state exactly once
 	# This replaces the old Actor.die() call, intercepting death at the MobaCombatant
 	# level so the actor node is never freed and respawn can restore it.
-	if _current_health <= 0.0 and not _has_died:
-		_has_died = true
-		var state_machine := _get_state_machine()
+	#
+	# The death handler's flag is set only once try_enter() actually succeeds
+	# (not before): a rejected DEAD transition must leave the combatant free
+	# to try again on the next damage instance, not permanently stuck at <=0
+	# health and never dead.
+	if _current_health <= 0.0 and not _get_death_handler().has_died():
+		var state_machine := get_state_machine()
 		if state_machine != null:
 			if state_machine.try_enter(MobaState.DEAD):
-				_clear_on_death()
+				_get_death_handler().clear_on_death()
 
 
 ## Spend resource from the pool.
@@ -1077,11 +1017,11 @@ func break_channel() -> void:
 ## Also advances all active cooldowns and crowd control durations.
 ## While DEAD, advances the auto-respawn countdown if the policy allows it.
 func tick(delta: float) -> void:
-	var state_machine := _get_state_machine()
+	var state_machine := get_state_machine()
 
 	# Advance auto-respawn countdown if DEAD and policy allows auto-respawn
 	if state_machine != null and state_machine.current_state == MobaState.DEAD:
-		_tick_respawn_countdown(delta)
+		_get_death_handler().tick_respawn_countdown(delta)
 
 	# Advance in-progress cast and resolve if it reaches its expiry point.
 	# Resolution wins ties: if a cast reaches resolution during this tick(),
@@ -1099,7 +1039,7 @@ func tick(delta: float) -> void:
 	get_effect_container().tick(delta)
 
 	# Advance shield durations and expire shields
-	_tick_shields(delta)
+	_get_shield_tracker().tick(delta)
 
 	# Advance crowd control durations and expire entries
 	_tick_crowd_control(delta)
@@ -1109,9 +1049,7 @@ func tick(delta: float) -> void:
 	# a combatant: nothing else in rules/ ticks it. Game-side code (T4) must
 	# not also call MobaStateMachine.tick() directly for a combatant driven
 	# through here, or states would expire twice as fast.
-	if _attack_time_since_ready != INF:
-		_attack_time_since_ready += delta
-	_tick_state_machine_and_basic_attack(delta)
+	_get_basic_attack_cycle().tick(delta)
 
 	# Accumulate resource regeneration.
 	#
@@ -1143,29 +1081,12 @@ func tick(delta: float) -> void:
 			_update_health()
 
 
-## Advance shield durations and remove expired shields.
-## Emits shield_changed when any shields expire during this tick.
-func _tick_shields(delta: float) -> void:
-	var shields_before := _active_shields.size()
-
-	# Advance all shield durations
-	for i in range(_active_shields.size() - 1, -1, -1):
-		var shield = _active_shields[i]
-		shield.remaining -= delta
-		if shield.remaining <= 0.0:
-			_active_shields.remove_at(i)
-
-	# Emit shield_changed if any shields expired
-	if _active_shields.size() < shields_before:
-		shield_changed.emit(total_shield())
-
-
 ## Advance crowd control durations and expire entries.
 ## For hard CC: Returns to IDLE once the last active entry expires.
 ## For displacement: Expires displacement when duration is reached, and for KNOCK_UP,
 ## applies any queued follow-up effect when transitioning from AIRBORNE to IDLE.
 func _tick_crowd_control(delta: float) -> void:
-	var state_machine := _get_state_machine()
+	var state_machine := get_state_machine()
 
 	# Advance all hard CC entries
 	for cc_type in _active_cc_entries.keys():
@@ -1200,68 +1121,38 @@ func _tick_crowd_control(delta: float) -> void:
 						apply_crowd_control(queued_effect, queued_effect_source)
 
 
-## Advance the auto-respawn countdown while DEAD. Called from tick() when
-## the combatant is in DEAD state. Triggers respawn() when the countdown expires
-## if the respawn policy permits auto-respawn.
-func _tick_respawn_countdown(delta: float) -> void:
-	# Only count down if the policy exists and allows auto-respawn
-	if respawn_policy == null or not respawn_policy.respawns:
-		return
-
-	# Initialize countdown on first tick in DEAD state
-	var state_machine := _get_state_machine()
-	if state_machine != null and state_machine.current_state == MobaState.DEAD:
-		if _respawn_countdown == 0.0:
-			_respawn_countdown = respawn_policy.respawn_delay
-
-		# Decrement and trigger respawn when done
-		_respawn_countdown -= delta
-		if _respawn_countdown <= 0.0:
-			respawn()
+## The basic-attack wind-up/recovery cycle for this combatant, created on
+## first use.
+func _get_basic_attack_cycle() -> MobaBasicAttackCycle:
+	if _basic_attack_cycle == null:
+		_basic_attack_cycle = MobaBasicAttackCycle.new(self)
+	return _basic_attack_cycle
 
 
 ## Whether basic_attack() may be called right now to start a new cycle: the
 ## combatant currently permits a basic attack (accounting for crowd control)
 ## and the attack-speed interval (1.0 / attack_speed) has elapsed since the last attack started.
 ## This is the minimal query the game side needs to drive repeat attacks.
+## Implemented by MobaBasicAttackCycle.
 func is_basic_attack_ready() -> bool:
-	if not can_perform_action(&"basic_attack"):
-		return false
-	var attack_speed := get_stat(MobaStatBlock.ATTACK_SPEED)
-	if attack_speed <= 0.0:
-		return false
-	return _attack_time_since_ready >= 1.0 / attack_speed
+	return _get_basic_attack_cycle().is_ready()
 
 
+## Start a basic attack cycle against target. Returns false and starts
+## nothing if the loadout has no weapon, target is dead, target is out of
+## range, or the cycle is not ready. Implemented by MobaBasicAttackCycle.
 func basic_attack(target: MobaCombatant) -> bool:
-	var weapon := loadout.get_weapon() if loadout != null else null
-	if (
-		weapon == null
-		or not target.is_alive()
-		or not _is_in_range(target, weapon.attack_range)
-		or not is_basic_attack_ready()
-	):
-		return false
-
-	var state_machine := _get_state_machine()
-	if not state_machine.try_enter(MobaState.BASIC_ATTACK_WINDUP, weapon.wind_up):
-		return false
-	_attack_target = target
-	_attack_time_since_ready = 0.0
-	return true
+	return _get_basic_attack_cycle().start(target)
 
 
-## Fail-closed: an attacker or target whose parent exposes no global_position
-## is treated as out of range rather than in range, so range gating cannot be
-## bypassed by an incomplete scene setup. Duck-typed via get("global_position")
-## -- matching MobaAbilityAction._get_position() -- so rules/ keeps no
-## outward reference to Actor.
-func _is_in_range(target: MobaCombatant, range_m: float) -> bool:
-	var this_position = _get_parent_position(self)
-	var target_position = _get_parent_position(target)
-	if this_position == null or target_position == null:
-		return false
-	return (this_position as Vector3).distance_to(target_position as Vector3) <= range_m
+## The sibling MobaStateMachine node, or null if there is no parent or no such
+## sibling. Public so MobaDeathHandler/MobaBasicAttackCycle can reach it
+## without MobaCombatant re-exposing every state-machine operation itself.
+func get_state_machine() -> MobaStateMachine:
+	var parent := get_parent()
+	if parent == null:
+		return null
+	return parent.get_node_or_null("MobaStateMachine") as MobaStateMachine
 
 
 func _get_parent_position(combatant: MobaCombatant) -> Variant:
@@ -1269,109 +1160,3 @@ func _get_parent_position(combatant: MobaCombatant) -> Variant:
 	if parent == null:
 		return null
 	return parent.get("global_position")
-
-
-func _get_state_machine() -> MobaStateMachine:
-	var parent := get_parent()
-	if parent == null:
-		return null
-	return parent.get_node_or_null("MobaStateMachine") as MobaStateMachine
-
-
-## Advances the sibling MobaStateMachine and the basic-attack cycle together.
-##
-## The wind-up and recovery phases are tracked through the state machine's
-## own duration/expiry mechanism (try_enter()/tick()), but a naive single
-## state_machine.tick(delta) call would silently drop any overshoot past a
-## phase boundary (the delta beyond exactly when wind-up or recovery
-## expires), making cycle durations drift with tick granularity. This loop
-## ticks the state machine only up to the next phase boundary, applies the
-## hit or returns to ready exactly at that boundary, and carries the
-## leftover delta into the following phase - bounded to at most the two
-## basic-attack phase boundaries per call, so it always terminates.
-func _tick_state_machine_and_basic_attack(delta: float) -> void:
-	var state_machine := _get_state_machine()
-	if state_machine == null:
-		return
-
-	var remaining_delta := delta
-	while remaining_delta > 0.0:
-		var expiring_state = state_machine.current_state
-		var in_attack_phase = (
-			expiring_state == MobaState.BASIC_ATTACK_WINDUP
-			or expiring_state == MobaState.BASIC_ATTACK_RECOVERY
-		)
-
-		if (
-			not in_attack_phase
-			or state_machine.remaining <= 0.0
-			or state_machine.remaining > remaining_delta
-		):
-			state_machine.tick(remaining_delta)
-			remaining_delta = 0.0
-			continue
-
-		# This tick exactly exhausts the current attack phase; carry the
-		# overshoot into the phase that follows.
-		var overshoot = remaining_delta - state_machine.remaining
-		state_machine.tick(state_machine.remaining)
-		_advance_basic_attack_phase(expiring_state, state_machine)
-		remaining_delta = overshoot
-
-
-## Called exactly when `expiring_state` (WINDUP or RECOVERY) has expired
-## back to IDLE. Applies the hit and enters recovery, or clears the cycle
-## and lets the readiness interval (tracked separately) gate the next
-## attack.
-func _advance_basic_attack_phase(expiring_state: int, state_machine: MobaStateMachine) -> void:
-	if expiring_state != MobaState.BASIC_ATTACK_WINDUP:
-		_attack_target = null
-		return
-
-	var weapon := loadout.get_weapon() if loadout != null else null
-	if weapon == null:
-		_attack_target = null
-		return
-
-	_apply_basic_attack_hit(weapon)
-	if not state_machine.try_enter(MobaState.BASIC_ATTACK_RECOVERY, weapon.recovery):
-		_attack_target = null
-
-
-func _apply_basic_attack_hit(weapon: MobaWeapon) -> void:
-	if _attack_target == null or not _attack_target.is_alive():
-		return
-
-	var attack_damage := get_stat(MobaStatBlock.ATTACK_DAMAGE)
-	var total_damage := MobaFormulas.basic_attack_damage(weapon.damage, attack_damage)
-
-	# Check for BLIND miss: the attacker's own BLIND entry impairs its accuracy,
-	# rolled against that entry's magnitude as a miss chance.
-	var blind_type = MobaCrowdControlSpec.CCType.BLIND
-	if has_crowd_control(blind_type):
-		var blind_spec: MobaCrowdControlSpec = get_crowd_control_spec(blind_type)
-		if blind_spec != null:
-			var blind_roll := MobaRules.roll_blind()
-			var miss_chance: float = blind_spec.magnitude
-			if blind_roll < miss_chance:
-				# Miss: skip apply_damage entirely; attack cycle still runs. Report
-				# the same computed raw amount a hit would have, so listeners see a
-				# consistent pre-mitigation figure regardless of miss/hit.
-				basic_attack_resolved.emit(
-					_attack_target, total_damage, 0.0, weapon.damage_type, false
-				)
-				return
-
-	var damage := MobaDamage.new(
-		total_damage,
-		weapon.damage_type,
-		self,
-		true,
-		get_stat(MobaStatBlock.ARMOR_PEN_FLAT),
-		get_stat(MobaStatBlock.ARMOR_PEN_PERCENT),
-		true
-	)
-	_attack_target.apply_damage(damage)
-	basic_attack_resolved.emit(
-		_attack_target, damage.amount, damage.final_amount, damage.damage_type, damage.was_crit
-	)

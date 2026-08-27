@@ -69,6 +69,10 @@ static func run() -> bool:
 	var respawn_on_living_violations = _test_respawn_on_living_refused()
 	all_violations.append_array(respawn_on_living_violations)
 
+	# Test 10: Applying CC/shield to an already-dead combatant is refused
+	var dead_refuses_cc_and_shield_violations = _test_dead_refuses_cc_and_shield()
+	all_violations.append_array(dead_refuses_cc_and_shield_violations)
+
 	if all_violations.is_empty():
 		return true
 
@@ -539,6 +543,57 @@ static func _test_respawn_on_living_refused() -> Array[String]:
 					"respawn_on_living_refused: state changed when calling respawn on living combatant (state=%d)"
 					% state_machine.current_state
 				)
+			)
+		)
+
+	parent.queue_free()
+	return violations
+
+
+## Test: Applying crowd control or a shield to an already-dead combatant is
+## refused -- distinct from _test_clear_on_death(), which only checks that
+## pre-existing CC/shields/effects are cleared *at the moment* death fires,
+## not that further attempts to apply them while DEAD are rejected.
+static func _test_dead_refuses_cc_and_shield() -> Array[String]:
+	var violations: Array[String] = []
+
+	var combatant = MobaCombatant.new()
+	combatant.stat_block = _BASELINE_STAT_BLOCK
+	combatant._runtime_stat_block = combatant.stat_block.duplicate()
+	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+
+	# Add a mock state machine and parent
+	var state_machine = MobaStateMachine.new()
+	state_machine._ready()
+	var parent = Node.new()
+	parent.add_child(state_machine)
+	state_machine.name = "MobaStateMachine"
+	parent.add_child(combatant)
+
+	# Kill the combatant
+	var lethal_damage = MobaDamage.new(
+		1000.0, MobaDamage.DamageType.TRUE, combatant, false, 0.0, 0.0, false
+	)
+	combatant.apply_damage(lethal_damage)
+
+	# Attempt to apply CC to the now-dead combatant
+	var cc_spec = MobaCrowdControlSpec.new()
+	cc_spec.type = MobaCrowdControlSpec.CCType.STUN
+	cc_spec.duration = 5.0
+	cc_spec.affected_by_tenacity = false
+	combatant.apply_crowd_control(cc_spec, combatant)
+
+	if not combatant._active_cc_entries.is_empty():
+		violations.append("dead_refuses_cc_and_shield: CC applied to a dead combatant")
+
+	# Attempt to apply a shield to the now-dead combatant
+	combatant.apply_shield(100.0, &"test", 10.0)
+
+	if combatant.total_shield() > 0.0:
+		violations.append(
+			(
+				"dead_refuses_cc_and_shield: shield applied to a dead combatant (total=%f)"
+				% combatant.total_shield()
 			)
 		)
 
