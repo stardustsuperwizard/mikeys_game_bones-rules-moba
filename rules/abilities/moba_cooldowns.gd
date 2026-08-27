@@ -168,3 +168,22 @@ func maximum_charges(ability_id: StringName) -> int:
 
 	var state: _AbilityState = _ability_states[ability_id]
 	return state.max_charges
+
+
+## Undo the cooldown and charge state that start() established.
+## Restores the consumed charge and clears the running timer (as if start was never called).
+## A no-op if the ability has never been started.
+##
+## Args:
+##     ability_id: Unique identifier for the ability
+func cancel(ability_id: StringName) -> void:
+	if not ability_id in _ability_states:
+		return
+
+	var state: _AbilityState = _ability_states[ability_id]
+
+	# Restore the consumed charge
+	state.available_charges = mini(state.available_charges + 1, state.max_charges)
+
+	# Clear the running timer
+	state.timer_remaining = 0.0

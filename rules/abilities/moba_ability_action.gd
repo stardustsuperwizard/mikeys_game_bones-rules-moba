@@ -79,21 +79,27 @@ func execute() -> ActionResult:
 	if commit_failure != &"":
 		return ActionResult.new(false, commit_failure)
 
-	# Step 7: Enter ABILITY_CAST state if cast_time > 0
-	if state_machine != null and ability.cast_time > 0.0:
-		state_machine.try_enter(MobaState.ABILITY_CAST, ability.cast_time)
+	# Step 7: For cast_time > 0, defer damage/effects to resolution time.
+	# For cast_time == 0, apply immediately (instant abilities).
+	if ability.cast_time > 0.0:
+		# Enter ABILITY_CAST state
+		if state_machine != null:
+			state_machine.try_enter(MobaState.ABILITY_CAST, ability.cast_time)
 
-	# Steps 8-9: Apply damage and effects, guarded against the target having
-	# evaporated between commit (step 6) and this resolution step. The
-	# resource spend and cooldown start committed above are never refunded
-	# if that happens -- resolution just safely no-ops.
-	if resolved_target != null and is_instance_valid(resolved_target):
-		# Step 8: Apply damage (Batch 2 will defer this if cast_time > 0)
-		# For now, apply immediately
-		_apply_damage(ability, resolved_target, combatant)
+		# Start the cast: damage and effects will be applied when it resolves via tick()
+		combatant.start_cast(ability_id, ability, resolved_target, ability.cast_time)
+	else:
+		# Instant ability: apply damage and effects immediately
+		# Steps 8-9: Apply damage and effects, guarded against the target having
+		# evaporated between commit (step 6) and this resolution step. The
+		# resource spend and cooldown start committed above are never refunded
+		# if that happens -- resolution just safely no-ops.
+		if resolved_target != null and is_instance_valid(resolved_target):
+			# Step 8: Apply damage
+			_apply_damage(ability, resolved_target, combatant)
 
-		# Step 9: Apply effects (crowd control, buffs, debuffs) - Batch 2 seam
-		_apply_effects_seam(ability, resolved_target)
+			# Step 9: Apply effects (crowd control, buffs, debuffs)
+			_apply_effects_seam(ability, resolved_target)
 
 	return ActionResult.new(true)
 

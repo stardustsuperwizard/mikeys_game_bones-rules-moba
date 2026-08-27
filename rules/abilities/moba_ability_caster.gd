@@ -55,3 +55,29 @@ func activate_slot(index: int, context: MobaCastContext) -> ActionResult:
 		return ActionResult.new(false, MobaAbilityAction.FAILURE_EMPTY_SLOT)
 
 	return activate(ability_id, context)
+
+
+## Cancel an in-progress cast for the given caster.
+## If the caster has no in-progress cast, this is a harmless no-op and returns without error.
+##
+## The caster can be identified by:
+## - An Actor, from which the MobaCombatant child is discovered
+## - A MobaCastContext, from which the caster Actor is extracted
+##
+## Args:
+##     caster: An Actor or MobaCastContext identifying the caster
+func cancel(caster: Variant) -> void:
+	var combatant: MobaCombatant = null
+
+	# Handle both Actor and MobaCastContext inputs
+	if caster is Actor:
+		combatant = caster.get_node_or_null("MobaCombatant") as MobaCombatant
+	elif caster is MobaCastContext:
+		var context := caster as MobaCastContext
+		if context.caster != null:
+			combatant = context.caster.get_node_or_null("MobaCombatant") as MobaCombatant
+
+	if combatant == null:
+		return
+
+	combatant.cancel_cast()
