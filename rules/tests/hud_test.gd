@@ -366,8 +366,10 @@ static func _test_new_elements_rebind_safety() -> Array[String]:
 		violations.append("rebind_elements: the status tray connected no effect signal at all")
 	if _connection_count(container, status_tray) != tray_after_first:
 		violations.append(
-			"rebind_elements: rebinding doubled the status tray connections (%d, then %d)"
-			% [tray_after_first, _connection_count(container, status_tray)]
+			(
+				"rebind_elements: rebinding doubled the status tray connections (%d, then %d)"
+				% [tray_after_first, _connection_count(container, status_tray)]
+			)
 		)
 
 	# The target frame binds a different combatant than the HUD's own, through
@@ -384,8 +386,10 @@ static func _test_new_elements_rebind_safety() -> Array[String]:
 		violations.append("rebind_elements: the target frame connected no signal at all")
 	if _connection_count(target, target_frame) != frame_after_first:
 		violations.append(
-			"rebind_elements: rebinding doubled the target frame connections (%d, then %d)"
-			% [frame_after_first, _connection_count(target, target_frame)]
+			(
+				"rebind_elements: rebinding doubled the target frame connections (%d, then %d)"
+				% [frame_after_first, _connection_count(target, target_frame)]
+			)
 		)
 
 	# No stale element is left behind by the unbind half of the contract.
@@ -398,8 +402,10 @@ static func _test_new_elements_rebind_safety() -> Array[String]:
 		violations.append("rebind_elements: unbind() should leave the cast bar hidden")
 	if status_tray.get_entry_count() != 0:
 		violations.append(
-			"rebind_elements: unbind() left %d status tray entries behind"
-			% status_tray.get_entry_count()
+			(
+				"rebind_elements: unbind() left %d status tray entries behind"
+				% status_tray.get_entry_count()
+			)
 		)
 	if _connection_count(container, status_tray) != 0:
 		violations.append("rebind_elements: unbind() left a status tray connection behind")
