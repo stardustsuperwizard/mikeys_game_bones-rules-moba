@@ -466,17 +466,19 @@ static func _test_replace_if_stronger_preserves_is_debuff() -> Array[String]:
 	container.apply_modifier(debuff_modifier_weak, &"debuff_hex", true)
 
 	if not container.is_debuff(&"debuff_hex", MobaStatBlock.ARMOR):
-		violations.append("replace_if_stronger_is_debuff: initial debuff should report is_debuff = true")
+		violations.append(
+			"replace_stronger_polarity: initial debuff should report is_debuff = true"
+		)
 
 	# Apply a stronger debuff with is_debuff = true
 	var debuff_modifier_strong := _make_modifier("armor", -25.0, false, 8.0, policy)
 	container.apply_modifier(debuff_modifier_strong, &"debuff_hex", true)
 
 	if not container.is_debuff(&"debuff_hex", MobaStatBlock.ARMOR):
-		violations.append("replace_if_stronger_is_debuff: replaced debuff should preserve is_debuff = true")
+		violations.append("replace_stronger_polarity: replaced debuff should stay is_debuff = true")
 
 	if not _approx_equal(container.get_flat_bonus(MobaStatBlock.ARMOR), -25.0):
-		violations.append("replace_if_stronger_is_debuff: replaced debuff magnitude should be -25.0")
+		violations.append("replace_stronger_polarity: replaced debuff magnitude should be -25.0")
 
 	# Test 2: Buff entry under REPLACE_IF_STRONGER with is_debuff = false
 	# Should preserve is_debuff = false after replacement
@@ -484,23 +486,31 @@ static func _test_replace_if_stronger_preserves_is_debuff() -> Array[String]:
 	container.apply_modifier(buff_modifier_weak, &"buff_surge", false)
 
 	if container.is_debuff(&"buff_surge", MobaStatBlock.ATTACK_DAMAGE):
-		violations.append("replace_if_stronger_is_debuff: initial buff should report is_debuff = false")
+		violations.append("replace_stronger_polarity: initial buff should report is_debuff = false")
 
 	# Apply a stronger buff with is_debuff = false
 	var buff_modifier_strong := _make_modifier("attack_damage", 20.0, false, 8.0, policy)
 	container.apply_modifier(buff_modifier_strong, &"buff_surge", false)
 
 	if container.is_debuff(&"buff_surge", MobaStatBlock.ATTACK_DAMAGE):
-		violations.append("replace_if_stronger_is_debuff: replaced buff should preserve is_debuff = false")
+		violations.append("replace_stronger_polarity: replaced buff should stay is_debuff = false")
 
-	# Test 3: Weaker application is rejected and doesn't change is_debuff
-	var buff_modifier_weaker := _make_modifier("attack_damage", 3.0, false, 60.0, policy)
-	var applied := container.apply_modifier(buff_modifier_weaker, &"buff_surge", false)
+	# Test 3: A weaker application is rejected and leaves the existing entry
+	# untouched. Driven against the debuff entry and passing is_debuff = false,
+	# so a rejected path that wrongly wrote through would flip true -> false and
+	# be caught here; asserting on the buff entry would pass either way.
+	var debuff_modifier_weaker := _make_modifier("armor", -5.0, false, 60.0, policy)
+	var applied := container.apply_modifier(debuff_modifier_weaker, &"debuff_hex", false)
 
 	if applied:
-		violations.append("replace_if_stronger_is_debuff: weaker application should return false")
+		violations.append("replace_stronger_polarity: weaker application should return false")
 
-	if container.is_debuff(&"buff_surge", MobaStatBlock.ATTACK_DAMAGE):
-		violations.append("replace_if_stronger_is_debuff: weaker rejected application should not change is_debuff")
+	if not container.is_debuff(&"debuff_hex", MobaStatBlock.ARMOR):
+		violations.append(
+			"replace_stronger_polarity: rejected weaker should leave is_debuff = true"
+		)
+
+	if not _approx_equal(container.get_flat_bonus(MobaStatBlock.ARMOR), -25.0):
+		violations.append("replace_stronger_polarity: rejected weaker should leave magnitude -25.0")
 
 	return violations
