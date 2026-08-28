@@ -41,6 +41,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_cast_time_defers_resolution())
 	all_violations.append_array(_test_instant_ability_resolves_immediately())
 	all_violations.append_array(_test_cancel_no_op_when_no_cast_in_progress())
+	all_violations.append_array(_test_cast_time_getters())
 	all_violations.append_array(_test_on_cancel_full_refund())
 	all_violations.append_array(_test_on_cancel_partial_refund())
 	all_violations.append_array(_test_on_cancel_no_refund())
@@ -872,5 +873,92 @@ static func _test_cataclysm_ability_data() -> Array[String]:
 
 	if not is_equal_approx(cataclysm.area_radius, 4.0):
 		violations.append("cataclysm_data: area_radius should be 4.0")
+
+	return violations
+
+
+## Test: Cast time remaining getters report correct values.
+static func _test_cast_time_getters() -> Array[String]:
+	var violations: Array[String] = []
+
+	_ensure_all_test_abilities_loaded()
+	var test_actor = _create_test_actor()
+	var actor = test_actor["actor"]
+	var combatant = test_actor["combatant"]
+	var target = _create_target_with_combatant()
+
+	# Before any cast, getters should return null/0.0
+	if combatant.get_casting_ability() != null:
+		violations.append(
+			"cast_time_getters: get_casting_ability() should return null when not casting"
+		)
+
+	if not is_equal_approx(combatant.get_cast_time_remaining(), 0.0):
+		violations.append(
+			"cast_time_getters: get_cast_time_remaining() should return 0.0 when not casting"
+		)
+
+	# Start a cast with 0.5 second duration
+	var context = MobaCastContext.new(actor, target)
+	var result = MobaAbilityCaster.new().activate(&"cast_time_ability", context)
+	if not result.success:
+		violations.append("cast_time_getters: activation should succeed, got %s" % result.reason)
+		return violations
+
+	# Immediately after activation, should have the ability
+	var casting_ability = combatant.get_casting_ability()
+	if casting_ability == null:
+		violations.append(
+			"cast_time_getters: get_casting_ability() should return ability while casting"
+		)
+		return violations
+
+	if casting_ability.id != "cast_time_ability":
+		violations.append(
+			"cast_time_getters: get_casting_ability() should return the correct ability"
+		)
+
+	# Check remaining time at activation (should be close to 0.5)
+	var remaining_at_start = combatant.get_cast_time_remaining()
+	if not is_equal_approx(remaining_at_start, 0.5):
+		(
+			violations
+			. append(
+				(
+					"cast_time_getters: get_cast_time_remaining() should be close to 0.5 at start, got %f"
+					% remaining_at_start
+				)
+			)
+		)
+
+	# Advance time by 0.3 seconds (still mid-cast; total cast time is 0.5)
+	combatant.tick(0.3)
+
+	# Remaining time should be around 0.2 (0.5 total - 0.3 elapsed)
+	var remaining_after_tick = combatant.get_cast_time_remaining()
+	if remaining_after_tick >= remaining_at_start:
+		(
+			violations
+			. append(
+				(
+					"cast_time_getters: after partial tick, remaining should be less than original, got %f"
+					% remaining_after_tick
+				)
+			)
+		)
+
+	# Advance to completion
+	combatant.tick(0.5)
+
+	# After completion, getters should reset
+	if combatant.get_casting_ability() != null:
+		violations.append(
+			"cast_time_getters: get_casting_ability() should return null after cast completes"
+		)
+
+	if not is_equal_approx(combatant.get_cast_time_remaining(), 0.0):
+		violations.append(
+			"cast_time_getters: get_cast_time_remaining() should return 0.0 after cast completes"
+		)
 
 	return violations

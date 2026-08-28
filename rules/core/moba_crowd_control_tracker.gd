@@ -131,6 +131,14 @@ func get_source(cc_type: int) -> MobaCombatant:
 	return entry.source
 
 
+## Seconds remaining on an active entry, or 0.0 if the type is not active.
+func get_remaining(cc_type: int) -> float:
+	if cc_type not in _active_cc_entries:
+		return 0.0
+	var entry = _active_cc_entries[cc_type]
+	return entry.remaining
+
+
 ## The spec of an active entry, or null if the type is not active.
 func get_spec(cc_type: int) -> MobaCrowdControlSpec:
 	if cc_type not in _active_cc_entries:

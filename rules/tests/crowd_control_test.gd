@@ -34,6 +34,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_blind_causes_attacker_miss())
 	all_violations.append_array(_test_blind_zero_magnitude_never_misses())
 	all_violations.append_array(_test_cc_intersects_with_state_outside_crowd_controlled())
+	all_violations.append_array(_test_crowd_control_remaining_duration())
 
 	if all_violations.is_empty():
 		return true
@@ -589,5 +590,110 @@ static func _test_cc_intersects_with_state_outside_crowd_controlled() -> Array[S
 				+ " though the only active CC entry (BLIND) doesn't block basic_attack"
 			)
 		)
+
+	return violations
+
+
+## Test: get_crowd_control_remaining() returns correct duration for active CC.
+static func _test_crowd_control_remaining_duration() -> Array[String]:
+	var violations: Array[String] = []
+
+	var data = _create_combatant()
+	var target = data["combatant"]
+	var source = MobaCombatant.new()
+	source.name = "Source"
+	source.stat_block = _BASELINE_STAT_BLOCK
+	source._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
+	source._current_health = source._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	source._current_resource = source._runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
+
+	# Before any CC, remaining should be 0.0 for all types
+	if not is_equal_approx(
+		target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN), 0.0
+	):
+		violations.append("cc_remaining: should be 0.0 when no STUN active")
+
+	# Apply a 2.0 second stun
+	var spec = MobaCrowdControlSpec.new()
+	spec.type = MobaCrowdControlSpec.CCType.STUN
+	spec.duration = 2.0
+	spec.affected_by_tenacity = false
+	target.apply_crowd_control(spec, source)
+
+	# Immediately after application, should be close to 2.0
+	var remaining_at_start = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN)
+	if not is_equal_approx(remaining_at_start, 2.0):
+		violations.append(
+			"cc_remaining: STUN remaining should be ~2.0 at start, got %f" % remaining_at_start
+		)
+
+	# Advance 0.5 seconds
+	target.tick(0.5)
+
+	# Remaining should now be ~1.5
+	var remaining_after_half_second = target.get_crowd_control_remaining(
+		MobaCrowdControlSpec.CCType.STUN
+	)
+	if not is_equal_approx(remaining_after_half_second, 1.5):
+		violations.append(
+			(
+				"cc_remaining: after 0.5s tick, STUN remaining should be ~1.5, got %f"
+				% remaining_after_half_second
+			)
+		)
+
+	# Two CC types genuinely coexisting: apply ROOT while the STUN above is
+	# still live (1.5s left), so each type is read back on its own clock. This
+	# per-type independence is what the status tray polls for.
+	var root_spec = MobaCrowdControlSpec.new()
+	root_spec.type = MobaCrowdControlSpec.CCType.ROOT
+	root_spec.duration = 3.0
+	root_spec.affected_by_tenacity = false
+	target.apply_crowd_control(root_spec, source)
+
+	var coexisting_stun = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN)
+	var coexisting_root = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.ROOT)
+
+	if not is_equal_approx(coexisting_stun, 1.5):
+		violations.append(
+			"cc_remaining: STUN should still read ~1.5 alongside ROOT, got %f" % coexisting_stun
+		)
+
+	if not is_equal_approx(coexisting_root, 3.0):
+		violations.append(
+			"cc_remaining: newly applied ROOT should be ~3.0, got %f" % coexisting_root
+		)
+
+	# Advance past the STUN but not the ROOT: the expired type reports 0.0
+	# while the still-active one keeps counting down independently.
+	target.tick(2.0)
+
+	var remaining_after_expiry = target.get_crowd_control_remaining(
+		MobaCrowdControlSpec.CCType.STUN
+	)
+	if not is_equal_approx(remaining_after_expiry, 0.0):
+		violations.append(
+			(
+				"cc_remaining: after expiry, STUN remaining should be 0.0, got %f"
+				% remaining_after_expiry
+			)
+		)
+
+	var root_after_stun_expiry = target.get_crowd_control_remaining(
+		MobaCrowdControlSpec.CCType.ROOT
+	)
+	if not is_equal_approx(root_after_stun_expiry, 1.0):
+		violations.append(
+			(
+				"cc_remaining: ROOT should still read ~1.0 after STUN expired, got %f"
+				% root_after_stun_expiry
+			)
+		)
+
+	# An unknown / never-applied CC type reports 0.0 rather than erroring.
+	if not is_equal_approx(
+		target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.SILENCE), 0.0
+	):
+		violations.append("cc_remaining: never-applied SILENCE should be 0.0")
 
 	return violations

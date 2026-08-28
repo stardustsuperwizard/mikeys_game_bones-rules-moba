@@ -60,6 +60,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_cache_invalidation())
 	all_violations.append_array(_test_invalid_stat_rejected())
 	all_violations.append_array(_test_attack_speed_floor())
+	all_violations.append_array(_test_is_debuff_polarity())
 
 	if all_violations.is_empty():
 		return true
@@ -416,5 +417,35 @@ static func _test_attack_speed_floor() -> Array[String]:
 	var value := combatant.get_stat(MobaStatBlock.ATTACK_SPEED)
 	if not _approx_equal(value, 0.01):
 		violations.append("attack_speed_floor: expected 0.01, got %f" % value)
+
+	return violations
+
+
+## is_debuff() correctly tracks and reports buff/debuff polarity.
+static func _test_is_debuff_polarity() -> Array[String]:
+	var violations: Array[String] = []
+
+	var combatant := _make_combatant()
+	var container := combatant.get_effect_container()
+
+	# Apply a buff (is_debuff = false)
+	var buff_modifier := _make_modifier("armor", 10.0)
+	container.apply_modifier(buff_modifier, &"armor_buff", false)
+
+	# Apply a debuff (is_debuff = true)
+	var debuff_modifier := _make_modifier("armor", -5.0)
+	container.apply_modifier(debuff_modifier, &"armor_debuff", true)
+
+	# Check buff polarity
+	if container.is_debuff(&"armor_buff", MobaStatBlock.ARMOR):
+		violations.append("is_debuff_polarity: buff should report is_debuff = false")
+
+	# Check debuff polarity
+	if not container.is_debuff(&"armor_debuff", MobaStatBlock.ARMOR):
+		violations.append("is_debuff_polarity: debuff should report is_debuff = true")
+
+	# Check absent entry returns false
+	if container.is_debuff(&"nonexistent", MobaStatBlock.ARMOR):
+		violations.append("is_debuff_polarity: absent entry should return false")
 
 	return violations

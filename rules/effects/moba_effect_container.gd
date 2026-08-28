@@ -49,6 +49,7 @@ class _Entry:
 	var stacking: int = MobaStatModifier.Stacking.REFRESH
 	var max_stacks: int = 1
 	var stacks: int = 1
+	var is_debuff: bool = false
 
 
 ## Apply a modifier under a source ability id.
@@ -56,7 +57,9 @@ class _Entry:
 ## Returns true when the container's state changed, false when the application
 ## was rejected (invalid stat) or was a deliberate no-op (IGNORE while active,
 ## or a weaker REPLACE_IF_STRONGER application).
-func apply_modifier(modifier: MobaStatModifier, source_ability_id: StringName) -> bool:
+func apply_modifier(
+	modifier: MobaStatModifier, source_ability_id: StringName, is_debuff: bool = false
+) -> bool:
 	if modifier == null:
 		push_error(
 			"MobaEffectContainer: null modifier from source ability '%s'." % source_ability_id
@@ -70,7 +73,7 @@ func apply_modifier(modifier: MobaStatModifier, source_ability_id: StringName) -
 
 	var key := _key(source_ability_id, stat)
 	if key not in _entries:
-		_entries[key] = _make_entry(modifier, source_ability_id, stat)
+		_entries[key] = _make_entry(modifier, source_ability_id, stat, is_debuff)
 		effect_applied.emit(source_ability_id, stat)
 		return true
 
@@ -165,6 +168,14 @@ func has_modifier(source_ability_id: StringName, stat: StringName) -> bool:
 	return _key(source_ability_id, stat) in _entries
 
 
+## Whether an active entry for this identity is a debuff, or false if absent.
+func is_debuff(source_ability_id: StringName, stat: StringName) -> bool:
+	var key := _key(source_ability_id, stat)
+	if key not in _entries:
+		return false
+	return (_entries[key] as _Entry).is_debuff
+
+
 ## Stack count for an identity, or 0 when no entry is active.
 func get_stacks(source_ability_id: StringName, stat: StringName) -> int:
 	var key := _key(source_ability_id, stat)
@@ -207,7 +218,10 @@ static func invalid_stat_message(stat: StringName, source_ability_id: StringName
 
 
 func _make_entry(
-	modifier: MobaStatModifier, source_ability_id: StringName, stat: StringName
+	modifier: MobaStatModifier,
+	source_ability_id: StringName,
+	stat: StringName,
+	is_debuff: bool = false
 ) -> _Entry:
 	var entry := _Entry.new()
 	entry.source_ability_id = source_ability_id
@@ -219,6 +233,7 @@ func _make_entry(
 	entry.stacking = modifier.stacking
 	entry.max_stacks = modifier.max_stacks
 	entry.stacks = 1
+	entry.is_debuff = is_debuff
 	return entry
 
 

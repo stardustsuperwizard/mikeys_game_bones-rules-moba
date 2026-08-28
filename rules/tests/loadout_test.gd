@@ -601,7 +601,7 @@ static func _test_basic_attack_damage_amount_non_crit() -> bool:
 	var damage_resolved_final = [-1.0]
 	var damage_resolved_type = [-1]
 	var damage_resolved_crit = [false]
-	var damage_handler = func(raw, final, damage_type, was_crit, _source):
+	var damage_handler = func(raw, final, damage_type, was_crit, _source, _shield_absorbed):
 		damage_resolved_raw[0] = raw
 		damage_resolved_final[0] = final
 		damage_resolved_type[0] = damage_type
@@ -708,7 +708,7 @@ static func _test_basic_attack_damage_amount_crit() -> bool:
 	var damage_resolved_final = [-1.0]
 	var damage_resolved_type = [-1]
 	var damage_resolved_crit = [false]
-	var damage_handler = func(raw, final, damage_type, was_crit, _source):
+	var damage_handler = func(raw, final, damage_type, was_crit, _source, _shield_absorbed):
 		damage_resolved_raw[0] = raw
 		damage_resolved_final[0] = final
 		damage_resolved_type[0] = damage_type

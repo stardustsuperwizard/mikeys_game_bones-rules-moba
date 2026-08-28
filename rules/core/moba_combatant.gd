@@ -10,8 +10,11 @@ extends Node
 
 signal health_changed(current: float, maximum: float)
 ## Emitted when damage is resolved. Carries both raw (pre-crit, pre-mitigation)
-## and final (post-mitigation) amounts, plus metadata about the damage event.
-signal damage_resolved(raw: float, final: float, damage_type: int, was_crit: bool, source)
+## and final (post-mitigation) amounts, plus metadata about the damage event,
+## and the amount absorbed by shields.
+signal damage_resolved(
+	raw: float, final: float, damage_type: int, was_crit: bool, source, shield_absorbed: float
+)
 ## Emitted when healing is applied via apply_healing() and not refused.
 ## Carries the actual (post-clamp) amount applied.
 signal healing_applied(amount: float)
@@ -328,7 +331,7 @@ func apply_damage(damage: MobaDamage) -> void:
 	)
 
 	# Emit damage_resolved
-	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source)
+	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source, shield_absorbed)
 
 
 ## The death/respawn ledger for this combatant, created on first use.
@@ -487,11 +490,13 @@ func apply_shield(amount: float, source: StringName, duration: float) -> void:
 ## so this is the one place "is this combatant eligible to receive effects"
 ## is decided, matching apply_damage()/apply_healing()/apply_shield()/
 ## apply_crowd_control()'s existing pattern.
-func apply_stat_modifier(modifier: MobaStatModifier, source_ability_id: StringName) -> bool:
+func apply_stat_modifier(
+	modifier: MobaStatModifier, source_ability_id: StringName, is_debuff: bool = false
+) -> bool:
 	if not is_alive():
 		return false
 
-	return get_effect_container().apply_modifier(modifier, source_ability_id)
+	return get_effect_container().apply_modifier(modifier, source_ability_id, is_debuff)
 
 
 ## The crowd control ledger for this combatant, created on first use.
@@ -602,6 +607,11 @@ func get_crowd_control_spec(cc_type: int) -> MobaCrowdControlSpec:
 ## for read-only inspection (e.g. tests).
 func has_displacement() -> bool:
 	return _get_crowd_control_tracker().has_displacement()
+
+
+## Remaining seconds for an active hard-crowd-control entry, or 0.0 if inactive.
+func get_crowd_control_remaining(cc_type: int) -> float:
+	return _get_crowd_control_tracker().get_remaining(cc_type)
 
 
 ## Forced movement direction/magnitude while a displacement is active, scaled by
@@ -806,6 +816,16 @@ func is_casting() -> bool:
 	return _get_cast_tracker().is_casting()
 
 
+## The ability currently being cast, or null when not casting.
+func get_casting_ability() -> MobaAbility:
+	return _get_cast_tracker().current_ability()
+
+
+## Seconds remaining in the current cast, or 0.0 when not casting.
+func get_cast_time_remaining() -> float:
+	return _get_cast_tracker().get_cast_time_remaining()
+
+
 ## Start a cast that will resolve after its cast_time elapses via tick().
 ## Called by MobaAbilityAction when an ability with cast_time > 0 is activated.
 func start_cast(
@@ -836,6 +856,16 @@ func _get_channel_tracker() -> MobaChannelTracker:
 ## True while this combatant has a channel in progress.
 func is_channeling() -> bool:
 	return _get_channel_tracker().is_channeling()
+
+
+## The ability currently being channeled, or null when not channeling.
+func get_channeling_ability() -> MobaAbility:
+	return _get_channel_tracker().current_ability()
+
+
+## Seconds remaining in the current channel, or 0.0 when not channeling.
+func get_channel_time_remaining() -> float:
+	return _get_channel_tracker().get_channel_time_remaining()
 
 
 ## Start a channel that will tick according to channel_tick_interval via tick().

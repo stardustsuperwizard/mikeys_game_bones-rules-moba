@@ -75,6 +75,13 @@ func has_applied_at_least_one_tick() -> bool:
 	return _channel_in_progress.has_applied_at_least_one_tick
 
 
+## Seconds remaining in the current channel, or 0.0 when not channeling.
+func get_channel_time_remaining() -> float:
+	if _channel_in_progress == null:
+		return 0.0
+	return _channel_in_progress.remaining_time
+
+
 ## Start a channel that will tick according to channel_tick_interval via tick().
 ## Called by MobaAbilityAction when an ability with channel_duration > 0 is activated.
 ##

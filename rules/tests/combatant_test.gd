@@ -65,6 +65,10 @@ static func run() -> bool:
 	var rng_seeding_violations = _test_seeded_rng()
 	all_violations.append_array(rng_seeding_violations)
 
+	# Test 11: shield_absorbed on damage_resolved: none, full, and partial absorption
+	var shield_absorbed_violations = _test_shield_absorbed_signal()
+	all_violations.append_array(shield_absorbed_violations)
+
 	if all_violations.is_empty():
 		return true
 
@@ -532,5 +536,112 @@ static func _test_loadout_duplicated() -> Array[String]:
 	combatant1.loadout = null
 	if combatant1.loadout != null:
 		violations.append("loadout_duplicated: null assignment should leave loadout null")
+
+	return violations
+
+
+## Test shield_absorbed on damage_resolved: no shield, full absorption, partial absorption.
+##
+## shield_absorbed is defined against the post-mitigation "final" amount (see
+## MobaCombatant.apply_damage(): pre_shield_final - post_shield_final), so TRUE
+## damage is used throughout to keep raw == final and isolate the shield math.
+static func _test_shield_absorbed_signal() -> Array[String]:
+	var violations: Array[String] = []
+
+	MobaRules.seed_crit_rng(42)  # Seed for deterministic results
+
+	# Case (a): no shield active -- shield_absorbed should be 0.0
+	var combatant_no_shield = MobaCombatant.new()
+	combatant_no_shield.stat_block = _BASELINE_STAT_BLOCK
+	combatant_no_shield._runtime_stat_block = combatant_no_shield.stat_block.duplicate()
+	combatant_no_shield._current_health = (combatant_no_shield._runtime_stat_block.get_stat_value(
+		MobaStatBlock.HEALTH
+	))
+	combatant_no_shield._runtime_stat_block.crit_chance = 0.0
+
+	var absorbed_no_shield := [-1.0]
+	combatant_no_shield.damage_resolved.connect(
+		func(_raw: float, _final: float, _dtype: int, _crit: bool, _src, absorbed: float):
+			absorbed_no_shield[0] = absorbed
+	)
+
+	var initial_health_no_shield = combatant_no_shield._current_health
+	combatant_no_shield.apply_damage(MobaDamage.new(50.0, MobaDamage.DamageType.TRUE))
+
+	if not is_equal_approx(absorbed_no_shield[0], 0.0):
+		violations.append(
+			(
+				"shield_absorbed_signal: no shield active should report 0.0, got %f"
+				% absorbed_no_shield[0]
+			)
+		)
+
+	if not is_equal_approx(combatant_no_shield._current_health, initial_health_no_shield - 50.0):
+		violations.append("shield_absorbed_signal: no-shield health should drop by the full hit")
+
+	# Case (b): a shield that fully absorbs the hit -- shield_absorbed equals the
+	# post-mitigation final damage, and health does not change.
+	var combatant_full = MobaCombatant.new()
+	combatant_full.stat_block = _BASELINE_STAT_BLOCK
+	combatant_full._runtime_stat_block = combatant_full.stat_block.duplicate()
+	combatant_full._current_health = combatant_full._runtime_stat_block.get_stat_value(
+		MobaStatBlock.HEALTH
+	)
+	combatant_full._runtime_stat_block.crit_chance = 0.0
+	combatant_full.apply_shield(100.0, &"test_shield", 10.0)
+
+	var absorbed_full := [-1.0]
+	combatant_full.damage_resolved.connect(
+		func(_raw: float, _final: float, _dtype: int, _crit: bool, _src, absorbed: float):
+			absorbed_full[0] = absorbed
+	)
+
+	var initial_health_full = combatant_full._current_health
+	combatant_full.apply_damage(MobaDamage.new(50.0, MobaDamage.DamageType.TRUE))
+
+	if not is_equal_approx(absorbed_full[0], 50.0):
+		violations.append(
+			"shield_absorbed_signal: full absorption should report 50.0, got %f" % absorbed_full[0]
+		)
+
+	if not is_equal_approx(combatant_full._current_health, initial_health_full):
+		violations.append("shield_absorbed_signal: fully-shielded hit should not reduce health")
+
+	# Case (c): a shield that only partially absorbs -- shield_absorbed equals the
+	# shield's remaining capacity, and the remainder reduces health.
+	var combatant_partial = MobaCombatant.new()
+	combatant_partial.stat_block = _BASELINE_STAT_BLOCK
+	combatant_partial._runtime_stat_block = combatant_partial.stat_block.duplicate()
+	combatant_partial._current_health = combatant_partial._runtime_stat_block.get_stat_value(
+		MobaStatBlock.HEALTH
+	)
+	combatant_partial._runtime_stat_block.crit_chance = 0.0
+	combatant_partial.apply_shield(20.0, &"test_shield", 10.0)
+
+	var absorbed_partial := [-1.0]
+	combatant_partial.damage_resolved.connect(
+		func(_raw: float, _final: float, _dtype: int, _crit: bool, _src, absorbed: float):
+			absorbed_partial[0] = absorbed
+	)
+
+	var initial_health_partial = combatant_partial._current_health
+	combatant_partial.apply_damage(MobaDamage.new(50.0, MobaDamage.DamageType.TRUE))
+
+	if not is_equal_approx(absorbed_partial[0], 20.0):
+		violations.append(
+			(
+				"shield_absorbed_signal: partial absorption should report 20.0, got %f"
+				% absorbed_partial[0]
+			)
+		)
+
+	var expected_health_partial = initial_health_partial - (50.0 - 20.0)
+	if not is_equal_approx(combatant_partial._current_health, expected_health_partial):
+		violations.append(
+			(
+				"shield_absorbed_signal: partial absorption should reduce health by the"
+				+ " unabsorbed remainder"
+			)
+		)
 
 	return violations
