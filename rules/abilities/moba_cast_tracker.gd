@@ -21,16 +21,22 @@ extends RefCounted
 class _CastInProgress:
 	var ability_id: StringName
 	var ability: MobaAbility
-	var resolved_target: Node
+	var resolved_targets: Array[Node]
 	var remaining_time: float
+	var context: MobaCastContext  # Needed to re-resolve GROUND abilities at resolution time
 
 	func _init(
-		p_ability_id: StringName, p_ability: MobaAbility, p_target: Node, p_time: float
+		p_ability_id: StringName,
+		p_ability: MobaAbility,
+		p_targets: Array[Node],
+		p_time: float,
+		p_context: MobaCastContext = null
 	) -> void:
 		ability_id = p_ability_id
 		ability = p_ability
-		resolved_target = p_target
+		resolved_targets = p_targets
 		remaining_time = p_time
+		context = p_context
 
 
 ## The combatant this tracker belongs to.
@@ -69,12 +75,17 @@ func get_cast_time_remaining() -> float:
 ## Args:
 ##     ability_id: The ability being cast
 ##     ability: The resolved MobaAbility resource
-##     resolved_target: The target (may be null; guarded in resolution)
+##     resolved_targets: The targets (may be empty; guarded in resolution)
 ##     cast_time: Remaining time until resolution, in seconds
+##     context: The MobaCastContext (needed for GROUND re-resolution)
 func start(
-	ability_id: StringName, ability: MobaAbility, resolved_target: Node, cast_time: float
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+	cast_time: float,
+	context: MobaCastContext = null
 ) -> void:
-	_cast_in_progress = _CastInProgress.new(ability_id, ability, resolved_target, cast_time)
+	_cast_in_progress = _CastInProgress.new(ability_id, ability, resolved_targets, cast_time, context)
 
 
 ## Cancel an in-progress cast and apply the on_cancel outcome (resource
@@ -136,26 +147,44 @@ func _undo_cooldown_only(ability_id: StringName) -> void:
 	_combatant.cancel_cooldown(ability_id)
 
 
-## Resolve a cast that has expired: apply damage and effects to the target.
+## Resolve a cast that has expired: apply damage and effects to all targets.
 ##
-## Resolution runs through MobaAbilityAction.resolve() -- the same
-## implementation an instant ability uses -- so a cast_time ability and an
-## instant one cannot resolve differently. It guards a null/freed target
-## itself, leaving the already-committed resource and cooldown spent.
+## For GROUND abilities, targets are re-resolved at resolution time (after the
+## cast delay) so targets that moved out of radius during the delay are not hit.
+## For all other targeting types, pre-resolved targets from activation time are used.
+##
+## Resolution runs through MobaAbilityAction.resolve() -- the same implementation
+## an instant ability uses -- so a cast_time ability and an instant one cannot
+## resolve differently. It guards null/freed targets itself, leaving the
+## already-committed resource and cooldown spent.
+##
+## The in-progress cast is cleared BEFORE applying effects, so a cancel() call
+## made within effect application finds nothing in progress (per Scope's
+## "resolution wins ties" guarantee).
 func _resolve() -> void:
 	if _cast_in_progress == null:
 		return
 
 	var ability := _cast_in_progress.ability
+	var targets_to_resolve: Array[Node]
 
-	# Left untyped on purpose: the target may have been freed while the cast
-	# was in flight, and narrowing a freed object into a Node-typed local
-	# would fault here rather than no-opping inside resolve().
-	var resolved_target = _cast_in_progress.resolved_target
+	# For GROUND abilities, re-resolve targets at resolution time to capture
+	# the aimed point after the cast delay. For all other types, use pre-resolved
+	# targets from activation time.
+	if ability.targeting_type == MobaAbility.TargetingType.GROUND and _cast_in_progress.context != null:
+		# Re-resolve GROUND targets at this moment (after cast_time has elapsed)
+		var caster := _cast_in_progress.context.caster
+		var ground_point := _cast_in_progress.context.ground_point
+		targets_to_resolve = MobaTargeting.resolve_ground(caster, ground_point, ability)
+	else:
+		# Use pre-resolved targets from activation time
+		targets_to_resolve = _cast_in_progress.resolved_targets
 
 	# Clear the in-progress cast BEFORE resolving effects, so a cancel() call
 	# made within any effect application finds nothing in progress (per Scope's
 	# "resolution wins ties" guarantee).
 	_cast_in_progress = null
 
-	MobaAbilityAction.resolve(ability, resolved_target, _combatant)
+	# Apply resolution to each target through the shared resolve() implementation
+	for target in targets_to_resolve:
+		MobaAbilityAction.resolve(ability, target, _combatant)

@@ -102,7 +102,7 @@ static func _test_cast_shows_name_and_progress() -> Array[String]:
 		violations.append("cast_progress: bar should be hidden when not casting")
 
 	# Start a cast
-	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), null, 2.0)
+	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), [], 2.0)
 	bar.refresh()
 
 	# Bar should be visible
@@ -159,7 +159,7 @@ static func _test_channel_shows_name_and_progress() -> Array[String]:
 
 	# Start a channel
 	combatant.start_channel(
-		&"channel_ability", combatant.get_ability(&"channel_ability"), null, 2.0
+		&"channel_ability", combatant.get_ability(&"channel_ability"), [], 2.0
 	)
 	bar.refresh()
 
@@ -212,7 +212,7 @@ static func _test_clears_on_cast_completion() -> Array[String]:
 	bar.bind(combatant)
 
 	# Start a cast
-	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), null, 0.5)
+	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), [], 0.5)
 	bar.refresh()
 
 	if not bar.visible:
@@ -246,7 +246,7 @@ static func _test_clears_on_channel_completion() -> Array[String]:
 
 	# Start a channel
 	combatant.start_channel(
-		&"channel_ability", combatant.get_ability(&"channel_ability"), null, 0.5
+		&"channel_ability", combatant.get_ability(&"channel_ability"), [], 0.5
 	)
 	bar.refresh()
 
@@ -283,7 +283,7 @@ static func _test_clears_on_cast_cancellation() -> Array[String]:
 	bar.bind(combatant)
 
 	# Start a cast
-	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), null, 2.0)
+	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), [], 2.0)
 	bar.refresh()
 
 	if not bar.visible:
@@ -322,7 +322,7 @@ static func _test_clears_on_channel_break() -> Array[String]:
 	# hard-CC interrupt seam sees the state it gates on.
 	state_machine.try_enter(MobaState.ABILITY_CHANNEL, 2.0)
 	combatant.start_channel(
-		&"channel_ability", combatant.get_ability(&"channel_ability"), null, 2.0
+		&"channel_ability", combatant.get_ability(&"channel_ability"), [], 2.0
 	)
 	# Tick at least once to allow break
 	combatant.tick(0.1)
@@ -373,7 +373,7 @@ static func _test_clears_on_cast_hard_cc_interrupt() -> Array[String]:
 	bar.bind(combatant)
 
 	state_machine.try_enter(MobaState.ABILITY_CAST, 2.0)
-	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), null, 2.0)
+	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), [], 2.0)
 	combatant.tick(0.1)
 	bar.refresh()
 

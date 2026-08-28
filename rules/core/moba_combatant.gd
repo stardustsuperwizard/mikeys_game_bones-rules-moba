@@ -828,10 +828,15 @@ func get_cast_time_remaining() -> float:
 
 ## Start a cast that will resolve after its cast_time elapses via tick().
 ## Called by MobaAbilityAction when an ability with cast_time > 0 is activated.
+## For GROUND abilities, the context is needed to re-resolve targets at resolution time.
 func start_cast(
-	ability_id: StringName, ability: MobaAbility, resolved_target: Node, cast_time: float
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+	cast_time: float,
+	context: MobaCastContext = null
 ) -> void:
-	_get_cast_tracker().start(ability_id, ability, resolved_target, cast_time)
+	_get_cast_tracker().start(ability_id, ability, resolved_targets, cast_time, context)
 
 
 ## Cancel an in-progress cast and apply the on_cancel outcome (resource refund,
@@ -871,9 +876,12 @@ func get_channel_time_remaining() -> float:
 ## Start a channel that will tick according to channel_tick_interval via tick().
 ## Called by MobaAbilityAction when an ability with channel_duration > 0 is activated.
 func start_channel(
-	ability_id: StringName, ability: MobaAbility, resolved_target: Node, channel_duration: float
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+	channel_duration: float
 ) -> void:
-	_get_channel_tracker().start(ability_id, ability, resolved_target, channel_duration)
+	_get_channel_tracker().start(ability_id, ability, resolved_targets, channel_duration)
 
 
 ## Break an in-progress channel and apply the on_channel_break outcome.

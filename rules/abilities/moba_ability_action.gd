@@ -73,7 +73,8 @@ func execute() -> ActionResult:
 	var target_resolution := _resolve_target(ability)
 	if target_resolution.failure != &"":
 		return ActionResult.new(false, target_resolution.failure)
-	var resolved_target: Node = target_resolution.target
+	var resolved_targets: Array[Node] = []
+	resolved_targets.assign(target_resolution.targets)
 
 	# Step 6: Commit activation (spend resource and start cooldown)
 	var commit_failure := _commit_activation(combatant)
@@ -90,28 +91,24 @@ func execute() -> ActionResult:
 			state_machine.try_enter(MobaState.ABILITY_CAST, ability.cast_time)
 
 		# Start the cast: damage and effects will be applied when it resolves via tick().
-		# start_cast() -> MobaCastTracker.start() -> _CastInProgress._init() all take
-		# a typed Node parameter, so a target freed between commit (step 6) and here
-		# would fault at that boundary rather than no-opping. Substitute null in that
-		# case: MobaCastTracker._resolve() and resolve() already guard a null target,
-		# and the cast still gets registered so tick()/cancel() have something to act on.
-		var cast_target: Node = resolved_target if is_instance_valid(resolved_target) else null
-		combatant.start_cast(ability_id, ability, cast_target, ability.cast_time)
+		# start_cast() receives a target list that will be re-resolved for GROUND at
+		# cast resolution time (after delay) to capture targets at the aimed point.
+		combatant.start_cast(ability_id, ability, resolved_targets, ability.cast_time, context)
 	elif ability.channel_duration > 0.0:
 		# Enter ABILITY_CHANNEL state
 		if state_machine != null:
 			state_machine.try_enter(MobaState.ABILITY_CHANNEL, ability.channel_duration)
 
 		# Start the channel: ticks (including the first tick at t = 0) will be applied
-		# via tick(). Like the cast path, guard against a freed target.
-		var channel_target: Node = resolved_target if is_instance_valid(resolved_target) else null
-		combatant.start_channel(ability_id, ability, channel_target, ability.channel_duration)
+		# via tick().
+		combatant.start_channel(ability_id, ability, resolved_targets, ability.channel_duration)
 	else:
 		# Instant ability: steps 8-9 run now, through the same resolve() the
 		# deferred cast path uses. A target that evaporated between commit
 		# (step 6) and here makes resolution a safe no-op; the resource spend
 		# and cooldown start committed above are never refunded.
-		resolve(ability, resolved_target, combatant)
+		for target in resolved_targets:
+			resolve(ability, target, combatant)
 
 	return ActionResult.new(true)
 
@@ -158,19 +155,44 @@ func _check_early_legality(combatant: MobaCombatant) -> StringName:
 	return &""
 
 
-## Resolve the ability's target based on its targeting type.
-## Returns {"target": Node, "failure": StringName}; failure is empty on success.
+## Resolve the ability's target(s) based on its targeting type.
+## Returns {"targets": Array[Node], "failure": StringName}; failure is empty on success.
+##
+## SELF, TARGETED, and CHANNELED are resolved inline to preserve their existing
+## behavior (range checks, null handling). AREA and GROUND route through MobaTargeting
+## for shape-query physics resolution and shared filtering.
 func _resolve_target(ability: MobaAbility) -> Dictionary:
 	match ability.targeting_type:
 		MobaAbility.TargetingType.SELF:
-			return {"target": actor, "failure": &""}
+			# SELF always targets the caster
+			return {"targets": [actor], "failure": &""}
+
 		MobaAbility.TargetingType.TARGETED:
-			return _resolve_targeted_or_channeled_target(ability)
+			var resolution := _resolve_targeted_or_channeled_target(ability)
+			if resolution.failure != &"":
+				return {"targets": [], "failure": resolution.failure}
+			return {"targets": [resolution.target], "failure": &""}
+
 		MobaAbility.TargetingType.CHANNELED:
-			return _resolve_targeted_or_channeled_target(ability)
+			var resolution := _resolve_targeted_or_channeled_target(ability)
+			if resolution.failure != &"":
+				return {"targets": [], "failure": resolution.failure}
+			return {"targets": [resolution.target], "failure": &""}
+
+		MobaAbility.TargetingType.AREA:
+			var targets := MobaTargeting.resolve_area(actor, ability)
+			return {"targets": targets, "failure": &""}
+
+		MobaAbility.TargetingType.GROUND:
+			# For instant GROUND abilities, resolve immediately. For cast_time > 0,
+			# MobaCastTracker will re-resolve at resolution time so targets that
+			# moved out of radius during the delay are not hit.
+			var targets := MobaTargeting.resolve_ground(actor, context.ground_point, ability)
+			return {"targets": targets, "failure": &""}
+
 		_:
-			# All other targeting types not implemented in Batch 1
-			return {"target": null, "failure": FAILURE_TARGETING_NOT_IMPLEMENTED}
+			# All other targeting types not implemented (SKILLSHOT, TOGGLE)
+			return {"targets": [], "failure": FAILURE_TARGETING_NOT_IMPLEMENTED}
 
 
 ## Resolve a targeted or channeled ability's target, checking validity and range.
