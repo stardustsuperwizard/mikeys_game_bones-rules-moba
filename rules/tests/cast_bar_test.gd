@@ -19,6 +19,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_cast_shows_name_and_progress())
 	all_violations.append_array(_test_channel_shows_name_and_progress())
 	all_violations.append_array(_test_clears_on_cast_completion())
+	all_violations.append_array(_test_clears_on_channel_completion())
 	all_violations.append_array(_test_clears_on_cast_cancellation())
 	all_violations.append_array(_test_clears_on_channel_break())
 	all_violations.append_array(_test_clears_on_cast_hard_cc_interrupt())
@@ -102,7 +103,7 @@ static func _test_cast_shows_name_and_progress() -> Array[String]:
 
 	# Start a cast
 	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), null, 2.0)
-	bar._process(0.0)  # Process to refresh
+	bar.refresh()
 
 	# Bar should be visible
 	if not bar.visible:
@@ -126,7 +127,7 @@ static func _test_cast_shows_name_and_progress() -> Array[String]:
 
 	# Advance time and check progress increases
 	combatant.tick(1.0)
-	bar._process(0.0)
+	bar.refresh()
 	var after_tick_progress: float = progress_bar.value
 	if after_tick_progress <= initial_progress:
 		violations.append("cast_progress: progress should increase as time elapses")
@@ -160,7 +161,7 @@ static func _test_channel_shows_name_and_progress() -> Array[String]:
 	combatant.start_channel(
 		&"channel_ability", combatant.get_ability(&"channel_ability"), null, 2.0
 	)
-	bar._process(0.0)  # Process to refresh
+	bar.refresh()
 
 	# Bar should be visible
 	if not bar.visible:
@@ -184,7 +185,7 @@ static func _test_channel_shows_name_and_progress() -> Array[String]:
 
 	# Advance time and check progress increases
 	combatant.tick(1.0)
-	bar._process(0.0)
+	bar.refresh()
 	var after_tick_progress: float = progress_bar.value
 	if after_tick_progress <= initial_progress:
 		violations.append("channel_progress: progress should increase as time elapses")
@@ -212,14 +213,14 @@ static func _test_clears_on_cast_completion() -> Array[String]:
 
 	# Start a cast
 	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), null, 0.5)
-	bar._process(0.0)
+	bar.refresh()
 
 	if not bar.visible:
 		violations.append("cast_completion: bar should be visible during cast")
 
 	# Advance time until cast completes (more than cast_time)
 	combatant.tick(0.6)
-	bar._process(0.0)
+	bar.refresh()
 
 	# Bar should be hidden after completion
 	if bar.visible:
@@ -228,6 +229,44 @@ static func _test_clears_on_cast_completion() -> Array[String]:
 	var name_label: Label = bar.get_node("VBox/NameLabel")
 	if name_label.text != "":
 		violations.append("cast_completion: name should be cleared after completion")
+
+	bar.free()
+	combatant.free()
+	return violations
+
+
+static func _test_clears_on_channel_completion() -> Array[String]:
+	var violations: Array[String] = []
+
+	var combatant := _make_combatant()
+	combatant.register_ability(_make_ability("channel_ability", 0.0, 0.5))
+
+	var bar: MobaCastBar = CAST_BAR_SCENE.instantiate()
+	bar.bind(combatant)
+
+	# Start a channel
+	combatant.start_channel(
+		&"channel_ability", combatant.get_ability(&"channel_ability"), null, 0.5
+	)
+	bar.refresh()
+
+	if not bar.visible:
+		violations.append("channel_completion: bar should be visible during channel")
+
+	# Advance time until the channel naturally expires (more than channel_time)
+	combatant.tick(0.6)
+	bar.refresh()
+
+	if combatant.is_channeling():
+		violations.append("channel_completion: channel should have expired")
+
+	# Bar should be hidden after completion
+	if bar.visible:
+		violations.append("channel_completion: bar should be hidden after channel completes")
+
+	var name_label: Label = bar.get_node("VBox/NameLabel")
+	if name_label.text != "":
+		violations.append("channel_completion: name should be cleared after completion")
 
 	bar.free()
 	combatant.free()
@@ -245,14 +284,14 @@ static func _test_clears_on_cast_cancellation() -> Array[String]:
 
 	# Start a cast
 	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), null, 2.0)
-	bar._process(0.0)
+	bar.refresh()
 
 	if not bar.visible:
 		violations.append("cast_cancellation: bar should be visible during cast")
 
 	# Cancel the cast
 	combatant.cancel_cast()
-	bar._process(0.0)
+	bar.refresh()
 
 	# Bar should be hidden after cancellation
 	if bar.visible:
@@ -287,7 +326,7 @@ static func _test_clears_on_channel_break() -> Array[String]:
 	)
 	# Tick at least once to allow break
 	combatant.tick(0.1)
-	bar._process(0.0)
+	bar.refresh()
 
 	if not bar.visible:
 		violations.append("channel_break: bar should be visible during channel")
@@ -300,7 +339,7 @@ static func _test_clears_on_channel_break() -> Array[String]:
 	spec.duration = 1.0
 	spec.affected_by_tenacity = false
 	combatant.apply_crowd_control(spec, null)
-	bar._process(0.0)
+	bar.refresh()
 
 	if combatant.is_channeling():
 		violations.append("channel_break: hard CC should have broken the channel")
@@ -336,7 +375,7 @@ static func _test_clears_on_cast_hard_cc_interrupt() -> Array[String]:
 	state_machine.try_enter(MobaState.ABILITY_CAST, 2.0)
 	combatant.start_cast(&"cast_ability", combatant.get_ability(&"cast_ability"), null, 2.0)
 	combatant.tick(0.1)
-	bar._process(0.0)
+	bar.refresh()
 
 	if not bar.visible:
 		violations.append("cast_hard_cc: bar should be visible during cast")
@@ -346,7 +385,7 @@ static func _test_clears_on_cast_hard_cc_interrupt() -> Array[String]:
 	spec.duration = 1.0
 	spec.affected_by_tenacity = false
 	combatant.apply_crowd_control(spec, null)
-	bar._process(0.0)
+	bar.refresh()
 
 	if combatant.is_casting():
 		violations.append("cast_hard_cc: hard CC should have interrupted the cast")
@@ -377,7 +416,7 @@ static func _test_rebind_has_no_stale_state() -> Array[String]:
 	# Bind to combatant1 and start a cast
 	bar.bind(combatant1)
 	combatant1.start_cast(&"cast_ability_1", combatant1.get_ability(&"cast_ability_1"), null, 2.0)
-	bar._process(0.0)
+	bar.refresh()
 
 	var name_label: Label = bar.get_node("VBox/NameLabel")
 	if name_label.text != "Test cast_ability_1":
@@ -388,7 +427,7 @@ static func _test_rebind_has_no_stale_state() -> Array[String]:
 
 	# Rebind to combatant2 (which is not casting)
 	bar.bind(combatant2)
-	bar._process(0.0)
+	bar.refresh()
 
 	# Bar should be hidden and name cleared
 	if bar.visible:
@@ -399,7 +438,7 @@ static func _test_rebind_has_no_stale_state() -> Array[String]:
 
 	# Rebind to null
 	bar.bind(null)
-	bar._process(0.0)
+	bar.refresh()
 
 	if bar.visible:
 		violations.append("rebind: bar should be hidden when bound to null")

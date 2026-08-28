@@ -22,6 +22,7 @@ Nothing here searches the scene tree for the player.
 
 - `MobaCombatHUD.bind(combatant)` hands the HUD its combatant.
 - `MobaAbilitySlot.set_ability(combatant, ability_id)` hands a slot its ability.
+- `MobaCastBar.bind(combatant)` / `unbind()` hands the cast bar its combatant.
 
 `bind()` is safe to call repeatedly: it disconnects the previous combatant
 before connecting the new one, so a respawn cannot accumulate duplicate
@@ -32,8 +33,9 @@ state; the HUD also drops a binding whose combatant has been freed, because
 `Actor.die()` calls `queue_free()`.
 
 Health and resource are signal-driven — `health_changed` and
-`resource_changed` — and are never polled per frame. The only per-frame poll in
-this directory is the cooldown sweep, and it lives in the slot.
+`resource_changed` — and are never polled per frame. The per-frame polls in
+this directory are the cooldown sweep in the slot and the cast/channel poll
+in `MobaCastBar`.
 
 ## The focused-slot tooltip seam
 

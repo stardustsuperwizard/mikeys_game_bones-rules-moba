@@ -25,10 +25,18 @@ var _progress_bar: TextureProgressBar = null
 
 func _ready() -> void:
 	_ensure_nodes()
+	refresh()
 
 
 ## Polling for casting/channeling state is the only per-frame work.
 func _process(_delta: float) -> void:
+	refresh()
+
+
+## Re-render both visibility and progress. Called on binding changes and
+## on ready; per-frame updates use the same pair since this bar has no
+## narrower refresh to fall back to.
+func refresh() -> void:
 	_refresh_visibility()
 	_refresh_progress()
 
@@ -42,8 +50,7 @@ func bind(combatant: MobaCombatant) -> void:
 	_ensure_nodes()
 	_disconnect_combatant()
 	_combatant = combatant if is_instance_valid(combatant) else null
-	_refresh_visibility()
-	_refresh_progress()
+	refresh()
 
 
 ## Drop the binding and render the empty state.
@@ -133,10 +140,12 @@ func _render_empty() -> void:
 		_progress_bar.value = 0.0
 
 
+## No signals to disconnect: this bar uses polling only. bind() still calls
+## this before reassigning _combatant, matching MobaCombatHUD.bind()'s
+## disconnect-then-reconnect shape, so the seam stays obvious for whoever
+## adds a signal here later.
 func _disconnect_combatant() -> void:
-	# No signals to disconnect: this bar uses polling only
-	if not is_instance_valid(_combatant):
-		_combatant = null
+	pass
 
 
 ## Resolves child nodes without requiring the bar to be inside the scene tree,
