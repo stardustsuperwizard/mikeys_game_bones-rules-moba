@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://addons/mikeys_game_bones/actors/actor.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/player_body_3d.gd" id="2"]
@@ -9,6 +9,8 @@
 [ext_resource type="Script" path="res://rules/state/moba_state_machine.gd" id="7"]
 [ext_resource type="Script" path="res://rules/abilities/moba_ability_caster.gd" id="8"]
 [ext_resource type="Resource" path="res://resources/player_respawn_policy.tres" id="9"]
+[ext_resource type="Script" path="res://rules/input/moba_input_router.gd" id="10"]
+[ext_resource type="Script" path="res://rules/input/moba_input_scheme.gd" id="11"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 height = 2.0
@@ -59,3 +61,9 @@ script = ExtResource("7")
 
 [node name="MobaAbilityCaster" type="Node" parent="."]
 script = ExtResource("8")
+
+[node name="MobaInputRouter" type="Node" parent="."]
+script = ExtResource("10")
+
+[node name="MobaInputScheme" type="Node" parent="."]
+script = ExtResource("11")

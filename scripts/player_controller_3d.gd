@@ -80,9 +80,19 @@ var _interact_target: Node = null
 var _closest_distance := INF
 var _stall_timer := 0.0
 
+# The active input scheme, exposed for future consumers like prompt glyph swapping.
+var _input_scheme: MobaInputScheme
+
 
 func _ready() -> void:
 	actor.add_to_group("players")
+
+	# Wire the input intent layer for abilities and jump.
+	var input_router := actor.get_node_or_null("MobaInputRouter") as MobaInputRouter
+	if input_router:
+		input_router.intent_emitted.connect(_on_intent_emitted)
+
+	_input_scheme = actor.get_node_or_null("MobaInputScheme") as MobaInputScheme
 
 
 # Ticks the MOBA combatant once per physics frame.  MobaCombatant.tick() drives
@@ -124,9 +134,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("jump"):
-		_jump_requested = true
-	elif event.is_action_pressed("action_primary"):
+	if event.is_action_pressed("action_primary"):
 		# The camera captures the mouse while right-drag look is active, which
 		# parks the cursor at screen center -- a click then would pick whatever
 		# happens to be under the crosshair rather than what the player aimed at.
@@ -134,15 +142,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			_issue_order_from_click(get_viewport().get_mouse_position())
 		else:
 			print("Left click ignored: mouse is captured by camera look")
-	# Ability slots: keys 1-4 / gamepad A/B/X/Y.
-	elif event.is_action_pressed("ability_1"):
-		_activate_slot(1)
-	elif event.is_action_pressed("ability_2"):
-		_activate_slot(2)
-	elif event.is_action_pressed("ability_3"):
-		_activate_slot(3)
-	elif event.is_action_pressed("ability_4"):
-		_activate_slot(4)
 	# NOTE: basic_attack is also bound to left mouse button (same as
 	# action_primary in project.godot).  It is intentionally NOT consumed
 	# here: reading it from _unhandled_input would cause a single left click
@@ -213,6 +212,17 @@ func get_turn_direction() -> float:
 	if turn != 0.0:
 		return turn
 	return _order_turn_direction()
+
+
+# Handles input intents from the MobaInputRouter: abilities and jump.
+# The router emits these when the corresponding actions are pressed.
+func _on_intent_emitted(intent: RefCounted) -> void:
+	if intent is MobaIntent.JumpIntent:
+		_jump_requested = true
+	elif intent is MobaIntent.AbilityIntent:
+		var ability_intent := intent as MobaIntent.AbilityIntent
+		if ability_intent.phase == MobaIntent.AbilityIntent.Phase.PRESS:
+			_activate_slot(ability_intent.slot)
 
 
 # Consumes and returns the buffered jump request.
@@ -509,6 +519,13 @@ func get_current_target_combatant() -> MobaCombatant:
 	if not is_instance_valid(target_actor):
 		return null
 	return target_actor.get_node_or_null("MobaCombatant") as MobaCombatant
+
+
+# Returns the active MobaInputScheme for this player, exposing the
+# scheme_changed signal for future consumers like prompt glyph swapping.
+# Returns null if the scheme was not successfully initialized.
+func get_input_scheme() -> MobaInputScheme:
+	return _input_scheme
 
 
 # Unit vector pointing straight away from the recorded FEAR source, flattened to
