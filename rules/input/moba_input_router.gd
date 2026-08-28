@@ -18,6 +18,19 @@ extends Node
 ## match on type rather than subscribing to seven separate channels.
 signal intent_emitted(intent: RefCounted)
 
+## Transition an action made between two polls.
+##
+## Derived from held state rather than read from Input.is_action_just_*, whose
+## answers are tied to the engine's frame counter. Deriving them keeps a poll
+## self-consistent however it is driven, which is what lets the suite step a
+## whole gesture synchronously.
+enum Edge {
+	IDLE,
+	PRESSED,
+	HELD,
+	RELEASED,
+}
+
 ## Number of ability slots, matching MobaLoadout's positional slots.
 const _ABILITY_SLOTS: int = 4
 
@@ -37,9 +50,6 @@ var action_strength_source: Callable = func(action: StringName) -> float:
 ## poll self-consistent however it is driven, which is what lets the suite step
 ## a full PRESS -> AIM -> RELEASE gesture synchronously.
 var _was_pressed: Dictionary = {}
-
-## Slots with a gesture currently in flight, so AIM only follows a real PRESS.
-var _ability_active: Dictionary = {}
 
 
 func _process(_delta: float) -> void:
@@ -67,25 +77,15 @@ func _axis(negative: StringName, positive: StringName) -> float:
 	return _strength(positive) - _strength(negative)
 
 
-## True on the poll an action goes down; updates the remembered state.
-## Call at most once per action per poll -- it consumes the edge.
-func _just_pressed(action: StringName) -> bool:
+## What one action did between the previous poll and this one.
+func _edge(action: StringName) -> Edge:
 	var down := _strength(action) > 0.0
 	var before: bool = _was_pressed.get(action, false)
 	_was_pressed[action] = down
-	return down and not before
 
-
-## True on the poll an action comes up; updates the remembered state.
-func _just_released(action: StringName) -> bool:
-	var down := _strength(action) > 0.0
-	var before: bool = _was_pressed.get(action, false)
-	_was_pressed[action] = down
-	return before and not down
-
-
-func _is_down(action: StringName) -> bool:
-	return _strength(action) > 0.0
+	if down:
+		return Edge.PRESSED if not before else Edge.HELD
+	return Edge.RELEASED if before else Edge.IDLE
 
 
 ## Emit movement. Translation and rotation go out as separate intents so the
@@ -109,23 +109,20 @@ func _poll_movement() -> void:
 
 
 func _poll_jump() -> void:
-	if _just_pressed(&"jump"):
+	if _edge(&"jump") == Edge.PRESSED:
 		intent_emitted.emit(MobaIntent.JumpIntent.new())
 
 
 func _poll_basic_attack() -> void:
-	var down := _is_down(&"basic_attack")
-	var before: bool = _was_pressed.get(&"basic_attack", false)
-	_was_pressed[&"basic_attack"] = down
-
-	if down and not before:
-		var pressed := MobaIntent.BasicAttackIntent.new()
-		pressed.held = true
-		intent_emitted.emit(pressed)
-	elif before and not down:
-		var released := MobaIntent.BasicAttackIntent.new()
-		released.held = false
-		intent_emitted.emit(released)
+	match _edge(&"basic_attack"):
+		Edge.PRESSED:
+			var pressed := MobaIntent.BasicAttackIntent.new()
+			pressed.held = true
+			intent_emitted.emit(pressed)
+		Edge.RELEASED:
+			var released := MobaIntent.BasicAttackIntent.new()
+			released.held = false
+			intent_emitted.emit(released)
 
 
 ## Emit the ability gesture lifecycle: PRESS on the way down, AIM every poll
@@ -136,19 +133,13 @@ func _poll_basic_attack() -> void:
 func _poll_abilities() -> void:
 	for slot in range(1, _ABILITY_SLOTS + 1):
 		var action := StringName("ability_%d" % slot)
-		var down := _is_down(action)
-		var before: bool = _was_pressed.get(action, false)
-		_was_pressed[action] = down
-
-		if down and not before:
-			_ability_active[slot] = true
-			intent_emitted.emit(_ability(slot, MobaIntent.AbilityIntent.Phase.PRESS))
-		elif before and not down:
-			if _ability_active.get(slot, false):
-				_ability_active[slot] = false
+		match _edge(action):
+			Edge.PRESSED:
+				intent_emitted.emit(_ability(slot, MobaIntent.AbilityIntent.Phase.PRESS))
+			Edge.HELD:
+				intent_emitted.emit(_ability(slot, MobaIntent.AbilityIntent.Phase.AIM))
+			Edge.RELEASED:
 				intent_emitted.emit(_ability(slot, MobaIntent.AbilityIntent.Phase.RELEASE))
-		elif down and _ability_active.get(slot, false):
-			intent_emitted.emit(_ability(slot, MobaIntent.AbilityIntent.Phase.AIM))
 
 
 func _ability(slot: int, phase: MobaIntent.AbilityIntent.Phase) -> MobaIntent.AbilityIntent:
@@ -161,22 +152,19 @@ func _ability(slot: int, phase: MobaIntent.AbilityIntent.Phase) -> MobaIntent.Ab
 ## Emit lock-on press and release. CYCLE stays unproducible: the single bound
 ## lock_on action has no cycling semantics defined yet.
 func _poll_lock_on() -> void:
-	var down := _is_down(&"lock_on")
-	var before: bool = _was_pressed.get(&"lock_on", false)
-	_was_pressed[&"lock_on"] = down
-
-	if down and not before:
-		var pressed := MobaIntent.LockOnIntent.new()
-		pressed.phase = MobaIntent.LockOnIntent.Phase.PRESS
-		intent_emitted.emit(pressed)
-	elif before and not down:
-		var released := MobaIntent.LockOnIntent.new()
-		released.phase = MobaIntent.LockOnIntent.Phase.RELEASE
-		intent_emitted.emit(released)
+	match _edge(&"lock_on"):
+		Edge.PRESSED:
+			var pressed := MobaIntent.LockOnIntent.new()
+			pressed.phase = MobaIntent.LockOnIntent.Phase.PRESS
+			intent_emitted.emit(pressed)
+		Edge.RELEASED:
+			var released := MobaIntent.LockOnIntent.new()
+			released.phase = MobaIntent.LockOnIntent.Phase.RELEASE
+			intent_emitted.emit(released)
 
 
 func _poll_defend() -> void:
-	if _just_pressed(&"defend"):
+	if _edge(&"defend") == Edge.PRESSED:
 		var intent := MobaIntent.UtilityIntent.new()
 		intent.id = &"defend"
 		intent_emitted.emit(intent)
