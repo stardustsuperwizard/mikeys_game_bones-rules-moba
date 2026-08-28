@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://rules/ui/moba_floating_text.gd" id="1"]
+
+[node name="MobaFloatingText" type="CanvasLayer"]
+script = ExtResource("1")
+max_concurrent = 20
+base_offset_y = 30.0

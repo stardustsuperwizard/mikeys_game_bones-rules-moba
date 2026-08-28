@@ -6,6 +6,8 @@
 [ext_resource type="Resource" path="res://resources/enemy_spawn_point.tres" id="5"]
 [ext_resource type="PackedScene" path="res://rules/ui/moba_combat_hud.tscn" id="6"]
 [ext_resource type="Script" path="res://scripts/combat_hud_binder.gd" id="7"]
+[ext_resource type="PackedScene" path="res://rules/ui/moba_floating_text.tscn" id="8"]
+[ext_resource type="Script" path="res://scripts/floating_text_binder.gd" id="9"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(20, 0.2, 20)
@@ -116,7 +118,13 @@ target_path = NodePath("../WorldManager/Player/Body")
 
 [node name="MobaCombatHUD" parent="." instance=ExtResource("6")]
 
+[node name="MobaFloatingText" parent="." instance=ExtResource("8")]
+
 [node name="CombatHUDBinder" type="Node" parent="."]
 script = ExtResource("7")
 hud_path = NodePath("../MobaCombatHUD")
 combatant_path = NodePath("../WorldManager/Player/MobaCombatant")
+
+[node name="FloatingTextBinder" type="Node" parent="."]
+script = ExtResource("9")
+floating_text_path = NodePath("../MobaFloatingText")
