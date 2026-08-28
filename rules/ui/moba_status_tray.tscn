@@ -1,0 +1,20 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://rules/ui/moba_status_tray.gd" id="1"]
+
+[node name="MobaStatusTray" type="Control"]
+script = ExtResource("1")
+anchor_right = 1.0
+offset_bottom = 72.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="Entries" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+alignment = 0
