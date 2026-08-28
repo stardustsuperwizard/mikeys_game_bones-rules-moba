@@ -1,7 +1,11 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://rules/ui/moba_combat_hud.gd" id="1"]
 [ext_resource type="PackedScene" path="res://rules/ui/moba_ability_slot.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://rules/ui/moba_cast_bar.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://rules/ui/moba_status_tray.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://rules/ui/moba_floating_text.tscn" id="5"]
+[ext_resource type="PackedScene" path="res://rules/ui/moba_target_frame.tscn" id="6"]
 
 [sub_resource type="Gradient" id="Gradient_bar"]
 offsets = PackedFloat32Array(0, 1)
@@ -25,6 +29,19 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
+[node name="TopBar" type="VBoxContainer" parent="Layout"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="TargetFrame" parent="Layout/TopBar" instance=ExtResource("6")]
+layout_mode = 2
+size_flags_horizontal = 4
+
+[node name="CastBar" parent="Layout" instance=ExtResource("3")]
+
 [node name="BottomBar" type="VBoxContainer" parent="Layout"]
 layout_mode = 1
 anchors_preset = 12
@@ -35,6 +52,10 @@ grow_horizontal = 2
 grow_vertical = 0
 mouse_filter = 2
 alignment = 2
+
+[node name="StatusTray" parent="Layout/BottomBar" instance=ExtResource("4")]
+custom_minimum_size = Vector2(0, 72)
+layout_mode = 2
 
 [node name="Tooltip" type="PanelContainer" parent="Layout/BottomBar"]
 visible = false
@@ -142,3 +163,5 @@ horizontal_alignment = 1
 
 [node name="PassiveSlot" parent="Layout/BottomBar/SlotRow/PassiveGroup" instance=ExtResource("2")]
 layout_mode = 2
+
+[node name="FloatingText" parent="." instance=ExtResource("5")]

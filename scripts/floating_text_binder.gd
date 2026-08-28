@@ -19,9 +19,10 @@
 class_name FloatingTextBinder
 extends Node
 
-## The MobaFloatingText pool that spawn requests are sent to.
-@export var floating_text_path: NodePath
+## The MobaCombatHUD that contains the MobaFloatingText pool.
+@export var hud_path: NodePath
 
+var _hud: MobaCombatHUD = null
 var _floating_text: MobaFloatingText = null
 
 ## Watched combatants keyed by instance ID. Node is not RefCounted, so this
@@ -31,9 +32,14 @@ var _watched: Dictionary = {}
 
 
 func _ready() -> void:
-	_floating_text = get_node_or_null(floating_text_path) as MobaFloatingText
+	_hud = get_node_or_null(hud_path) as MobaCombatHUD
+	if _hud == null:
+		push_error("FloatingTextBinder: hud_path does not resolve to a MobaCombatHUD")
+		return
+
+	_floating_text = _hud.get_floating_text()
 	if _floating_text == null:
-		push_error("FloatingTextBinder: floating_text_path does not resolve to a MobaFloatingText")
+		push_error("FloatingTextBinder: MobaCombatHUD.get_floating_text() returned null")
 		return
 
 	get_tree().node_added.connect(_on_node_added)
