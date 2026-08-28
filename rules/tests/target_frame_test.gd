@@ -124,45 +124,52 @@ static func _test_rebind_leaves_no_stale_data() -> Array[String]:
 	return violations
 
 
-## The name comes from the parent Actor's character sheet, falling back to the
-## actor's node name when the sheet has none.
+## The name falls back to the parent Actor's node name, and is cleared on
+## unbind. The character-sheet branch above it is deliberately not exercised
+## here: Actor.character_sheet is statically typed to the game-side
+## CharacterSheet, so the only value this suite could attach is a CharacterSheet
+## -- naming which from rules/ is exactly the outward dependency the extraction
+## contract exists to prevent. A duck-typed stand-in is not an option: the
+## assignment is a parse error, and Object.set() refuses it silently. So the
+## branch is covered by the widget's own guards and by the editor check in the
+## pull request instead of by a reference this module must not carry.
 static func _test_name_from_actor() -> Array[String]:
 	var violations: Array[String] = []
 
 	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
 	var name_label: Label = frame.get_node_or_null(NAME_LABEL_PATH)
 
-	var named_actor := Actor.new()
-	named_actor.name = "HostileActor"
-	named_actor.character_sheet = CharacterSheet.new()
-	named_actor.character_sheet.character_name = "Sand Raider"
-	var named_combatant := _make_combatant()
-	named_combatant.name = "MobaCombatant"
-	named_actor.add_child(named_combatant)
+	var actor := Actor.new()
+	actor.name = "SandRaider"
+	var combatant := _make_combatant()
+	combatant.name = "MobaCombatant"
+	actor.add_child(combatant)
 
-	frame.bind_target(named_combatant)
-	if name_label.text != "Sand Raider":
-		violations.append("name: expected the character sheet name, got '%s'" % name_label.text)
-
-	var unnamed_actor := Actor.new()
-	unnamed_actor.name = "UnnamedActor"
-	var unnamed_combatant := _make_combatant()
-	unnamed_combatant.name = "MobaCombatant"
-	unnamed_actor.add_child(unnamed_combatant)
-
-	frame.bind_target(unnamed_combatant)
-	if name_label.text != "UnnamedActor":
+	frame.bind_target(combatant)
+	if name_label.text != "SandRaider":
 		violations.append(
-			"name: expected the actor node name as fallback, got '%s'" % name_label.text
+			"name: expected the actor node name with no sheet, got '%s'" % name_label.text
 		)
 
 	frame.unbind_target()
 	if name_label.text != "":
 		violations.append("name: unbind_target() left the previous target's name on screen")
 
+	# A combatant with no Actor parent must render blank rather than error.
+	var orphan := _make_combatant()
+	frame.bind_target(orphan)
+	if name_label.text != "":
+		violations.append(
+			(
+				"name: a target with no Actor parent should render a blank name, got '%s'"
+				% name_label.text
+			)
+		)
+
+	frame.unbind_target()
 	frame.free()
-	named_actor.free()
-	unnamed_actor.free()
+	actor.free()
+	orphan.free()
 	return violations
 
 

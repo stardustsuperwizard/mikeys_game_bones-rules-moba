@@ -136,4 +136,4 @@ floating_text_path = NodePath("../MobaFloatingText")
 [node name="TargetFrameBinder" type="Node" parent="."]
 script = ExtResource("11")
 target_frame_path = NodePath("../MobaTargetFrame")
-controller_path = NodePath("../WorldManager/Player/PlayerController3D")
+controller_path = NodePath("../WorldManager/Player/Controller")
