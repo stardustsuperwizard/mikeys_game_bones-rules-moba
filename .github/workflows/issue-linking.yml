@@ -41,11 +41,21 @@ name: PR to Issue Linking
 #
 #        <!-- no-originating-issue -->
 #
-#      in the body opts out of both the repair and the failure. It is
-#      deliberately an explicit marker rather than prose-matching: the
-#      difference between "no Issue exists" and "the Issue reference is
-#      missing" is not inferable from the body, and guessing wrong either
-#      invents a link or blocks real work.
+#      as the FIRST non-blank line of the body opts out of both the repair
+#      and the failure. It is deliberately an explicit marker rather than
+#      prose-matching: the difference between "no Issue exists" and "the
+#      Issue reference is missing" is not inferable from the body, and
+#      guessing wrong either invents a link or blocks real work.
+#
+#      First line, and an exact match rather than a substring search,
+#      because this gate must fail closed. A search anywhere in the body
+#      finds the marker in boilerplate that merely contains it -- the pull
+#      request template's header comment above all, since that file becomes
+#      the body of every new pull request -- and in any body that discusses
+#      the marker at all. Either would quietly declare a pull request that
+#      never meant to, and an unlinked implementation pull request has to
+#      keep failing. For the same reason the template describes the marker
+#      instead of spelling it out.
 #
 #      The marker is inert when a real closing reference exists -- the link
 #      wins, and dependency checking proceeds as normal.
@@ -186,9 +196,27 @@ jobs:
               --jq '.body // ""'
           )
 
-          if ! printf '%s' "$BODY" | grep -qF "$MARKER"; then
+          # Exact match on the first non-blank line, not a substring search
+          # anywhere in the body. A substring search reads the marker out of
+          # any boilerplate that happens to contain it -- the pull request
+          # template's own header comment being the obvious one, since its
+          # contents become the body of every new pull request -- and out of
+          # any body that merely discusses the marker, such as the pull
+          # request that introduced it. Both would declare a pull request
+          # that never meant to, and this gate has to fail closed: an
+          # unlinked implementation pull request must still be caught.
+          FIRST_LINE=$(
+            printf '%s\n' "$BODY" \
+              | tr -d '\r' \
+              | grep -m1 -v '^[[:space:]]*$' \
+              | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+              || true
+          )
+
+          if [ "$FIRST_LINE" != "$MARKER" ]; then
             echo "declared=false" >> "$GITHUB_OUTPUT"
-            echo "No no-originating-issue declaration; normal linking rules apply."
+            echo "No no-originating-issue declaration on the first line;" \
+                 "normal linking rules apply."
             exit 0
           fi
 

@@ -1215,8 +1215,11 @@ Copilot one, but a session working **without** an Issue (a review or audit,
 per `CLAUDE.md`) hits a job whose only success path is a link it was never
 supposed to have. Nothing observable distinguishes that from an
 implementation session that forgot the keyword, so the PR declares itself
-with `<!-- no-originating-issue -->` in the body. That suppresses both the
-failure and the repair — the latter matters, because the repair's fallback
+with `<!-- no-originating-issue -->` on the first non-blank line of the body
+— first line and matched exactly, so that the marker cannot be picked up out
+of boilerplate that merely contains it, the PR template's header comment
+included; the check has to fail closed. That suppresses both the failure and
+the repair — the latter matters, because the repair's fallback
 scan reads every `#NN` in the body and would otherwise link a freeform PR to
 an Implementation Task it only mentioned in passing. The marker is inert on
 a PR that does close a task, which is reported as a warning rather than

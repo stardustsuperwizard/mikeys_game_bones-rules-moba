@@ -56,7 +56,7 @@ Such a PR has no originating Issue and so no `Closes #<issue>` line. Say that
 explicitly at the top instead of leaving the template's placeholder in, and
 still add `agent:review` — the gate is the same one everything else uses.
 
-Put this marker in the body as well:
+Put this marker on the **first non-blank line** of the body:
 
 ```text
 <!-- no-originating-issue -->
@@ -69,3 +69,10 @@ whose repair step would otherwise scan the body and silently link the PR to
 any open Implementation Task it merely mentions. Prose saying there is no
 Issue is for the reader; the marker is what the workflow reads. It is inert
 on a PR that does close a task.
+
+The first line specifically, matched exactly rather than searched for. A
+search anywhere in the body would find the marker in boilerplate that merely
+contains it — including the PR template's own header comment, which becomes
+the body of every new PR — and would then wave through the unlinked PRs the
+check exists to catch. If you keep the template's comment, the marker goes
+above it.
