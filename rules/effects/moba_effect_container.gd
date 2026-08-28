@@ -77,7 +77,7 @@ func apply_modifier(
 		effect_applied.emit(source_ability_id, stat)
 		return true
 
-	return _apply_to_existing_entry(_entries[key], modifier, source_ability_id, stat, key)
+	return _apply_to_existing_entry(_entries[key], modifier, source_ability_id, stat, key, is_debuff)
 
 
 ## Resolve an application against an already-active entry per its stacking
@@ -88,7 +88,8 @@ func _apply_to_existing_entry(
 	modifier: MobaStatModifier,
 	source_ability_id: StringName,
 	stat: StringName,
-	key: Array
+	key: Array,
+	is_debuff: bool = false
 ) -> bool:
 	match entry.stacking:
 		MobaStatModifier.Stacking.REFRESH:
@@ -114,7 +115,7 @@ func _apply_to_existing_entry(
 		MobaStatModifier.Stacking.REPLACE_IF_STRONGER:
 			if absf(modifier.amount) <= absf(entry.magnitude):
 				return false
-			_entries[key] = _make_entry(modifier, source_ability_id, stat)
+			_entries[key] = _make_entry(modifier, source_ability_id, stat, is_debuff)
 			effect_applied.emit(source_ability_id, stat)
 			return true
 
