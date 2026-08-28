@@ -48,6 +48,7 @@ var _expected_suites: Array[String] = [
 	"Floating Text Test",
 	"Death Test",
 	"Target Frame Test",
+	"Input Intent Test",
 ]
 
 
@@ -90,6 +91,7 @@ func _ready() -> void:
 	_check("Floating Text Test", FloatingTextTest.run())
 	_check("Death Test", DeathTest.run())
 	_check("Target Frame Test", TargetFrameTest.run())
+	_check("Input Intent Test", InputIntentTest.run())
 
 
 ## Record and announce one suite's result.
