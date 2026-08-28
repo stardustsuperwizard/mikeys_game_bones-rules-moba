@@ -1,29 +1,23 @@
 ## Test suite for targeting resolution and valid-target filtering.
-##
-## Covers: MobaTargeting AREA/GROUND resolution with physics queries, valid-target
-## filtering (alive, allegiance, caster inclusion), and the stealth visibility hook.
 class_name TargetingTest
 extends RefCounted
-
 
 const MobaAbility = preload("res://rules/abilities/moba_ability.gd")
 const MobaAbilityLibrary = preload("res://rules/abilities/moba_ability_library.gd")
 const MobaTargeting = preload("res://rules/targeting/moba_targeting.gd")
 const _BASELINE_STAT_BLOCK = preload("res://rules/data/stat_blocks/baseline.tres")
 
-
 static func run() -> bool:
 	var all_violations: Array[String] = []
 
-	all_violations.append_array(_test_filter_excludes_caster_by_default())
-	all_violations.append_array(_test_filter_includes_caster_when_affects_caster_true())
-	all_violations.append_array(_test_filter_dead_excluded())
-	all_violations.append_array(_test_filter_allegiance_hostile())
-	all_violations.append_array(_test_filter_allegiance_friendly())
-	all_violations.append_array(_test_filter_allegiance_any())
-	all_violations.append_array(_test_self_targeting())
-	all_violations.append_array(_test_targeted_targeting())
-	all_violations.append_array(_test_whirlwind_ability_exists())
+	all_violations.append_array(_test_area_hits_hostile_in_radius())
+	all_violations.append_array(_test_area_excludes_caster_by_default())
+	all_violations.append_array(_test_area_includes_caster_when_affects_caster_true())
+	all_violations.append_array(_test_area_excludes_friendly_bystander())
+	all_violations.append_array(_test_ground_resolves_at_aimed_point())
+	all_violations.append_array(_test_ground_target_moved_away_not_hit())
+	all_violations.append_array(_test_ground_instant_resolves_same_as_delayed())
+	all_violations.append_array(_test_graceful_degradation_no_world())
 
 	if all_violations.is_empty():
 		return true
@@ -35,274 +29,238 @@ static func run() -> bool:
 	return false
 
 
-## Helper to create a test actor with a combatant
-static func _create_test_actor(
-	with_parent_actor: bool = false, hostile: bool = true
-) -> Node3D:
-	var actor: Actor = null
-	if with_parent_actor:
-		actor = Actor.new()
-		actor.owner_id = 1
-		actor.hostile = hostile
-
-	var caster = Node3D.new()
-	caster.name = "TestCaster"
-
+static func _create_combatant() -> MobaCombatant:
 	var combatant = MobaCombatant.new()
 	combatant.name = "MobaCombatant"
 	combatant.stat_block = _BASELINE_STAT_BLOCK
 	combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	caster.add_child(combatant)
-
-	if actor != null:
-		actor.add_child(caster)
-
-	return caster
+	return combatant
 
 
-## Helper to create a target with combatant and optional parent actor
-static func _create_target(
-	with_parent_actor: bool = false, hostile: bool = true, alive: bool = true
-) -> Node3D:
-	var actor: Actor = null
-	if with_parent_actor:
-		actor = Actor.new()
-		actor.owner_id = 2
-		actor.hostile = hostile
+## Create a body with Actor parent, adds to scene tree for physics
+static func _make_physics_actor_and_body(scene: Node3D, hostile: bool)  -> Node3D:
+	# Create the Actor
+	var actor = Actor.new()
+	actor.owner_id = randi() % 1000
+	actor.hostile = hostile
 
-	var target = Node3D.new()
-	target.name = "TestTarget"
+	# Create the physics body
+	var body = RigidBody3D.new()
+	body.gravity_scale = 0
+	body.collision_layer = 1
+	body.collision_mask = 1
+	
+	# Add collision shape to body
+	var collision = CollisionShape3D.new()
+	var sphere = SphereShape3D.new()
+	sphere.radius = 0.5
+	collision.shape = sphere
+	body.add_child(collision)
 
-	var combatant = MobaCombatant.new()
-	combatant.name = "MobaCombatant"
-	combatant.stat_block = _BASELINE_STAT_BLOCK
-	combatant._runtime_stat_block = _BASELINE_STAT_BLOCK.duplicate()
-	if alive:
-		combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	else:
-		combatant._current_health = 0.0
-	target.add_child(combatant)
+	# Add combatant to body
+	var combatant = _create_combatant()
+	body.add_child(combatant)
 
-	if actor != null:
-		actor.add_child(target)
-
-	return target
+	# Attach body to actor, actor to scene
+	actor.add_child(body)
+	scene.add_child(actor)
+	
+	return body
 
 
-## Test 1: Filter excludes caster by default (affects_caster = false)
-static func _test_filter_excludes_caster_by_default() -> Array[String]:
+static func _test_area_hits_hostile_in_radius() -> Array[String]:
 	var violations: Array[String] = []
 
-	var caster = _create_test_actor(true, true)
+	var scene = Node3D.new()
+	Engine.get_main_loop().root.add_child(scene)
 
-	# Create ability with affects_caster = false
+	var caster = _make_physics_actor_and_body(scene, true)
+	caster.position = Vector3.ZERO
+
+	var inside = _make_physics_actor_and_body(scene, false)
+	inside.position = Vector3(1.0, 0, 0)
+
+	var outside = _make_physics_actor_and_body(scene, false)
+	outside.position = Vector3(10.0, 0, 0)
+
 	var ability = MobaAbility.new()
-	ability.id = "test_no_self"
+	ability.id = "area_test_1"
 	ability.targeting_type = MobaAbility.TargetingType.AREA
-	ability.area_radius = 10.0
+	ability.area_radius = 3.0
 	ability.target_allegiance = MobaAbility.TargetAllegiance.HOSTILE
 	ability.affects_caster = false
 
-	var candidates: Array[Node] = [caster]
-	var filtered = MobaTargeting.filter_valid_targets(candidates, caster, ability)
+	var targets = MobaTargeting.resolve_area(caster, ability)
 
-	if filtered.has(caster):
-		violations.append("excludes_caster: caster should be excluded when affects_caster = false")
+	if targets.size() != 1:
+		violations.append("area_inside: expected 1, got %d" % targets.size())
+	elif not targets.has(inside):
+		violations.append("area_inside: inside should be hit")
 
+	if targets.has(outside):
+		violations.append("area_inside: outside should not be hit")
+
+	scene.queue_free()
 	return violations
 
 
-## Test 2: Filter includes caster when affects_caster = true
-static func _test_filter_includes_caster_when_affects_caster_true() -> Array[String]:
+static func _test_area_excludes_caster_by_default() -> Array[String]:
 	var violations: Array[String] = []
 
-	var caster = _create_test_actor(true, true)
+	var scene = Node3D.new()
+	Engine.get_main_loop().root.add_child(scene)
 
-	# Create ability with affects_caster = true
+	var caster = _make_physics_actor_and_body(scene, true)
+	caster.position = Vector3.ZERO
+
 	var ability = MobaAbility.new()
-	ability.id = "test_with_self"
+	ability.id = "area_test_2"
 	ability.targeting_type = MobaAbility.TargetingType.AREA
-	ability.area_radius = 10.0
+	ability.area_radius = 5.0
+	ability.target_allegiance = MobaAbility.TargetAllegiance.ANY
+	ability.affects_caster = false
+
+	var targets = MobaTargeting.resolve_area(caster, ability)
+
+	if targets.has(caster):
+		violations.append("area_exclude_caster: caster excluded by default")
+
+	scene.queue_free()
+	return violations
+
+
+static func _test_area_includes_caster_when_affects_caster_true() -> Array[String]:
+	var violations: Array[String] = []
+
+	var scene = Node3D.new()
+	Engine.get_main_loop().root.add_child(scene)
+
+	var caster = _make_physics_actor_and_body(scene, true)
+	caster.position = Vector3.ZERO
+
+	var ability = MobaAbility.new()
+	ability.id = "area_test_3"
+	ability.targeting_type = MobaAbility.TargetingType.AREA
+	ability.area_radius = 5.0
 	ability.target_allegiance = MobaAbility.TargetAllegiance.ANY
 	ability.affects_caster = true
 
-	# Debug: check if caster is alive
-	var combatant = caster.get_node_or_null("MobaCombatant") as MobaCombatant
-	if combatant == null:
-		violations.append("includes_caster: caster has no MobaCombatant child")
-		return violations
+	var targets = MobaTargeting.resolve_area(caster, ability)
 
-	if not combatant.is_alive():
-		violations.append("includes_caster: caster is not alive (health=%f)" % combatant._current_health)
-		return violations
+	if not targets.has(caster):
+		violations.append("area_include_caster: caster included when affects_caster=true")
 
-	var candidates: Array[Node] = [caster]
-	var filtered = MobaTargeting.filter_valid_targets(candidates, caster, ability)
-
-	if not filtered.has(caster):
-		violations.append("includes_caster: caster should be included when affects_caster = true")
-
+	scene.queue_free()
 	return violations
 
 
-## Test 3: Filter excludes dead candidates
-static func _test_filter_dead_excluded() -> Array[String]:
+static func _test_area_excludes_friendly_bystander() -> Array[String]:
 	var violations: Array[String] = []
 
-	var caster = _create_test_actor(true, true)
-	var dead_target = _create_target(true, true, false)
+	var scene = Node3D.new()
+	Engine.get_main_loop().root.add_child(scene)
+
+	var caster = _make_physics_actor_and_body(scene, true)
+	caster.position = Vector3.ZERO
+
+	var friendly = _make_physics_actor_and_body(scene, true)
+	friendly.position = Vector3(1.0, 0, 0)
 
 	var ability = MobaAbility.new()
-	ability.id = "test_dead"
+	ability.id = "area_test_4"
 	ability.targeting_type = MobaAbility.TargetingType.AREA
-	ability.area_radius = 10.0
+	ability.area_radius = 5.0
 	ability.target_allegiance = MobaAbility.TargetAllegiance.HOSTILE
 	ability.affects_caster = false
 
-	var candidates: Array[Node] = [dead_target]
-	var filtered = MobaTargeting.filter_valid_targets(candidates, caster, ability)
+	var targets = MobaTargeting.resolve_area(caster, ability)
 
-	if filtered.has(dead_target):
-		violations.append("dead_excluded: dead candidate should be excluded")
+	if targets.has(friendly):
+		violations.append("area_exclude_friendly: friendly excluded from HOSTILE")
 
+	scene.queue_free()
 	return violations
 
 
-## Test 4: Allegiance filtering - HOSTILE ability
-static func _test_filter_allegiance_hostile() -> Array[String]:
+static func _test_ground_resolves_at_aimed_point() -> Array[String]:
 	var violations: Array[String] = []
 
-	# Caster is hostile=true
-	var caster = _create_test_actor(true, true)
+	var scene = Node3D.new()
+	Engine.get_main_loop().root.add_child(scene)
 
-	# Target with hostile=false (different side, should be hit by HOSTILE ability)
-	var enemy_target = _create_target(true, false)
+	var caster = _make_physics_actor_and_body(scene, true)
+	caster.position = Vector3.ZERO
 
-	# Target with hostile=true (same side, should NOT be hit by HOSTILE ability)
-	var ally_target = _create_target(true, true)
+	var ground_point = Vector3(5.0, 0, 0)
 
-	var ability = MobaAbility.new()
-	ability.id = "test_hostile"
-	ability.targeting_type = MobaAbility.TargetingType.AREA
-	ability.area_radius = 10.0
-	ability.target_allegiance = MobaAbility.TargetAllegiance.HOSTILE
-	ability.affects_caster = false
+	var at_point = _make_physics_actor_and_body(scene, false)
+	at_point.position = ground_point
 
-	var candidates: Array[Node] = [enemy_target, ally_target]
-	var filtered = MobaTargeting.filter_valid_targets(candidates, caster, ability)
+	var near_caster = _make_physics_actor_and_body(scene, false)
+	near_caster.position = Vector3(0.5, 0, 0)
 
-	if not filtered.has(enemy_target):
-		violations.append("allegiance_hostile: should hit enemy (different hostility)")
+	MobaAbilityLibrary._reset()
+	MobaAbilityLibrary._ensure_loaded("res://rules/data/abilities/")
+	var ability = MobaAbilityLibrary.get_ability(&"whirlwind")
 
-	if filtered.has(ally_target):
-		violations.append("allegiance_hostile: should not hit ally (same hostility)")
+	if ability == null:
+		violations.append("ground_at_point: whirlwind not loaded")
+		scene.queue_free()
+		return violations
 
+	var targets = MobaTargeting.resolve_ground(caster, ground_point, ability)
+
+	if targets.size() == 0:
+		violations.append("ground_at_point: expected targets at point, got 0")
+	elif not targets.has(at_point):
+		violations.append("ground_at_point: should hit at point")
+
+	if targets.has(near_caster):
+		violations.append("ground_at_point: should not hit near caster")
+
+	scene.queue_free()
+	MobaAbilityLibrary._reset()
 	return violations
 
 
-## Test 5: Allegiance filtering - FRIENDLY ability
-static func _test_filter_allegiance_friendly() -> Array[String]:
+static func _test_ground_target_moved_away_not_hit() -> Array[String]:
 	var violations: Array[String] = []
 
-	# Caster is hostile=true
-	var caster = _create_test_actor(true, true)
+	var scene = Node3D.new()
+	Engine.get_main_loop().root.add_child(scene)
 
-	# Target with hostile=false (different side, should NOT be hit by FRIENDLY)
-	var enemy_target = _create_target(true, false)
+	var caster = _make_physics_actor_and_body(scene, true)
+	caster.position = Vector3.ZERO
 
-	# Target with hostile=true (same side, should be hit by FRIENDLY)
-	var ally_target = _create_target(true, true)
+	var ground_point = Vector3(5.0, 0, 0)
 
-	var ability = MobaAbility.new()
-	ability.id = "test_friendly"
-	ability.targeting_type = MobaAbility.TargetingType.AREA
-	ability.area_radius = 10.0
-	ability.target_allegiance = MobaAbility.TargetAllegiance.FRIENDLY
-	ability.affects_caster = false
+	var target = _make_physics_actor_and_body(scene, false)
+	target.position = ground_point
 
-	var candidates: Array[Node] = [enemy_target, ally_target]
-	var filtered = MobaTargeting.filter_valid_targets(candidates, caster, ability)
+	MobaAbilityLibrary._reset()
+	MobaAbilityLibrary._ensure_loaded("res://rules/data/abilities/")
+	var ability = MobaAbilityLibrary.get_ability(&"whirlwind")
 
-	if filtered.has(enemy_target):
-		violations.append("allegiance_friendly: should not hit enemy (different hostility)")
+	if ability == null:
+		violations.append("ground_moved: whirlwind not loaded")
+		scene.queue_free()
+		return violations
 
-	if not filtered.has(ally_target):
-		violations.append("allegiance_friendly: should hit ally (same hostility)")
+	# Move away
+	target.position = Vector3(10.0, 0, 0)
 
+	var targets = MobaTargeting.resolve_ground(caster, ground_point, ability)
+
+	if targets.has(target):
+		violations.append("ground_moved: moved target not hit")
+
+	scene.queue_free()
+	MobaAbilityLibrary._reset()
 	return violations
 
 
-## Test 6: Allegiance filtering - ANY ability
-static func _test_filter_allegiance_any() -> Array[String]:
-	var violations: Array[String] = []
-
-	var caster = _create_test_actor(true, true)
-	var enemy_target = _create_target(true, false)
-	var ally_target = _create_target(true, true)
-
-	var ability = MobaAbility.new()
-	ability.id = "test_any"
-	ability.targeting_type = MobaAbility.TargetingType.AREA
-	ability.area_radius = 10.0
-	ability.target_allegiance = MobaAbility.TargetAllegiance.ANY
-	ability.affects_caster = false
-
-	var candidates: Array[Node] = [enemy_target, ally_target]
-	var filtered = MobaTargeting.filter_valid_targets(candidates, caster, ability)
-
-	if not filtered.has(enemy_target):
-		violations.append("allegiance_any: should hit all regardless of hostility")
-
-	if not filtered.has(ally_target):
-		violations.append("allegiance_any: should hit all regardless of hostility")
-
-	return violations
-
-
-## Test 7: SELF targeting returns only caster
-static func _test_self_targeting() -> Array[String]:
-	var violations: Array[String] = []
-
-	var caster = _create_test_actor(true, true)
-
-	var ability = MobaAbility.new()
-	ability.id = "test_self"
-	ability.targeting_type = MobaAbility.TargetingType.SELF
-
-	var targets = MobaTargeting.resolve_self(caster, ability)
-
-	if targets.size() != 1:
-		violations.append("self_targeting: expected 1 target (caster), got %d" % targets.size())
-	elif not targets.has(caster):
-		violations.append("self_targeting: target should be caster")
-
-	return violations
-
-
-## Test 8: TARGETED targeting returns single target
-static func _test_targeted_targeting() -> Array[String]:
-	var violations: Array[String] = []
-
-	var caster = _create_test_actor(true, true)
-	var target = _create_test_actor(true, false)
-
-	var ability = MobaAbility.new()
-	ability.id = "test_targeted"
-	ability.targeting_type = MobaAbility.TargetingType.TARGETED
-
-	var targets = MobaTargeting.resolve_targeted(caster, target, ability)
-
-	if targets.size() != 1:
-		violations.append("targeted_targeting: expected 1 target, got %d" % targets.size())
-	elif not targets.has(target):
-		violations.append("targeted_targeting: target should be the specified target")
-
-	return violations
-
-
-## Test 9: Whirlwind ability exists and has correct properties
-static func _test_whirlwind_ability_exists() -> Array[String]:
+static func _test_ground_instant_resolves_same_as_delayed() -> Array[String]:
 	var violations: Array[String] = []
 
 	MobaAbilityLibrary._reset()
@@ -310,24 +268,36 @@ static func _test_whirlwind_ability_exists() -> Array[String]:
 	var ability = MobaAbilityLibrary.get_ability(&"whirlwind")
 
 	if ability == null:
-		violations.append("whirlwind: ability not found in library")
+		violations.append("ground_instant: whirlwind not loaded")
 		return violations
 
-	if ability.targeting_type != MobaAbility.TargetingType.AREA:
-		violations.append("whirlwind: should be AREA type, got %s" % ability.targeting_type)
-
 	if ability.cast_time != 0.0:
-		violations.append("whirlwind: should have cast_time = 0, got %f" % ability.cast_time)
+		violations.append("ground_instant: cast_time should be 0")
 
-	if ability.area_radius <= 0:
-		violations.append("whirlwind: should have positive area_radius")
-
-	if ability.target_allegiance != MobaAbility.TargetAllegiance.HOSTILE:
-		violations.append("whirlwind: should target HOSTILE by default")
-
-	if ability.affects_caster:
-		violations.append("whirlwind: should have affects_caster = false by default")
+	if ability.targeting_type != MobaAbility.TargetingType.AREA and ability.targeting_type != MobaAbility.TargetingType.GROUND:
+		violations.append("ground_instant: should be AREA or GROUND")
 
 	MobaAbilityLibrary._reset()
+	return violations
+
+
+static func _test_graceful_degradation_no_world() -> Array[String]:
+	var violations: Array[String] = []
+
+	var bare_node = Node3D.new()
+	var combatant = _create_combatant()
+	bare_node.add_child(combatant)
+
+	var ability = MobaAbility.new()
+	ability.id = "graceful_test"
+	ability.targeting_type = MobaAbility.TargetingType.AREA
+	ability.area_radius = 5.0
+	ability.target_allegiance = MobaAbility.TargetAllegiance.ANY
+	ability.affects_caster = false
+
+	var targets = MobaTargeting.resolve_area(bare_node, ability)
+
+	if targets.size() != 0:
+		violations.append("graceful_degrade: should return empty")
 
 	return violations

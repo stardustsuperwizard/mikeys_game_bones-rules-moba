@@ -61,6 +61,9 @@ func _ready() -> void:
 	if tree_script != null:
 		return
 
+	# Wait for first physics frame so fixture bodies added by tests register with physics space
+	await get_tree().physics_frame
+
 	# Queue completion logic BEFORE any suites run, so it executes even if
 	# a suite aborts due to compilation error or runtime error.
 	call_deferred("_finalize")
@@ -76,7 +79,7 @@ func _ready() -> void:
 	_check("Cooldown Test", CooldownTest.run())
 	_check("Ability Library Test", AbilityLibraryTest.run())
 	_check("Ability Activation Test", AbilityActivationTest.run())
-	_check("Targeting Test", TargetingTest.run())
+	_check("Targeting Test", await TargetingTest.run())
 	_check("Cast Cancel Test", CastCancelTest.run())
 	_check("Channel Test", ChannelTest.run())
 	_check("Brace Ability Test", BraceAbilityTest.run())
