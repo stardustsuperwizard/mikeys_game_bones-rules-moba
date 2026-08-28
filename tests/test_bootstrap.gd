@@ -44,6 +44,7 @@ var _expected_suites: Array[String] = [
 	"HUD Slot Test",
 	"HUD Test",
 	"Cast Bar Test",
+	"Status Tray Test",
 	"Death Test",
 ]
 
@@ -83,6 +84,7 @@ func _ready() -> void:
 	_check("HUD Slot Test", HudSlotTest.run())
 	_check("HUD Test", HudTest.run())
 	_check("Cast Bar Test", CastBarTest.run())
+	_check("Status Tray Test", StatusTrayTest.run())
 	_check("Death Test", DeathTest.run())
 
 
