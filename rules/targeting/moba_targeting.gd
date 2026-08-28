@@ -22,14 +22,14 @@ static func resolve_self(caster: Node, _ability: MobaAbility) -> Array[Node]:
 
 
 ## Resolve a TARGETED ability: target is the explicitly provided target.
-static func resolve_targeted(caster: Node, target: Node, _ability: MobaAbility) -> Array[Node]:
+static func resolve_targeted(_caster: Node, target: Node, _ability: MobaAbility) -> Array[Node]:
 	if target == null or not is_instance_valid(target):
 		return []
 	return [target]
 
 
 ## Resolve a CHANNELED ability: target is the explicitly provided target.
-static func resolve_channeled(caster: Node, target: Node, _ability: MobaAbility) -> Array[Node]:
+static func resolve_channeled(_caster: Node, target: Node, _ability: MobaAbility) -> Array[Node]:
 	if target == null or not is_instance_valid(target):
 		return []
 	return [target]
@@ -63,7 +63,9 @@ static func resolve_area(
 		query_origin = _get_position(caster)
 
 	# Query physics space for bodies in the area
-	var candidates := _query_area(query_origin, ability.area_radius, collision_layer_mask, collision_mask, caster)
+	var candidates := _query_area(
+		query_origin, ability.area_radius, collision_layer_mask, collision_mask, caster
+	)
 
 	# Filter through the shared valid-target filter
 	return filter_valid_targets(candidates, caster, ability)
@@ -92,7 +94,9 @@ static func resolve_ground(
 		return []
 
 	# Query physics space for bodies at the ground point
-	var candidates := _query_area(ground_point, ability.area_radius, collision_layer_mask, collision_mask, caster)
+	var candidates := _query_area(
+		ground_point, ability.area_radius, collision_layer_mask, collision_mask, caster
+	)
 
 	# Filter through the shared valid-target filter
 	return filter_valid_targets(candidates, caster, ability)
@@ -151,14 +155,21 @@ static func filter_valid_targets(
 ## Fails gracefully (returns empty array) if no physics world is available.
 ## Requires a reference node to get the physics world from.
 static func _query_area(
-	position: Vector3, radius: float, collision_layer_mask: int, collision_mask: int, reference_node: Node
+	position: Vector3,
+	radius: float,
+	_collision_layer_mask: int,
+	collision_mask: int,
+	reference_node: Node
 ) -> Array[Node]:
 	var candidates: Array[Node] = []
 
 	# Get the physics space state from the reference node's world. Fail gracefully if it doesn't exist.
+	# get_world_3d() likewise logs an engine error when the node is not in a
+	# world yet, so the tree check has to come first.
 	var space_state: PhysicsDirectSpaceState3D = null
-	if reference_node is Node3D:
-		var world = (reference_node as Node3D).get_world_3d()
+	var reference_3d := reference_node as Node3D
+	if reference_3d != null and reference_3d.is_inside_tree():
+		var world := reference_3d.get_world_3d()
 		if world != null:
 			space_state = world.direct_space_state
 	if space_state == null:
@@ -196,9 +207,7 @@ static func _is_candidate_alive(candidate: Node) -> bool:
 ##
 ## When either the candidate or caster has no parent Actor, treat the candidate
 ## as hostile (allows headless test fixtures without full scenes to resolve).
-static func _matches_allegiance(
-	candidate: Node, caster: Node, target_allegiance: int
-) -> bool:
+static func _matches_allegiance(candidate: Node, caster: Node, target_allegiance: int) -> bool:
 	match target_allegiance:
 		MobaAbility.TargetAllegiance.ANY:
 			# ANY targets everyone
@@ -259,13 +268,17 @@ static func _is_candidate_visible(_candidate: Node) -> bool:
 
 
 ## Get world position of a node, with a default fallback.
+##
+## global_position is only readable once a Node3D is inside the tree -- reading
+## it earlier still returns a value but logs an engine error, which turns the
+## documented "no physics world" path into pages of error spam. Guard on the
+## tree instead of relying on that.
 static func _get_position(node: Node) -> Vector3:
 	if node == null:
 		return Vector3.ZERO
 
-	# Try to access global_position (works for Node3D)
-	if node.get("global_position") != null:
-		return node.global_position as Vector3
+	var node_3d := node as Node3D
+	if node_3d != null and node_3d.is_inside_tree():
+		return node_3d.global_position
 
-	# Fallback to zero
 	return Vector3.ZERO
