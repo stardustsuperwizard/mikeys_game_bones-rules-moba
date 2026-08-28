@@ -1206,7 +1206,24 @@ Claude Code doesn't land on a `copilot/*` branch, so it won't trigger
 `agent-04-review.yml`'s automatic `ready_for_review` review — add
 `agent:review` by hand (works from GitHub Mobile) to put it through the same
 reviewer, same as the scripted executor's own `agent-exec/*` branches
-already require. Everything else — labels, the control plane, rollup, the
+already require.
+
+`issue-linking.yml` cuts the other way, and the asymmetry is worth stating
+plainly. It *does* run on `claude/*`, and it requires a closing reference —
+so a Claude Code session working an `[impl]` Issue is covered exactly like a
+Copilot one, but a session working **without** an Issue (a review or audit,
+per `CLAUDE.md`) hits a job whose only success path is a link it was never
+supposed to have. Nothing observable distinguishes that from an
+implementation session that forgot the keyword, so the PR declares itself
+with `<!-- no-originating-issue -->` on the first non-blank line of the body
+— first line and matched exactly, so that the marker cannot be picked up out
+of boilerplate that merely contains it, the PR template's header comment
+included; the check has to fail closed. That suppresses both the failure and
+the repair — the latter matters, because the repair's fallback
+scan reads every `#NN` in the body and would otherwise link a freeform PR to
+an Implementation Task it only mentioned in passing. The marker is inert on
+a PR that does close a task, which is reported as a warning rather than
+honored. Everything else — labels, the control plane, rollup, the
 dashboard — reads the Issue graph the same way regardless of which tool
 produced the diff, so switching tools mid-Feature, or per task, doesn't
 require picking one system and discarding the other.

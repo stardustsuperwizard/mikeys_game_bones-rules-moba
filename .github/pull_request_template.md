@@ -1,6 +1,17 @@
 <!--
 Sword and Planet uses one issue → one pull request → one squashed commit.
 See CONTRIBUTING.md and docs/AGENT_WORKFLOW.md.
+
+A review, audit, or exploratory PR has no originating Issue. Replace the
+line below with a sentence saying so, and put the no-originating-issue
+marker on the very first line of the body, above this comment. CLAUDE.md
+-> "Working without an Issue" carries the exact string to paste.
+
+It is quoted there and not here on purpose: this file's contents become
+the body of every new PR, so a template that spelled the marker out would
+declare every PR that left this comment in place -- including one that
+merely forgot its closing reference, which is the case the check exists
+to catch.
 -->
 
 Closes #<issue-number>
