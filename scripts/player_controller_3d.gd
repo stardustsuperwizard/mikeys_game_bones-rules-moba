@@ -499,6 +499,18 @@ func _ability_target() -> Node:
 	return null
 
 
+# Returns the MobaCombatant of the current attack target, or null if there is
+# no valid target. This is a public accessor for the placeholder target concept
+# that _ability_target() already computes. Used by the target frame binder to
+# poll for target changes once per frame. Does not add targeting logic; #39's
+# lock-on will replace the underlying target selection without changing this API.
+func get_current_target_combatant() -> MobaCombatant:
+	var target_actor := _ability_target() as Actor
+	if not is_instance_valid(target_actor):
+		return null
+	return target_actor.get_node_or_null("MobaCombatant") as MobaCombatant
+
+
 # Unit vector pointing straight away from the recorded FEAR source, flattened to
 # the ground plane, or Vector3.ZERO when not feared. Resolved here from the
 # source #220 exposes for exactly this consumer, because #220 does not route
