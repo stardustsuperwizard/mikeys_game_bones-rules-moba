@@ -32,6 +32,11 @@ var _tooltip: Control = null
 var _tooltip_name: Label = null
 var _tooltip_status: Label = null
 
+var _cast_bar: MobaCastBar = null
+var _status_tray: MobaStatusTray = null
+var _floating_text: MobaFloatingText = null
+var _target_frame: MobaTargetFrame = null
+
 var _nodes_resolved: bool = false
 
 
@@ -60,6 +65,7 @@ func bind(combatant: MobaCombatant) -> void:
 	_disconnect_combatant()
 	_combatant = combatant if is_instance_valid(combatant) else null
 	_connect_combatant()
+	_bind_child_elements()
 	_refresh_slots()
 	_push_current_values()
 	_refresh_tooltip()
@@ -100,6 +106,36 @@ func get_passive_slot() -> MobaAbilitySlot:
 func is_tooltip_visible() -> bool:
 	_ensure_nodes()
 	return _tooltip != null and _tooltip.visible
+
+
+## The floating text pool for displaying damage, healing, and other
+## floating numbers. Used by game-side bindings to spawn text at combatant
+## impact positions.
+func get_floating_text() -> MobaFloatingText:
+	_ensure_nodes()
+	return _floating_text
+
+
+## Bind the target frame to a target combatant (different from the HUD's own
+## bound combatant). Used by game-side target bindings.
+func bind_target(target: MobaCombatant) -> void:
+	_ensure_nodes()
+	if _target_frame != null:
+		_target_frame.bind_target(target)
+
+
+## Unbind the target frame's current target.
+func unbind_target() -> void:
+	_ensure_nodes()
+	if _target_frame != null:
+		_target_frame.unbind_target()
+
+
+func _bind_child_elements() -> void:
+	if _cast_bar != null:
+		_cast_bar.bind(_combatant)
+	if _status_tray != null:
+		_status_tray.bind(_combatant)
 
 
 func _refresh_slots() -> void:
@@ -280,6 +316,11 @@ func _ensure_nodes() -> void:
 	_tooltip = get_node_or_null(^"Layout/BottomBar/Tooltip")
 	_tooltip_name = get_node_or_null(^"Layout/BottomBar/Tooltip/TooltipText/TooltipName")
 	_tooltip_status = get_node_or_null(^"Layout/BottomBar/Tooltip/TooltipText/TooltipStatus")
+
+	_cast_bar = get_node_or_null(^"Layout/CastBar")
+	_status_tray = get_node_or_null(^"Layout/BottomBar/StatusTray")
+	_floating_text = get_node_or_null(^"FloatingText")
+	_target_frame = get_node_or_null(^"Layout/TopBar/TargetFrame")
 
 
 func _bind_focus_seam(slot: MobaAbilitySlot) -> void:

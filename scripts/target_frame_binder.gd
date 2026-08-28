@@ -21,14 +21,14 @@ extends Node
 ## How many frames the node lookup is retried before giving up.
 const MAX_LOOKUP_FRAMES := 120
 
-## The MobaTargetFrame instance to bind.
-@export var target_frame_path: NodePath
+## The MobaCombatHUD that contains the target frame.
+@export var hud_path: NodePath
 
 ## The player's PlayerController3D node.
 @export var controller_path: NodePath
 
 var _frames_remaining: int = MAX_LOOKUP_FRAMES
-var _frame: MobaTargetFrame = null
+var _hud: MobaCombatHUD = null
 var _controller: PlayerController3D = null
 var _bound_target: MobaCombatant = null
 
@@ -55,12 +55,12 @@ func _process(_delta: float) -> void:
 ## True once both nodes have been found and are still alive. A resolved pair can
 ## go stale if the player is despawned, which drops this back to searching.
 func _resolved() -> bool:
-	return is_instance_valid(_frame) and is_instance_valid(_controller)
+	return is_instance_valid(_hud) and is_instance_valid(_controller)
 
 
-## Returns true once both the frame and the controller have been found.
+## Returns true once both the HUD and the controller have been found.
 func _try_lookup() -> bool:
-	_frame = get_node_or_null(target_frame_path) as MobaTargetFrame
+	_hud = get_node_or_null(hud_path) as MobaCombatHUD
 	_controller = get_node_or_null(controller_path) as PlayerController3D
 	if not _resolved():
 		return false
@@ -68,9 +68,9 @@ func _try_lookup() -> bool:
 	return true
 
 
-## Push the controller's current target at the frame, rebinding only when it
-## actually changed. A bound target dying or being freed counts as a change: the
-## frame is unbound, and a later target rebinds normally.
+## Push the controller's current target at the HUD's target frame, rebinding
+## only when it actually changed. A bound target dying or being freed counts as
+## a change: the frame is unbound, and a later target rebinds normally.
 func _poll_and_bind() -> void:
 	var target := _controller.get_current_target_combatant()
 	if not is_instance_valid(target) or not target.is_alive():
@@ -81,11 +81,11 @@ func _poll_and_bind() -> void:
 			return
 		_bound_target = target
 		_has_binding = true
-		_frame.bind_target(target)
+		_hud.bind_target(target)
 		return
 
 	if not _has_binding:
 		return
 	_bound_target = null
 	_has_binding = false
-	_frame.unbind_target()
+	_hud.unbind_target()

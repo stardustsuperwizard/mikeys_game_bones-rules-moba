@@ -2,7 +2,8 @@
 ##
 ## Covers rebinding without duplicate connections, bars seeded and updated from
 ## their signals, the four action slots holding fixed positional order, the
-## passive grouping's empty state, and the focused-slot tooltip seam.
+## passive grouping's empty state, the focused-slot tooltip seam, and the cast
+## bar, status tray, floating text and target frame the HUD composes.
 class_name HudTest
 
 const MobaStatBlock = preload("res://rules/core/moba_stat_block.gd")
@@ -22,6 +23,8 @@ static func run() -> bool:
 	all_violations.append_array(_test_passive_empty_state())
 	all_violations.append_array(_test_tooltip_follows_focus())
 	all_violations.append_array(_test_freed_combatant_clears_binding())
+	all_violations.append_array(_test_new_elements_are_present())
+	all_violations.append_array(_test_new_elements_rebind_safety())
 
 	if all_violations.is_empty():
 		return true
@@ -281,4 +284,135 @@ static func _test_freed_combatant_clears_binding() -> Array[String]:
 	hud._process(0.016)
 
 	hud.free()
+	return violations
+
+
+static func _connection_count(source: Object, listener: Object) -> int:
+	if not is_instance_valid(source) or not is_instance_valid(listener):
+		return 0
+
+	var total: int = 0
+	for signal_info in source.get_signal_list():
+		for connection in source.get_signal_connection_list(signal_info["name"]):
+			if (connection["callable"] as Callable).get_object() == listener:
+				total += 1
+	return total
+
+
+## Every element added in #247 is present at its scene path, and the two the
+## game side drives from outside are reachable through MobaCombatHUD alone.
+static func _test_new_elements_are_present() -> Array[String]:
+	var violations: Array[String] = []
+
+	var hud: MobaCombatHUD = HUD_SCENE.instantiate()
+
+	var cast_bar := hud.get_node_or_null(^"Layout/CastBar") as MobaCastBar
+	var status_tray := hud.get_node_or_null(^"Layout/BottomBar/StatusTray") as MobaStatusTray
+	var floating_text := hud.get_node_or_null(^"FloatingText") as MobaFloatingText
+	var target_frame := hud.get_node_or_null(^"Layout/TopBar/TargetFrame") as MobaTargetFrame
+
+	if cast_bar == null:
+		violations.append("elements: the HUD scene is missing its MobaCastBar child")
+	if status_tray == null:
+		violations.append("elements: the HUD scene is missing its MobaStatusTray child")
+	if floating_text == null:
+		violations.append("elements: the HUD scene is missing its MobaFloatingText child")
+	if target_frame == null:
+		violations.append("elements: the HUD scene is missing its MobaTargetFrame child")
+
+	# The game-side binders reach these through the HUD, never by searching.
+	if hud.get_floating_text() != floating_text:
+		violations.append("elements: get_floating_text() should return the pooled child")
+
+	# The four action slots keep their fixed positional order with the new
+	# elements sharing the layout, and none of them is hidden.
+	var slots := hud.get_action_slots()
+	if slots.size() != 4:
+		violations.append("elements: expected 4 action slots, got %d" % slots.size())
+	for index in slots.size():
+		var slot := slots[index]
+		if slot.get_parent().name != &"ActionSlots":
+			violations.append("elements: slot %d left the ActionSlots row" % (index + 1))
+		if not slot.visible:
+			violations.append("elements: slot %d should not be hidden" % (index + 1))
+
+	hud.free()
+	return violations
+
+
+## bind() forwards to the cast bar and status tray, bind_target() forwards to
+## the target frame, and calling either twice -- what a respawn does -- leaves
+## exactly one connection per signal and no state from the previous life.
+static func _test_new_elements_rebind_safety() -> Array[String]:
+	var violations: Array[String] = []
+
+	var combatant := _make_combatant()
+	var hud: MobaCombatHUD = HUD_SCENE.instantiate()
+	var cast_bar := hud.get_node(^"Layout/CastBar") as MobaCastBar
+	var status_tray := hud.get_node(^"Layout/BottomBar/StatusTray") as MobaStatusTray
+	var target_frame := hud.get_node(^"Layout/TopBar/TargetFrame") as MobaTargetFrame
+
+	hud.bind(combatant)
+	var container := combatant.get_effect_container()
+	var tray_after_first: int = _connection_count(container, status_tray)
+
+	hud.bind(combatant)
+
+	if cast_bar.get_combatant() != combatant:
+		violations.append("rebind_elements: bind() should bind the cast bar")
+	if status_tray.get_combatant() != combatant:
+		violations.append("rebind_elements: bind() should bind the status tray")
+	if tray_after_first < 1:
+		violations.append("rebind_elements: the status tray connected no effect signal at all")
+	if _connection_count(container, status_tray) != tray_after_first:
+		violations.append(
+			"rebind_elements: rebinding doubled the status tray connections (%d, then %d)"
+			% [tray_after_first, _connection_count(container, status_tray)]
+		)
+
+	# The target frame binds a different combatant than the HUD's own, through
+	# its own pair, and is equally safe to rebind.
+	var target := _make_combatant()
+	hud.bind_target(target)
+	var frame_after_first: int = _connection_count(target, target_frame)
+
+	hud.bind_target(target)
+
+	if target_frame.get_combatant() != target:
+		violations.append("rebind_elements: bind_target() should bind the target frame")
+	if frame_after_first < 1:
+		violations.append("rebind_elements: the target frame connected no signal at all")
+	if _connection_count(target, target_frame) != frame_after_first:
+		violations.append(
+			"rebind_elements: rebinding doubled the target frame connections (%d, then %d)"
+			% [frame_after_first, _connection_count(target, target_frame)]
+		)
+
+	# No stale element is left behind by the unbind half of the contract.
+	hud.unbind()
+	if cast_bar.get_combatant() != null:
+		violations.append("rebind_elements: unbind() should clear the cast bar")
+	if status_tray.get_combatant() != null:
+		violations.append("rebind_elements: unbind() should clear the status tray")
+	if cast_bar.visible:
+		violations.append("rebind_elements: unbind() should leave the cast bar hidden")
+	if status_tray.get_entry_count() != 0:
+		violations.append(
+			"rebind_elements: unbind() left %d status tray entries behind"
+			% status_tray.get_entry_count()
+		)
+	if _connection_count(container, status_tray) != 0:
+		violations.append("rebind_elements: unbind() left a status tray connection behind")
+
+	hud.unbind_target()
+	if target_frame.get_combatant() != null:
+		violations.append("rebind_elements: unbind_target() should clear the target frame")
+	if target_frame.visible:
+		violations.append("rebind_elements: unbind_target() should leave the frame hidden")
+	if _connection_count(target, target_frame) != 0:
+		violations.append("rebind_elements: unbind_target() left a connection behind")
+
+	hud.free()
+	combatant.free()
+	target.free()
 	return violations

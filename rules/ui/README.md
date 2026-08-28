@@ -20,11 +20,16 @@ formula, threshold, or cost comparison is written in a HUD script.
 
 Nothing here searches the scene tree for the player.
 
-- `MobaCombatHUD.bind(combatant)` hands the HUD its combatant.
+- `MobaCombatHUD.bind(combatant)` hands the HUD its combatant and forwards the
+  binding to its child cast bar and status tray.
 - `MobaAbilitySlot.set_ability(combatant, ability_id)` hands a slot its ability.
 - `MobaCastBar.bind(combatant)` / `unbind()` hands the cast bar its combatant.
 - `MobaStatusTray.bind(combatant)` / `unbind()` hands the status tray its
   combatant.
+- `MobaCombatHUD.get_floating_text()` provides access to the floating text pool
+  so game-side binders can spawn damage and healing numbers.
+- `MobaCombatHUD.bind_target(combatant)` / `unbind_target()` forwards to the
+  target frame, binding it to a different combatant than the HUD's own.
 
 `bind()` is safe to call repeatedly: it disconnects the previous combatant
 before connecting the new one, so a respawn cannot accumulate duplicate
