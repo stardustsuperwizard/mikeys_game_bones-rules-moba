@@ -26,6 +26,29 @@ name: PR to Issue Linking
 #
 #      If inference is ambiguous, it refuses to guess and posts a comment
 #      asking for the closing reference manually.
+#
+#   3. Let a pull request that legitimately has no Implementation Task say
+#      so, instead of failing it.
+#
+#      The job is gated on the branch prefix, and Claude Code sessions get
+#      `claude/*` branch names -- so a review, audit, or exploratory session,
+#      which `CLAUDE.md` sanctions under "Working without an Issue" and which
+#      has no originating Issue by definition, used to land in a job whose
+#      only success path was a closing reference it was never supposed to
+#      have. The branch prefix cannot tell that apart from a prompt-started
+#      implementation session that simply forgot the keyword, so the pull
+#      request declares which it is:
+#
+#        <!-- no-originating-issue -->
+#
+#      in the body opts out of both the repair and the failure. It is
+#      deliberately an explicit marker rather than prose-matching: the
+#      difference between "no Issue exists" and "the Issue reference is
+#      missing" is not inferable from the body, and guessing wrong either
+#      invents a link or blocks real work.
+#
+#      The marker is inert when a real closing reference exists -- the link
+#      wins, and dependency checking proceeds as normal.
 
 on:
   issues:
@@ -127,6 +150,64 @@ jobs:
           fi
 
       # ----------------------------------------------------------------------
+      # A pull request may legitimately have no Implementation Task at all.
+      #
+      # `CLAUDE.md` -> "Working without an Issue" describes exactly that case:
+      # a review, audit, or exploratory session, whose whole deliverable is
+      # deciding what should become work. It has no originating Issue, so it
+      # has no `Closes #NN` line and no Issue for one to point at.
+      #
+      # Nothing about the pull request itself distinguishes that from a
+      # session that meant to link an Issue and forgot -- the branch prefix
+      # is the same, and body prose is not a contract. So the pull request
+      # states it, with the marker below in its body. Declaring it suppresses
+      # both the repair attempt and the failure; it does not suppress the
+      # blocker check, which has nothing to check when there is no task.
+      #
+      # Suppressing the repair matters as much as suppressing the failure:
+      # the fallback scan reads every `#NN` in the body, and a freeform pull
+      # request that merely *mentions* an open Implementation Task would
+      # otherwise be silently rewritten to close it.
+      # ----------------------------------------------------------------------
+      - name: Detect Declared No-Issue Pull Request
+        id: freeform
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          MARKER: "<!-- no-originating-issue -->"
+          TASK_COUNT: ${{ steps.tasks.outputs.count }}
+        run: |
+          set -euo pipefail
+
+          BODY=$(
+            gh pr view "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json body \
+              --jq '.body // ""'
+          )
+
+          if ! printf '%s' "$BODY" | grep -qF "$MARKER"; then
+            echo "declared=false" >> "$GITHUB_OUTPUT"
+            echo "No no-originating-issue declaration; normal linking rules apply."
+            exit 0
+          fi
+
+          # The marker is advisory, not an override: a pull request that
+          # really does close a task stays linked to it, and the declaration
+          # is reported as the contradiction it is rather than honored.
+          if [ "${TASK_COUNT}" != "0" ]; then
+            echo "declared=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::This pull request carries the" \
+                 "no-originating-issue marker but does close an Issue." \
+                 "Ignoring the marker and checking the linked task as usual."
+            exit 0
+          fi
+
+          echo "declared=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::This pull request declares it has no originating" \
+               "Implementation Task, so no closing reference is required."
+
+      # ----------------------------------------------------------------------
       # Prompt-started Copilot sessions can create a complete implementation
       # PR but fail to include `Closes #NN`.
       #
@@ -160,7 +241,8 @@ jobs:
         id: repair
         if: >-
           github.event_name == 'pull_request' &&
-          steps.tasks.outputs.count == '0'
+          steps.tasks.outputs.count == '0' &&
+          steps.freeform.outputs.declared != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -289,7 +371,8 @@ jobs:
         if: >-
           github.event_name == 'pull_request' &&
           steps.tasks.outputs.count == '0' &&
-          steps.repair.outputs.repaired != 'true'
+          steps.repair.outputs.repaired != 'true' &&
+          steps.freeform.outputs.declared != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -504,6 +587,16 @@ jobs:
               else
                 echo "✅ The Implementation Task is unblocked."
               fi
+
+            elif [ "${{ steps.freeform.outputs.declared }}" = "true" ]; then
+              echo "📋 **This pull request declares no originating Issue.**"
+              echo
+              echo "It carries \`<!-- no-originating-issue -->\`, so no"
+              echo "closing reference is required and none was inferred."
+              echo
+              echo "See \`CLAUDE.md\` → *Working without an Issue*. Such a"
+              echo "pull request still goes through the same reviewer via the"
+              echo "\`agent:review\` label."
 
             elif [ "${{ steps.tasks.outputs.count }}" = "0" ]; then
               echo "❌ This Copilot pull request closes no Issue."

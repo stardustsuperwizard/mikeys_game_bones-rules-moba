@@ -1,6 +1,14 @@
 <!--
 Sword and Planet uses one issue → one pull request → one squashed commit.
 See CONTRIBUTING.md and docs/AGENT_WORKFLOW.md.
+
+A review, audit, or exploratory PR has no originating Issue. Replace the
+line below with a sentence saying so, and add this marker to the body:
+
+    <!-- no-originating-issue -->
+
+That is what tells issue-linking.yml not to require (or infer) a closing
+reference. See CLAUDE.md → "Working without an Issue".
 -->
 
 Closes #<issue-number>
