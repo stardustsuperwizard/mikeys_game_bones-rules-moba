@@ -5,16 +5,27 @@
 #
 # max-file-lines: raised from gdtoolkit's default of 1000.
 #
-# rules/core/moba_combatant.gd crossed 1000 in #230 (shield pool) and is the
-# only file in the project above the default -- the next largest is
-# rules/tests/ability_activation_test.gd at 874. The combatant is the MOBA
-# rules hub (health, stats, damage pipeline, crowd control, displacement,
-# shields), so it grows a little with each Batch 2 task while everything
-# else stays well clear.
+# History matters here, because this key is the one that keeps going red.
+# It was raised to 1200 in #230, when rules/core/moba_combatant.gd crossed
+# 1000 and was the only file in the project above the default. By #240 the
+# combatant was at 1180 and rules/tests/cast_cancel_test.gd at 1197 -- three
+# lines of headroom -- so any pull request touching either failed GDScript
+# Lint on arrival. max-file-lines is in LINT_NO_IN_FILE_FIX_RULES, so
+# gdscript-lint.yml cannot self-heal it: the check goes straight to red and
+# waits for a human.
 #
-# 1200 keeps the gate meaningful for the rest of the project rather than
-# disabling it: every other .gd file has at least 300 lines of headroom, so
-# this only stops the combatant from failing the check on line count alone.
-# Splitting MobaCombatant is still worth doing on its own terms -- this
-# raises the threshold, it does not decide that question.
+# The answer was to split, not to raise again. MobaCrowdControlTracker came
+# out of the combatant, channel_test.gd out of cast_cancel_test.gd, and
+# shield_test.gd out of sustain_test.gd. The largest .gd file in the project
+# is now the combatant at 958, and every file has at least 242 lines of
+# headroom.
+#
+# The threshold stays at 1200 rather than returning to gdtoolkit's 1000
+# precisely because the combatant is at 958: dropping to the default would
+# leave the one file that grows in almost every rules task with 42 lines of
+# room, which is the cliff this split just removed.
+#
+# When a file next approaches 1200, split it. Raising this number again
+# trades a bounded refactor for a few more tasks of runway and puts the
+# same failure back on someone else's pull request.
 max-file-lines: 1200

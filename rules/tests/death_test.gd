@@ -312,7 +312,7 @@ static func _test_clear_on_death() -> Array[String]:
 		)
 
 	# Check that CC is cleared
-	if not combatant._active_cc_entries.is_empty():
+	if combatant.has_any_crowd_control():
 		violations.append("clear_on_death: CC entries not cleared on death")
 
 	parent.queue_free()
@@ -499,7 +499,7 @@ static func _test_effects_cleared_on_respawn() -> Array[String]:
 			)
 		)
 
-	if not combatant._active_cc_entries.is_empty():
+	if combatant.has_any_crowd_control():
 		violations.append("effects_cleared_on_respawn: CC entries not cleared on respawn")
 
 	parent.queue_free()
@@ -584,7 +584,7 @@ static func _test_dead_refuses_cc_shield_and_modifier() -> Array[String]:
 	cc_spec.affected_by_tenacity = false
 	combatant.apply_crowd_control(cc_spec, combatant)
 
-	if not combatant._active_cc_entries.is_empty():
+	if combatant.has_any_crowd_control():
 		violations.append("dead_refuses_cc_and_shield: CC applied to a dead combatant")
 
 	# Attempt to apply a shield to the now-dead combatant
