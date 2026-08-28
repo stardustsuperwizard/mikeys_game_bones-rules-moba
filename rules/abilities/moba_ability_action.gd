@@ -162,37 +162,42 @@ func _check_early_legality(combatant: MobaCombatant) -> StringName:
 ## behavior (range checks, null handling). AREA and GROUND route through MobaTargeting
 ## for shape-query physics resolution and shared filtering.
 func _resolve_target(ability: MobaAbility) -> Dictionary:
+	var targets: Array[Node] = []
+	var failure: StringName = &""
+
 	match ability.targeting_type:
 		MobaAbility.TargetingType.SELF:
 			# SELF always targets the caster
-			return {"targets": [actor], "failure": &""}
+			targets = [actor]
 
 		MobaAbility.TargetingType.TARGETED:
 			var resolution := _resolve_targeted_or_channeled_target(ability)
 			if resolution.failure != &"":
-				return {"targets": [], "failure": resolution.failure}
-			return {"targets": [resolution.target], "failure": &""}
+				failure = resolution.failure
+			else:
+				targets = [resolution.target]
 
 		MobaAbility.TargetingType.CHANNELED:
 			var resolution := _resolve_targeted_or_channeled_target(ability)
 			if resolution.failure != &"":
-				return {"targets": [], "failure": resolution.failure}
-			return {"targets": [resolution.target], "failure": &""}
+				failure = resolution.failure
+			else:
+				targets = [resolution.target]
 
 		MobaAbility.TargetingType.AREA:
-			var targets := MobaTargeting.resolve_area(actor, ability)
-			return {"targets": targets, "failure": &""}
+			targets = MobaTargeting.resolve_area(actor, ability)
 
 		MobaAbility.TargetingType.GROUND:
 			# For instant GROUND abilities, resolve immediately. For cast_time > 0,
 			# MobaCastTracker will re-resolve at resolution time so targets that
 			# moved out of radius during the delay are not hit.
-			var targets := MobaTargeting.resolve_ground(actor, context.ground_point, ability)
-			return {"targets": targets, "failure": &""}
+			targets = MobaTargeting.resolve_ground(actor, context.ground_point, ability)
 
 		_:
 			# All other targeting types not implemented (SKILLSHOT, TOGGLE)
-			return {"targets": [], "failure": FAILURE_TARGETING_NOT_IMPLEMENTED}
+			failure = FAILURE_TARGETING_NOT_IMPLEMENTED
+
+	return {"targets": targets, "failure": failure}
 
 
 ## Resolve a targeted or channeled ability's target, checking validity and range.
