@@ -93,8 +93,7 @@ func start(
 		target_list_producer = func() -> Array[Node]:
 			return MobaTargeting.resolve_ground(context.caster, context.ground_point, ability)
 	else:
-		target_list_producer = func() -> Array[Node]:
-			return resolved_targets
+		target_list_producer = func() -> Array[Node]: return resolved_targets
 
 	_cast_in_progress = _CastInProgress.new(ability_id, ability, target_list_producer, cast_time)
 

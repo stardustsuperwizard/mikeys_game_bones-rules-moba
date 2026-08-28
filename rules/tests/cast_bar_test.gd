@@ -158,9 +158,7 @@ static func _test_channel_shows_name_and_progress() -> Array[String]:
 		violations.append("channel_progress: bar should be hidden when not channeling")
 
 	# Start a channel
-	combatant.start_channel(
-		&"channel_ability", combatant.get_ability(&"channel_ability"), [], 2.0
-	)
+	combatant.start_channel(&"channel_ability", combatant.get_ability(&"channel_ability"), [], 2.0)
 	bar.refresh()
 
 	# Bar should be visible
@@ -245,9 +243,7 @@ static func _test_clears_on_channel_completion() -> Array[String]:
 	bar.bind(combatant)
 
 	# Start a channel
-	combatant.start_channel(
-		&"channel_ability", combatant.get_ability(&"channel_ability"), [], 0.5
-	)
+	combatant.start_channel(&"channel_ability", combatant.get_ability(&"channel_ability"), [], 0.5)
 	bar.refresh()
 
 	if not bar.visible:
@@ -321,9 +317,7 @@ static func _test_clears_on_channel_break() -> Array[String]:
 	# Start a channel, and put the state machine in ABILITY_CHANNEL so the
 	# hard-CC interrupt seam sees the state it gates on.
 	state_machine.try_enter(MobaState.ABILITY_CHANNEL, 2.0)
-	combatant.start_channel(
-		&"channel_ability", combatant.get_ability(&"channel_ability"), [], 2.0
-	)
+	combatant.start_channel(&"channel_ability", combatant.get_ability(&"channel_ability"), [], 2.0)
 	# Tick at least once to allow break
 	combatant.tick(0.1)
 	bar.refresh()
@@ -415,7 +409,9 @@ static func _test_rebind_has_no_stale_state() -> Array[String]:
 
 	# Bind to combatant1 and start a cast
 	bar.bind(combatant1)
-	combatant1.start_cast(&"cast_ability_1", combatant1.get_ability(&"cast_ability_1"), ([] as Array[Node]), 2.0)
+	combatant1.start_cast(
+		&"cast_ability_1", combatant1.get_ability(&"cast_ability_1"), [] as Array[Node], 2.0
+	)
 	bar.refresh()
 
 	var name_label: Label = bar.get_node("VBox/NameLabel")

@@ -94,7 +94,10 @@ func get_channel_time_remaining() -> float:
 ##     resolved_targets: The targets (may be empty; guarded in resolution)
 ##     channel_duration: Total duration of the channel, in seconds
 func start(
-	ability_id: StringName, ability: MobaAbility, resolved_targets: Array[Node], channel_duration: float
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+	channel_duration: float
 ) -> void:
 	_channel_in_progress = _ChannelInProgress.new(
 		ability_id, ability, resolved_targets, channel_duration
