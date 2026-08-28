@@ -14,10 +14,15 @@ class_name MobaFloatingText
 extends CanvasLayer
 
 ## Colors for different damage types and events.
+##
+## Keyed by MobaDamage.DamageType rather than by the bare ints it happens to
+## resolve to, so reordering that enum cannot silently remap the colors.
+## MobaDamage lives in rules/core/, which rules/ui/ may reference -- only
+## res://scripts/, res://scenes/, and res://resources/ are off limits here.
 const DAMAGE_COLORS := {
-	0: Color(0.8, 0.8, 0.8, 1.0),  # PHYSICAL - neutral white
-	1: Color(0.6, 0.4, 1.0, 1.0),  # MAGICAL - purple
-	2: Color(1.0, 0.8, 0.0, 1.0),  # TRUE - gold
+	MobaDamage.DamageType.PHYSICAL: Color(0.8, 0.8, 0.8, 1.0),  # neutral white
+	MobaDamage.DamageType.MAGICAL: Color(0.6, 0.4, 1.0, 1.0),  # purple
+	MobaDamage.DamageType.TRUE: Color(1.0, 0.8, 0.0, 1.0),  # gold
 }
 
 const HEAL_COLOR := Color(0.2, 0.8, 0.3, 1.0)  # green
@@ -147,7 +152,11 @@ func spawn_damage(world_position: Vector3, amount: float, damage_type: int, was_
 
 	# Determine text and color
 	var text: String = "%d" % int(amount)
-	var color: Color = CRIT_COLOR if was_crit else DAMAGE_COLORS.get(damage_type, DAMAGE_COLORS[0])
+	var color: Color = (
+		CRIT_COLOR
+		if was_crit
+		else DAMAGE_COLORS.get(damage_type, DAMAGE_COLORS[MobaDamage.DamageType.PHYSICAL])
+	)
 
 	# Add crit indicator
 	if was_crit:
