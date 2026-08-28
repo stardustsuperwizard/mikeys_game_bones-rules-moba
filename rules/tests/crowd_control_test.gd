@@ -642,10 +642,32 @@ static func _test_crowd_control_remaining_duration() -> Array[String]:
 			)
 		)
 
-	# Advance another 2.0 seconds to expire the CC
+	# Two CC types genuinely coexisting: apply ROOT while the STUN above is
+	# still live (1.5s left), so each type is read back on its own clock. This
+	# per-type independence is what the status tray polls for.
+	var root_spec = MobaCrowdControlSpec.new()
+	root_spec.type = MobaCrowdControlSpec.CCType.ROOT
+	root_spec.duration = 3.0
+	root_spec.affected_by_tenacity = false
+	target.apply_crowd_control(root_spec, source)
+
+	var coexisting_stun = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN)
+	var coexisting_root = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.ROOT)
+
+	if not is_equal_approx(coexisting_stun, 1.5):
+		violations.append(
+			"cc_remaining: STUN should still read ~1.5 alongside ROOT, got %f" % coexisting_stun
+		)
+
+	if not is_equal_approx(coexisting_root, 3.0):
+		violations.append(
+			"cc_remaining: newly applied ROOT should be ~3.0, got %f" % coexisting_root
+		)
+
+	# Advance past the STUN but not the ROOT: the expired type reports 0.0
+	# while the still-active one keeps counting down independently.
 	target.tick(2.0)
 
-	# After expiry, should be 0.0
 	var remaining_after_expiry = target.get_crowd_control_remaining(
 		MobaCrowdControlSpec.CCType.STUN
 	)
@@ -657,24 +679,21 @@ static func _test_crowd_control_remaining_duration() -> Array[String]:
 			)
 		)
 
-	# Test with multiple CC types coexisting
-	var root_spec = MobaCrowdControlSpec.new()
-	root_spec.type = MobaCrowdControlSpec.CCType.ROOT
-	root_spec.duration = 3.0
-	root_spec.affected_by_tenacity = false
-	target.apply_crowd_control(root_spec, source)
-
-	# Both should be active with their own durations
-	var stun_remaining = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.STUN)
-	var root_remaining = target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.ROOT)
-
-	# ROOT should be ~3.0, STUN should be 0.0 (expired)
-	if not is_equal_approx(root_remaining, 3.0):
+	var root_after_stun_expiry = target.get_crowd_control_remaining(
+		MobaCrowdControlSpec.CCType.ROOT
+	)
+	if not is_equal_approx(root_after_stun_expiry, 1.0):
 		violations.append(
-			"cc_remaining: newly applied ROOT should be ~3.0, got %f" % root_remaining
+			(
+				"cc_remaining: ROOT should still read ~1.0 after STUN expired, got %f"
+				% root_after_stun_expiry
+			)
 		)
 
-	if not is_equal_approx(stun_remaining, 0.0):
-		violations.append("cc_remaining: expired STUN should be 0.0, got %f" % stun_remaining)
+	# An unknown / never-applied CC type reports 0.0 rather than erroring.
+	if not is_equal_approx(
+		target.get_crowd_control_remaining(MobaCrowdControlSpec.CCType.SILENCE), 0.0
+	):
+		violations.append("cc_remaining: never-applied SILENCE should be 0.0")
 
 	return violations
