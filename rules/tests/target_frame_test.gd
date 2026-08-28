@@ -1,24 +1,32 @@
-## Test suite for MobaTargetFrame.
+## Test suite for the standalone MobaTargetFrame control.
 ##
-## Covers: rebinding without duplicate connections, bars seeded and updated from
-## their signals, frame visibility tied to target binding, frame self-hiding when
-## target dies or is freed, and shield rendering as an overlay.
+## Covers: rebinding without duplicate or stale connections, name resolution
+## from the parent Actor, bars seeded at bind and updated from their signals,
+## shields rendering as an overlay on the same bar as health, visibility tied to
+## whether a target is bound, and the frame dropping a target that dies or is
+## freed.
 class_name TargetFrameTest
 
 const MobaStatBlock = preload("res://rules/core/moba_stat_block.gd")
 const MobaCombatant = preload("res://rules/core/moba_combatant.gd")
-const MobaLoadout = preload("res://rules/abilities/moba_loadout.gd")
 const MobaDamage = preload("res://rules/core/moba_damage.gd")
 const TARGET_FRAME_SCENE = preload("res://rules/ui/moba_target_frame.tscn")
+
+const HEALTH_BAR_PATH := "VBoxContainer/HealthContainer/HealthBar"
+const SHIELD_BAR_PATH := "VBoxContainer/HealthContainer/ShieldBar"
+const HEALTH_LABEL_PATH := "VBoxContainer/HealthContainer/HealthLabel"
+const NAME_LABEL_PATH := "VBoxContainer/NameLabel"
 
 
 static func run() -> bool:
 	var all_violations: Array[String] = []
 
 	all_violations.append_array(_test_rebind_has_single_connection())
+	all_violations.append_array(_test_rebind_leaves_no_stale_data())
+	all_violations.append_array(_test_name_from_actor())
 	all_violations.append_array(_test_bars_follow_signals())
 	all_violations.append_array(_test_frame_visibility())
-	all_violations.append_array(_test_shield_overlay())
+	all_violations.append_array(_test_shield_overlays_health_bar())
 	all_violations.append_array(_test_freed_target_hides_frame())
 	all_violations.append_array(_test_dead_target_hides_frame())
 
@@ -33,14 +41,19 @@ static func run() -> bool:
 
 
 static func _make_combatant() -> MobaCombatant:
-	var combatant = MobaCombatant.new()
+	var combatant := MobaCombatant.new()
 	combatant._runtime_stat_block = combatant.stat_block.duplicate()
 	combatant._current_health = combatant._runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	combatant._current_resource = combatant._runtime_stat_block.get_stat_value(
-		MobaStatBlock.RESOURCE
-	)
-	combatant._runtime_stat_block.crit_chance = 0.0  # Disable crit for predictable tests
+	combatant._runtime_stat_block.crit_chance = 0.0
 	return combatant
+
+
+static func _connection_count(sig: Signal, target: Object) -> int:
+	var count := 0
+	for connection in sig.get_connections():
+		if (connection["callable"] as Callable).get_object() == target:
+			count += 1
+	return count
 
 
 static func _test_rebind_has_single_connection() -> Array[String]:
@@ -49,34 +62,107 @@ static func _test_rebind_has_single_connection() -> Array[String]:
 	var combatant := _make_combatant()
 	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
 
-	frame.bind(combatant)
-	frame.bind(combatant)
+	frame.bind_target(combatant)
+	frame.bind_target(combatant)
 
-	var health_connections: int = 0
-	for connection in combatant.health_changed.get_connections():
-		if (connection["callable"] as Callable).get_object() == frame:
-			health_connections += 1
-
-	var shield_connections: int = 0
-	for connection in combatant.shield_changed.get_connections():
-		if (connection["callable"] as Callable).get_object() == frame:
-			shield_connections += 1
-
+	var health_connections := _connection_count(combatant.health_changed, frame)
+	var shield_connections := _connection_count(combatant.shield_changed, frame)
 	if health_connections != 1:
-		violations.append("rebind: expected 1 health_changed connection, got %d" % health_connections)
+		violations.append(
+			"rebind: expected 1 health_changed connection, got %d" % health_connections
+		)
 	if shield_connections != 1:
-		violations.append("rebind: expected 1 shield_changed connection, got %d" % shield_connections)
+		violations.append(
+			"rebind: expected 1 shield_changed connection, got %d" % shield_connections
+		)
 
-	frame.unbind()
-	for connection in combatant.health_changed.get_connections():
-		if (connection["callable"] as Callable).get_object() == frame:
-			violations.append("rebind: unbind() left a health_changed connection behind")
-	for connection in combatant.shield_changed.get_connections():
-		if (connection["callable"] as Callable).get_object() == frame:
-			violations.append("rebind: unbind() left a shield_changed connection behind")
+	frame.unbind_target()
+	if _connection_count(combatant.health_changed, frame) != 0:
+		violations.append("rebind: unbind_target() left a health_changed connection behind")
+	if _connection_count(combatant.shield_changed, frame) != 0:
+		violations.append("rebind: unbind_target() left a shield_changed connection behind")
 
 	frame.free()
 	combatant.free()
+	return violations
+
+
+## Rebinding to a different target must leave no connection to the old one and
+## no trace of its values on screen.
+static func _test_rebind_leaves_no_stale_data() -> Array[String]:
+	var violations: Array[String] = []
+
+	var first := _make_combatant()
+	var second := _make_combatant()
+	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
+
+	frame.bind_target(first)
+	first.apply_shield(40.0, &"first_source", 5.0)
+	frame.bind_target(second)
+
+	if _connection_count(first.health_changed, frame) != 0:
+		violations.append("stale: rebinding left a health_changed connection on the old target")
+	if _connection_count(first.shield_changed, frame) != 0:
+		violations.append("stale: rebinding left a shield_changed connection on the old target")
+	if _connection_count(second.health_changed, frame) != 1:
+		violations.append("stale: rebinding did not connect health_changed on the new target")
+
+	var health_bar: TextureProgressBar = frame.get_node_or_null(HEALTH_BAR_PATH)
+	var shield_bar: TextureProgressBar = frame.get_node_or_null(SHIELD_BAR_PATH)
+	if not is_equal_approx(shield_bar.value, health_bar.value):
+		violations.append("stale: the new unshielded target still shows the old target's shield")
+
+	# A signal from the old target must no longer move the frame.
+	var value_before: float = health_bar.value
+	first.apply_damage(MobaDamage.new(10.0, MobaDamage.DamageType.PHYSICAL, null, false))
+	if not is_equal_approx(health_bar.value, value_before):
+		violations.append("stale: the old target still drives the frame after rebinding")
+
+	frame.free()
+	first.free()
+	second.free()
+	return violations
+
+
+## The name comes from the parent Actor's character sheet, falling back to the
+## actor's node name when the sheet has none.
+static func _test_name_from_actor() -> Array[String]:
+	var violations: Array[String] = []
+
+	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
+	var name_label: Label = frame.get_node_or_null(NAME_LABEL_PATH)
+
+	var named_actor := Actor.new()
+	named_actor.name = "HostileActor"
+	named_actor.character_sheet = CharacterSheet.new()
+	named_actor.character_sheet.character_name = "Sand Raider"
+	var named_combatant := _make_combatant()
+	named_combatant.name = "MobaCombatant"
+	named_actor.add_child(named_combatant)
+
+	frame.bind_target(named_combatant)
+	if name_label.text != "Sand Raider":
+		violations.append("name: expected the character sheet name, got '%s'" % name_label.text)
+
+	var unnamed_actor := Actor.new()
+	unnamed_actor.name = "UnnamedActor"
+	var unnamed_combatant := _make_combatant()
+	unnamed_combatant.name = "MobaCombatant"
+	unnamed_actor.add_child(unnamed_combatant)
+
+	frame.bind_target(unnamed_combatant)
+	if name_label.text != "UnnamedActor":
+		violations.append(
+			"name: expected the actor node name as fallback, got '%s'" % name_label.text
+		)
+
+	frame.unbind_target()
+	if name_label.text != "":
+		violations.append("name: unbind_target() left the previous target's name on screen")
+
+	frame.free()
+	named_actor.free()
+	unnamed_actor.free()
 	return violations
 
 
@@ -85,26 +171,27 @@ static func _test_bars_follow_signals() -> Array[String]:
 
 	var combatant := _make_combatant()
 	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
-	frame.bind(combatant)
+	frame.bind_target(combatant)
 
-	var maximum_health: float = combatant.get_stat(MobaStatBlock.HEALTH)
-	var health_bar: TextureProgressBar = frame.get_node_or_null("VBoxContainer/HealthContainer/HealthBar")
-	var health_label: Label = frame.get_node_or_null("VBoxContainer/HealthContainer/HealthLabel")
+	var maximum_health: float = combatant.maximum_health
+	var health_bar: TextureProgressBar = frame.get_node_or_null(HEALTH_BAR_PATH)
+	var health_label: Label = frame.get_node_or_null(HEALTH_LABEL_PATH)
 
-	# Seeded by bind(), without waiting for a signal.
+	# Seeded by bind_target(), without waiting for a signal.
 	if not is_equal_approx(health_bar.value, maximum_health):
 		violations.append(
-			"bars: bind() should seed health %f, got %f" % [maximum_health, health_bar.value]
+			"bars: bind_target() should seed health %f, got %f" % [maximum_health, health_bar.value]
 		)
 	if not is_equal_approx(health_bar.max_value, maximum_health):
 		violations.append("bars: health bar maximum should be %f" % maximum_health)
 	if health_label.text != "%d / %d" % [roundi(maximum_health), roundi(maximum_health)]:
 		violations.append("bars: health label should read current / maximum")
 
-	var damage := MobaDamage.new(10.0, MobaDamage.DamageType.PHYSICAL, null, false)
-	combatant.apply_damage(damage)
+	combatant.apply_damage(MobaDamage.new(10.0, MobaDamage.DamageType.PHYSICAL, null, false))
 	if health_bar.value >= maximum_health:
 		violations.append("bars: health bar did not follow health_changed")
+	if not is_equal_approx(health_bar.value, combatant.current_health):
+		violations.append("bars: health bar value diverged from the combatant's health")
 
 	frame.free()
 	combatant.free()
@@ -117,23 +204,20 @@ static func _test_frame_visibility() -> Array[String]:
 	var combatant := _make_combatant()
 	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
 
-	# Frame starts hidden
+	# Hidden straight out of the scene, before _ready() has had a chance to run.
 	if frame.visible:
 		violations.append("visibility: frame should be hidden initially")
 
-	# Frame becomes visible when bound
-	frame.bind(combatant)
+	frame.bind_target(combatant)
 	if not frame.visible:
-		violations.append("visibility: frame should be visible after bind(combatant)")
+		violations.append("visibility: frame should be visible after bind_target(combatant)")
 
-	# Frame hides when unbound
-	frame.unbind()
+	frame.unbind_target()
 	if frame.visible:
-		violations.append("visibility: frame should be hidden after unbind()")
+		violations.append("visibility: frame should be hidden after unbind_target()")
 
-	# Frame hides when bound to null
-	frame.bind(combatant)
-	frame.bind(null)
+	frame.bind_target(combatant)
+	frame.bind_target(null)
 	if frame.visible:
 		violations.append("visibility: frame should be hidden when bound to null")
 
@@ -142,27 +226,42 @@ static func _test_frame_visibility() -> Array[String]:
 	return violations
 
 
-static func _test_shield_overlay() -> Array[String]:
+## Shields are an overlay on the health bar, not a separate number: both bars
+## share one scale, and the shield bar's fill runs past the health fill's end by
+## exactly the shield amount.
+static func _test_shield_overlays_health_bar() -> Array[String]:
 	var violations: Array[String] = []
 
 	var combatant := _make_combatant()
 	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
-	frame.bind(combatant)
+	frame.bind_target(combatant)
 
-	var shield_bar: ProgressBar = frame.get_node_or_null("VBoxContainer/HealthContainer/ShieldBar")
+	var health_bar: TextureProgressBar = frame.get_node_or_null(HEALTH_BAR_PATH)
+	var shield_bar: TextureProgressBar = frame.get_node_or_null(SHIELD_BAR_PATH)
 
-	# Shield bar starts hidden (no shields)
-	if shield_bar.visible:
-		violations.append("shield: shield bar should be hidden with 0 shields")
+	# With no shield the two fills coincide, so no shield segment shows.
+	if not is_equal_approx(shield_bar.value, health_bar.value):
+		violations.append("shield: an unshielded target should show no shield segment")
 
-	# Apply shield
+	combatant.apply_damage(MobaDamage.new(20.0, MobaDamage.DamageType.TRUE, null, false))
 	combatant.apply_shield(50.0, &"test_source", 5.0)
-	if not shield_bar.visible:
-		violations.append("shield: shield bar should be visible with shields")
-	if not is_equal_approx(shield_bar.value, 50.0):
+
+	if not is_equal_approx(shield_bar.max_value, health_bar.max_value):
+		violations.append("shield: shield and health bars must share one scale")
+	if not is_equal_approx(shield_bar.value - health_bar.value, 50.0):
 		violations.append(
-			"shield: shield bar value should be 50.0, got %f" % shield_bar.value
+			(
+				"shield: shield segment should be 50.0 wide, got %f"
+				% (shield_bar.value - health_bar.value)
+			)
 		)
+	if not is_equal_approx(health_bar.value, combatant.current_health):
+		violations.append("shield: the shield must not eat into the health fill")
+
+	# A shield taking the target past maximum health must not be truncated.
+	combatant.apply_shield(500.0, &"big_source", 5.0)
+	if not is_equal_approx(shield_bar.value, combatant.current_health + combatant.total_shield()):
+		violations.append("shield: an overshield should extend the scale rather than clip")
 
 	frame.free()
 	combatant.free()
@@ -175,17 +274,17 @@ static func _test_freed_target_hides_frame() -> Array[String]:
 	var combatant := _make_combatant()
 	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
 
-	frame.bind(combatant)
+	frame.bind_target(combatant)
 	if not frame.visible:
-		violations.append("freed_target: frame should be visible after bind()")
+		violations.append("freed_target: frame should be visible after bind_target()")
 
-	# Free the combatant
 	combatant.free()
-	# Trigger the _process check
 	frame._process(0.0)
 
 	if frame.visible:
 		violations.append("freed_target: frame should hide when target is freed")
+	if frame.get_combatant() != null:
+		violations.append("freed_target: frame should drop its reference to a freed target")
 
 	frame.free()
 	return violations
@@ -197,19 +296,17 @@ static func _test_dead_target_hides_frame() -> Array[String]:
 	var combatant := _make_combatant()
 	var frame: MobaTargetFrame = TARGET_FRAME_SCENE.instantiate()
 
-	frame.bind(combatant)
+	frame.bind_target(combatant)
 	if not frame.visible:
-		violations.append("dead_target: frame should be visible after bind()")
+		violations.append("dead_target: frame should be visible after bind_target()")
 
-	# Kill the combatant
-	var lethal_damage := MobaDamage.new(9999.0, MobaDamage.DamageType.TRUE, null, false)
-	combatant.apply_damage(lethal_damage)
-
-	# Trigger the _process check
+	combatant.apply_damage(MobaDamage.new(9999.0, MobaDamage.DamageType.TRUE, null, false))
 	frame._process(0.0)
 
 	if frame.visible:
 		violations.append("dead_target: frame should hide when target dies")
+	if _connection_count(combatant.health_changed, frame) != 0:
+		violations.append("dead_target: dropping a dead target should drop its connections")
 
 	frame.free()
 	combatant.free()
