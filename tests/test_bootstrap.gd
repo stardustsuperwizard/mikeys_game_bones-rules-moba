@@ -47,6 +47,7 @@ var _expected_suites: Array[String] = [
 	"Status Tray Test",
 	"Floating Text Test",
 	"Death Test",
+	"Target Frame Test",
 ]
 
 
@@ -88,6 +89,7 @@ func _ready() -> void:
 	_check("Status Tray Test", StatusTrayTest.run())
 	_check("Floating Text Test", FloatingTextTest.run())
 	_check("Death Test", DeathTest.run())
+	_check("Target Frame Test", TargetFrameTest.run())
 
 
 ## Record and announce one suite's result.
