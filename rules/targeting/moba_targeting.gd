@@ -92,7 +92,7 @@ static func resolve_ground(
 		return []
 
 	# Query physics space for bodies at the ground point
-	var candidates := _query_area(ground_point, ability.area_radius, collision_layer_mask, collision_mask)
+	var candidates := _query_area(ground_point, ability.area_radius, collision_layer_mask, collision_mask, caster)
 
 	# Filter through the shared valid-target filter
 	return filter_valid_targets(candidates, caster, ability)

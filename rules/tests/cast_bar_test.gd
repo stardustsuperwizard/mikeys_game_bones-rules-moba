@@ -415,7 +415,7 @@ static func _test_rebind_has_no_stale_state() -> Array[String]:
 
 	# Bind to combatant1 and start a cast
 	bar.bind(combatant1)
-	combatant1.start_cast(&"cast_ability_1", combatant1.get_ability(&"cast_ability_1"), null, 2.0)
+	combatant1.start_cast(&"cast_ability_1", combatant1.get_ability(&"cast_ability_1"), ([] as Array[Node]), 2.0)
 	bar.refresh()
 
 	var name_label: Label = bar.get_node("VBox/NameLabel")

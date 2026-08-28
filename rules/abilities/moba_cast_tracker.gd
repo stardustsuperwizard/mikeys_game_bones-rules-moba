@@ -21,22 +21,22 @@ extends RefCounted
 class _CastInProgress:
 	var ability_id: StringName
 	var ability: MobaAbility
-	var resolved_targets: Array[Node]
+	## Callable that produces the target list at resolution time.
+	## For most types, returns pre-resolved targets.
+	## For GROUND, re-resolves at resolution time (after cast delay).
+	var target_list_producer: Callable
 	var remaining_time: float
-	var context: MobaCastContext  # Needed to re-resolve GROUND abilities at resolution time
 
 	func _init(
 		p_ability_id: StringName,
 		p_ability: MobaAbility,
-		p_targets: Array[Node],
-		p_time: float,
-		p_context: MobaCastContext = null
+		p_target_list_producer: Callable,
+		p_time: float
 	) -> void:
 		ability_id = p_ability_id
 		ability = p_ability
-		resolved_targets = p_targets
+		target_list_producer = p_target_list_producer
 		remaining_time = p_time
-		context = p_context
 
 
 ## The combatant this tracker belongs to.
@@ -85,7 +85,18 @@ func start(
 	cast_time: float,
 	context: MobaCastContext = null
 ) -> void:
-	_cast_in_progress = _CastInProgress.new(ability_id, ability, resolved_targets, cast_time, context)
+	# Create a target-list producer callable.
+	# For GROUND abilities, produce targets at resolution time (after cast delay).
+	# For other types, produce the pre-resolved targets.
+	var target_list_producer: Callable
+	if ability.targeting_type == MobaAbility.TargetingType.GROUND and context != null:
+		target_list_producer = func() -> Array[Node]:
+			return MobaTargeting.resolve_ground(context.caster, context.ground_point, ability)
+	else:
+		target_list_producer = func() -> Array[Node]:
+			return resolved_targets
+
+	_cast_in_progress = _CastInProgress.new(ability_id, ability, target_list_producer, cast_time)
 
 
 ## Cancel an in-progress cast and apply the on_cancel outcome (resource
@@ -149,9 +160,12 @@ func _undo_cooldown_only(ability_id: StringName) -> void:
 
 ## Resolve a cast that has expired: apply damage and effects to all targets.
 ##
-## For GROUND abilities, targets are re-resolved at resolution time (after the
-## cast delay) so targets that moved out of radius during the delay are not hit.
-## For all other targeting types, pre-resolved targets from activation time are used.
+## Targets are produced by the target_list_producer callable, which encapsulates
+## the timing strategy:
+## - For GROUND abilities, the producer re-resolves at this moment (after the
+##   cast delay) so targets that moved out of radius during the delay are not hit.
+## - For all other targeting types, the producer returns pre-resolved targets from
+##   activation time.
 ##
 ## Resolution runs through MobaAbilityAction.resolve() -- the same implementation
 ## an instant ability uses -- so a cast_time ability and an instant one cannot
@@ -166,19 +180,10 @@ func _resolve() -> void:
 		return
 
 	var ability := _cast_in_progress.ability
-	var targets_to_resolve: Array[Node]
 
-	# For GROUND abilities, re-resolve targets at resolution time to capture
-	# the aimed point after the cast delay. For all other types, use pre-resolved
-	# targets from activation time.
-	if ability.targeting_type == MobaAbility.TargetingType.GROUND and _cast_in_progress.context != null:
-		# Re-resolve GROUND targets at this moment (after cast_time has elapsed)
-		var caster := _cast_in_progress.context.caster
-		var ground_point := _cast_in_progress.context.ground_point
-		targets_to_resolve = MobaTargeting.resolve_ground(caster, ground_point, ability)
-	else:
-		# Use pre-resolved targets from activation time
-		targets_to_resolve = _cast_in_progress.resolved_targets
+	# Produce the target list at resolution time through the target-list producer.
+	# This encapsulates the timing strategy without a targeting-type-specific branch.
+	var targets_to_resolve: Array[Node] = _cast_in_progress.target_list_producer.call()
 
 	# Clear the in-progress cast BEFORE resolving effects, so a cancel() call
 	# made within any effect application finds nothing in progress (per Scope's
