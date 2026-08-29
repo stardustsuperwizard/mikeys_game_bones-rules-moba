@@ -177,7 +177,7 @@ static func _load_multiplier_table() -> void:
 		push_error("Failed to parse aim_assist.json: %s" % json.get_error_message())
 		return
 
-	var data := json.data
+	var data: Variant = json.data
 	if data is Dictionary:
 		# Extract device multipliers, skipping the comment key
 		if "mouse" in data:
