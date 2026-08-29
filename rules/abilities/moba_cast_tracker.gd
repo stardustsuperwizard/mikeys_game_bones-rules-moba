@@ -21,15 +21,21 @@ extends RefCounted
 class _CastInProgress:
 	var ability_id: StringName
 	var ability: MobaAbility
-	var resolved_target: Node
+	## Callable that produces the target list at resolution time.
+	## For most types, returns pre-resolved targets.
+	## For GROUND, re-resolves at resolution time (after cast delay).
+	var target_list_producer: Callable
 	var remaining_time: float
 
 	func _init(
-		p_ability_id: StringName, p_ability: MobaAbility, p_target: Node, p_time: float
+		p_ability_id: StringName,
+		p_ability: MobaAbility,
+		p_target_list_producer: Callable,
+		p_time: float
 	) -> void:
 		ability_id = p_ability_id
 		ability = p_ability
-		resolved_target = p_target
+		target_list_producer = p_target_list_producer
 		remaining_time = p_time
 
 
@@ -69,12 +75,29 @@ func get_cast_time_remaining() -> float:
 ## Args:
 ##     ability_id: The ability being cast
 ##     ability: The resolved MobaAbility resource
-##     resolved_target: The target (may be null; guarded in resolution)
+##     resolved_targets: The targets (may be empty; guarded in resolution)
 ##     cast_time: Remaining time until resolution, in seconds
+##     context: The MobaCastContext (needed for GROUND re-resolution)
 func start(
-	ability_id: StringName, ability: MobaAbility, resolved_target: Node, cast_time: float
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+	cast_time: float,
+	context: MobaCastContext = null
 ) -> void:
-	_cast_in_progress = _CastInProgress.new(ability_id, ability, resolved_target, cast_time)
+	# Create a target-list producer callable.
+	# For GROUND abilities, produce targets at resolution time (after cast delay)
+	# through MobaAbilityAction._ground_target_producer() -- the same query
+	# implementation execute()'s instant branch calls immediately, so an instant
+	# and a delayed GROUND ability can never diverge on how they find targets.
+	# For other types, produce the pre-resolved targets.
+	var target_list_producer: Callable
+	if ability.targeting_type == MobaAbility.TargetingType.GROUND and context != null:
+		target_list_producer = MobaAbilityAction._ground_target_producer(context, ability)
+	else:
+		target_list_producer = func() -> Array[Node]: return resolved_targets
+
+	_cast_in_progress = _CastInProgress.new(ability_id, ability, target_list_producer, cast_time)
 
 
 ## Cancel an in-progress cast and apply the on_cancel outcome (resource
@@ -136,26 +159,38 @@ func _undo_cooldown_only(ability_id: StringName) -> void:
 	_combatant.cancel_cooldown(ability_id)
 
 
-## Resolve a cast that has expired: apply damage and effects to the target.
+## Resolve a cast that has expired: apply damage and effects to all targets.
 ##
-## Resolution runs through MobaAbilityAction.resolve() -- the same
-## implementation an instant ability uses -- so a cast_time ability and an
-## instant one cannot resolve differently. It guards a null/freed target
-## itself, leaving the already-committed resource and cooldown spent.
+## Targets are produced by the target_list_producer callable, which encapsulates
+## the timing strategy:
+## - For GROUND abilities, the producer re-resolves at this moment (after the
+##   cast delay) so targets that moved out of radius during the delay are not hit.
+## - For all other targeting types, the producer returns pre-resolved targets from
+##   activation time.
+##
+## Resolution runs through MobaAbilityAction.resolve() -- the same implementation
+## an instant ability uses -- so a cast_time ability and an instant one cannot
+## resolve differently. It guards null/freed targets itself, leaving the
+## already-committed resource and cooldown spent.
+##
+## The in-progress cast is cleared BEFORE applying effects, so a cancel() call
+## made within effect application finds nothing in progress (per Scope's
+## "resolution wins ties" guarantee).
 func _resolve() -> void:
 	if _cast_in_progress == null:
 		return
 
 	var ability := _cast_in_progress.ability
 
-	# Left untyped on purpose: the target may have been freed while the cast
-	# was in flight, and narrowing a freed object into a Node-typed local
-	# would fault here rather than no-opping inside resolve().
-	var resolved_target = _cast_in_progress.resolved_target
+	# Produce the target list at resolution time through the target-list producer.
+	# This encapsulates the timing strategy without a targeting-type-specific branch.
+	var targets_to_resolve: Array[Node] = _cast_in_progress.target_list_producer.call()
 
 	# Clear the in-progress cast BEFORE resolving effects, so a cancel() call
 	# made within any effect application finds nothing in progress (per Scope's
 	# "resolution wins ties" guarantee).
 	_cast_in_progress = null
 
-	MobaAbilityAction.resolve(ability, resolved_target, _combatant)
+	# Apply resolution to each target through the shared resolve() implementation
+	for target in targets_to_resolve:
+		MobaAbilityAction.resolve(ability, target, _combatant)

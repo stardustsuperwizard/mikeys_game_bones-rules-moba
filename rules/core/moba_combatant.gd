@@ -137,6 +137,13 @@ func _seed_actor_character_sheet() -> void:
 	if parent_actor == null:
 		return
 
+	# A bare headless fixture is an Actor with no character_sheet: the sheet is
+	# statically typed to the game-side CharacterSheet, which rules/ must not
+	# name, so a test Actor cannot carry one. Seeding into it faults rather than
+	# no-opping, so skip it the same way a missing Actor is skipped.
+	if parent_actor.character_sheet == null:
+		return
+
 	# Seed max_hp and current_hp from the stat block
 	parent_actor.character_sheet.max_hp = int(
 		_runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
@@ -422,8 +429,16 @@ func notify_health_and_resource_changed() -> void:
 ## so both write through the same seam.
 func sync_character_sheet_hp() -> void:
 	var parent_actor := get_parent() as Actor
-	if parent_actor != null:
-		parent_actor.character_sheet.current_hp = int(_current_health)
+	if parent_actor == null:
+		return
+
+	# A bare headless fixture is an Actor with no character_sheet (see the
+	# matching guard in _seed_actor_character_sheet() above) -- writing into
+	# it faults rather than no-opping, so skip it the same way.
+	if parent_actor.character_sheet == null:
+		return
+
+	parent_actor.character_sheet.current_hp = int(_current_health)
 
 
 ## The shield pool ledger for this combatant, created on first use.
@@ -828,10 +843,15 @@ func get_cast_time_remaining() -> float:
 
 ## Start a cast that will resolve after its cast_time elapses via tick().
 ## Called by MobaAbilityAction when an ability with cast_time > 0 is activated.
+## For GROUND abilities, the context is needed to re-resolve targets at resolution time.
 func start_cast(
-	ability_id: StringName, ability: MobaAbility, resolved_target: Node, cast_time: float
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+	cast_time: float,
+	context: MobaCastContext = null
 ) -> void:
-	_get_cast_tracker().start(ability_id, ability, resolved_target, cast_time)
+	_get_cast_tracker().start(ability_id, ability, resolved_targets, cast_time, context)
 
 
 ## Cancel an in-progress cast and apply the on_cancel outcome (resource refund,
@@ -871,9 +891,12 @@ func get_channel_time_remaining() -> float:
 ## Start a channel that will tick according to channel_tick_interval via tick().
 ## Called by MobaAbilityAction when an ability with channel_duration > 0 is activated.
 func start_channel(
-	ability_id: StringName, ability: MobaAbility, resolved_target: Node, channel_duration: float
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+	channel_duration: float
 ) -> void:
-	_get_channel_tracker().start(ability_id, ability, resolved_target, channel_duration)
+	_get_channel_tracker().start(ability_id, ability, resolved_targets, channel_duration)
 
 
 ## Break an in-progress channel and apply the on_channel_break outcome.

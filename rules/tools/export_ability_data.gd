@@ -169,6 +169,10 @@ func _serialize_ability(ability: MobaAbility) -> Dictionary:
 		_enum_to_string(MobaAbility.OnChannelBreak.keys(), ability.on_channel_break),
 		"heal_amount": ability.heal_amount,
 		"shield_amount": ability.shield_amount,
+		"affects_caster": ability.affects_caster,
+		"target_allegiance":
+		_enum_to_string(MobaAbility.TargetAllegiance.keys(), ability.target_allegiance),
+		"targeting_collision_mask": ability.targeting_collision_mask,
 	}
 
 	# Serialize buffs

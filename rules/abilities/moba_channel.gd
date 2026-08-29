@@ -22,7 +22,7 @@ extends RefCounted
 class _ChannelInProgress:
 	var ability_id: StringName
 	var ability: MobaAbility
-	var resolved_target: Node
+	var resolved_targets: Array[Node]
 	var elapsed_time: float
 	var remaining_time: float
 	## True once at least one tick has applied. Set when the first tick fires
@@ -34,12 +34,12 @@ class _ChannelInProgress:
 	func _init(
 		p_ability_id: StringName,
 		p_ability: MobaAbility,
-		p_target: Node,
+		p_targets: Array[Node],
 		p_duration: float,
 	) -> void:
 		ability_id = p_ability_id
 		ability = p_ability
-		resolved_target = p_target
+		resolved_targets = p_targets
 		elapsed_time = 0.0
 		remaining_time = p_duration
 		time_since_last_tick = 0.0
@@ -91,13 +91,16 @@ func get_channel_time_remaining() -> float:
 ## Args:
 ##     ability_id: The ability being channeled
 ##     ability: The resolved MobaAbility resource
-##     resolved_target: The target (may be null; guarded in resolution)
+##     resolved_targets: The targets (may be empty; guarded in resolution)
 ##     channel_duration: Total duration of the channel, in seconds
 func start(
-	ability_id: StringName, ability: MobaAbility, resolved_target: Node, channel_duration: float
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+	channel_duration: float
 ) -> void:
 	_channel_in_progress = _ChannelInProgress.new(
-		ability_id, ability, resolved_target, channel_duration
+		ability_id, ability, resolved_targets, channel_duration
 	)
 
 	# Apply the first tick immediately (t = 0)
@@ -171,7 +174,6 @@ func _apply_tick() -> void:
 		return
 
 	var ability := _channel_in_progress.ability
-	var resolved_target = _channel_in_progress.resolved_target
 
 	# Spend the per-tick resource cost
 	if not _combatant.spend_resource(ability.resource_cost):
@@ -182,10 +184,11 @@ func _apply_tick() -> void:
 	# Mark that at least one tick has applied
 	_channel_in_progress.has_applied_at_least_one_tick = true
 
-	# Apply the tick's damage and effects via resolve() - same implementation an instant
-	# ability uses. The target may have been freed while the channel was in progress, and
-	# resolve() guards a null/freed target, leaving the spent resource unreturned.
-	MobaAbilityAction.resolve(ability, resolved_target, _combatant)
+	# Apply the tick's damage and effects to each target via resolve() - same implementation
+	# an instant ability uses. Targets may have been freed while the channel was in progress,
+	# and resolve() guards null/freed targets, leaving the spent resource unreturned.
+	for target in _channel_in_progress.resolved_targets:
+		MobaAbilityAction.resolve(ability, target, _combatant)
 
 
 ## Apply the on_channel_break outcome for buffs/debuffs based on the ability's policy.
@@ -198,23 +201,22 @@ func _apply_tick() -> void:
 func _apply_channel_break_outcome(ability_id: StringName, ability: MobaAbility) -> void:
 	match ability.on_channel_break:
 		MobaAbility.OnChannelBreak.NO_EFFECT_REMAINING:
-			# Remove buffs/debuffs this ability applied from both caster and target
+			# Remove buffs/debuffs this ability applied from both caster and all targets
 			var caster_container := _combatant.get_effect_container()
 			if caster_container != null:
 				caster_container.remove_modifiers_from(ability_id)
 
-			# Also remove from target if it has a combatant
-			var resolved_target = (
-				_channel_in_progress.resolved_target if _channel_in_progress != null else null
-			)
-			if resolved_target != null and is_instance_valid(resolved_target):
-				var target_combatant := (
-					resolved_target.get_node_or_null("MobaCombatant") as MobaCombatant
-				)
-				if target_combatant != null:
-					var target_container := target_combatant.get_effect_container()
-					if target_container != null:
-						target_container.remove_modifiers_from(ability_id)
+			# Also remove from all targets that have combatants
+			if _channel_in_progress != null:
+				for resolved_target in _channel_in_progress.resolved_targets:
+					if resolved_target != null and is_instance_valid(resolved_target):
+						var target_combatant := (
+							resolved_target.get_node_or_null("MobaCombatant") as MobaCombatant
+						)
+						if target_combatant != null:
+							var target_container := target_combatant.get_effect_container()
+							if target_container != null:
+								target_container.remove_modifiers_from(ability_id)
 
 		MobaAbility.OnChannelBreak.PARTIAL_EFFECT_ALREADY_APPLIED:
 			# Leave effects running their normal duration - nothing to do here

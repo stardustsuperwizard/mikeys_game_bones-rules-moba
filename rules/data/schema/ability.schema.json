@@ -167,6 +167,19 @@
       "type": "number",
       "description": "Self-shield capacity on cast (uses ability's duration field for shield duration)",
       "minimum": 0.0
+    },
+    "affects_caster": {
+      "type": "boolean",
+      "description": "Whether an AREA/GROUND ability includes the caster among its affected targets"
+    },
+    "target_allegiance": {
+      "type": "string",
+      "enum": ["hostile", "friendly", "any"],
+      "description": "Which side an ability affects: hostile (enemies), friendly (allies), or any"
+    },
+    "targeting_collision_mask": {
+      "type": "integer",
+      "description": "Physics collision mask used by an AREA/GROUND ability's shape query"
     }
   },
   "required": [
@@ -203,7 +216,10 @@
     "on_cancel",
     "on_channel_break",
     "heal_amount",
-    "shield_amount"
+    "shield_amount",
+    "affects_caster",
+    "target_allegiance",
+    "targeting_collision_mask"
   ],
   "definitions": {
     "statModifier": {

@@ -41,8 +41,6 @@ const _ALL_ABILITY_IDS: Array[StringName] = [
 ## Maps ability id -> targeting type name, for assertion messages.
 const _UNIMPLEMENTED_TYPE_ABILITIES: Dictionary = {
 	&"skillshot_ability": "SKILLSHOT",
-	&"ground_ability": "GROUND",
-	&"area_ability": "AREA",
 	&"toggle_ability": "TOGGLE",
 }
 

@@ -28,6 +28,13 @@ enum TargetingType {
 	CHANNELED,
 }
 
+## Target allegiance filter for multi-target abilities.
+enum TargetAllegiance {
+	HOSTILE,  ## Ability targets enemies
+	FRIENDLY,  ## Ability targets allies
+	ANY,  ## Ability targets everyone
+}
+
 enum AimAssist {
 	FREE,
 	SOFT_LOCK,
@@ -88,6 +95,17 @@ enum OnChannelBreak {
 
 ## Radius in world units within which a target can be acquired.
 @export var acquisition_range: float = 0.0
+
+## Whether an AREA/GROUND ability includes the caster among its affected targets.
+@export var affects_caster: bool = false
+
+## Target allegiance filter for multi-target abilities (AREA/GROUND).
+@export var target_allegiance: TargetAllegiance = TargetAllegiance.HOSTILE
+
+## Physics collision mask used by an AREA/GROUND ability's shape query
+## (MobaTargeting._query_area). Exported per ability rather than a shared
+## constant so different abilities can target different physics layers.
+@export var targeting_collision_mask: int = 1
 
 # ---------------------------------------------------------------------------
 # Damage
