@@ -1,10 +1,9 @@
-[gd_scene format=3 uid="uid://bsuilty4lnjsl"]
+[gd_scene load_steps=20 format=3 uid="uid://bsuilty4lnjsl"]
 
 [ext_resource type="Script" uid="uid://bbkyrp8blv57x" path="res://scripts/third_person_camera_3d.gd" id="2"]
 [ext_resource type="Script" uid="uid://snsjljqxfyjg" path="res://addons/mikeys_game_bones/world/spawn_point.gd" id="2_eb6dy"]
 [ext_resource type="Script" uid="uid://cjdpbv8uumhmx" path="res://addons/mikeys_game_bones/world/world_manager.gd" id="3"]
-[ext_resource type="Resource" path="res://resources/player_spawn_point.tres" id="4"]
-[ext_resource type="Resource" path="res://resources/enemy_spawn_point.tres" id="5"]
+[ext_resource type="Resource" path="res://resources/village_spawn_point.tres" id="4"]
 [ext_resource type="PackedScene" path="res://rules/ui/moba_combat_hud.tscn" id="6"]
 [ext_resource type="Script" uid="uid://xdlc00e4picu" path="res://scripts/combat_hud_binder.gd" id="7"]
 [ext_resource type="Script" uid="uid://dj7sjrerk23yy" path="res://scripts/floating_text_binder.gd" id="9"]
@@ -12,111 +11,29 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/inventory_hud.tscn" id="12"]
 [ext_resource type="Script" uid="uid://cyh0d64pfygbl" path="res://addons/maaacks_game_template/base/nodes/utilities/pause_menu_controller.gd" id="13"]
 [ext_resource type="PackedScene" path="res://scenes/windows/pause_menu_layer.tscn" id="14"]
-
-[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
-size = Vector3(20, 0.2, 20)
-
-[sub_resource type="StandardMaterial3D" id="Mat_floor"]
-albedo_color = Color(0.5, 0.5, 0.5, 1)
-
-[sub_resource type="BoxMesh" id="BoxMesh_floor"]
-size = Vector3(20, 0.2, 20)
-
-[sub_resource type="BoxShape3D" id="BoxShape3D_north"]
-size = Vector3(20, 4, 0.2)
-
-[sub_resource type="StandardMaterial3D" id="Mat_wall"]
-albedo_color = Color(0.96, 0.9, 0.78, 1)
-
-[sub_resource type="BoxMesh" id="BoxMesh_north"]
-size = Vector3(20, 4, 0.2)
-
-[sub_resource type="BoxShape3D" id="BoxShape3D_south"]
-size = Vector3(20, 4, 0.2)
-
-[sub_resource type="BoxMesh" id="BoxMesh_south"]
-size = Vector3(20, 4, 0.2)
-
-[sub_resource type="BoxShape3D" id="BoxShape3D_west"]
-size = Vector3(0.2, 4, 20)
-
-[sub_resource type="BoxMesh" id="BoxMesh_west"]
-size = Vector3(0.2, 4, 20)
-
-[sub_resource type="BoxShape3D" id="BoxShape3D_east"]
-size = Vector3(0.2, 4, 20)
-
-[sub_resource type="BoxMesh" id="BoxMesh_east"]
-size = Vector3(0.2, 4, 20)
+[ext_resource type="PackedScene" uid="uid://c7ckshevlssjn" path="res://addons/quaternius/medievalvillagemegakit/L_SampleScene_1.tscn" id="15"]
+[ext_resource type="Script" path="res://scripts/world/generate_static_collision.gd" id="16"]
+[ext_resource type="PackedScene" path="res://scenes/pickups/knight_armet_pickup.tscn" id="17"]
+[ext_resource type="PackedScene" path="res://scenes/pickups/knight_breastplate_pickup.tscn" id="18"]
+[ext_resource type="PackedScene" path="res://scenes/pickups/knight_greaves_pickup.tscn" id="19"]
+[ext_resource type="PackedScene" path="res://scenes/pickups/knight_sabatons_pickup.tscn" id="20"]
+[ext_resource type="PackedScene" path="res://scenes/pickups/wizard_robe_pickup.tscn" id="21"]
+[ext_resource type="PackedScene" path="res://scenes/pickups/ranger_hood_pickup.tscn" id="22"]
 
 [node name="swordAndPlanet" type="Node" unique_id=1142634838]
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=849271469]
-transform = Transform3D(1, 0, 0, 0, 0.5, -0.866025, 0, 0.866025, 0.5, 0, 0, 0)
-
-[node name="Floor" type="StaticBody3D" parent="." unique_id=693094655]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor" unique_id=2029116915]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
-shape = SubResource("BoxShape3D_floor")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor" unique_id=350707058]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
-material_override = SubResource("Mat_floor")
-mesh = SubResource("BoxMesh_floor")
-
-[node name="WallNorth" type="StaticBody3D" parent="." unique_id=970048831]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="WallNorth" unique_id=642241448]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -10)
-shape = SubResource("BoxShape3D_north")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="WallNorth" unique_id=147843908]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -10)
-material_override = SubResource("Mat_wall")
-mesh = SubResource("BoxMesh_north")
-
-[node name="WallSouth" type="StaticBody3D" parent="." unique_id=186581739]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="WallSouth" unique_id=1889906692]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 10)
-shape = SubResource("BoxShape3D_south")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="WallSouth" unique_id=11038992]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 10)
-material_override = SubResource("Mat_wall")
-mesh = SubResource("BoxMesh_south")
-
-[node name="WallWest" type="StaticBody3D" parent="." unique_id=4213803]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="WallWest" unique_id=990137310]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, 0)
-shape = SubResource("BoxShape3D_west")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="WallWest" unique_id=1046238771]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, 0)
-material_override = SubResource("Mat_wall")
-mesh = SubResource("BoxMesh_west")
-
-[node name="WallEast" type="StaticBody3D" parent="." unique_id=664046903]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="WallEast" unique_id=58021418]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 2, 0)
-shape = SubResource("BoxShape3D_east")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="WallEast" unique_id=1420168593]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 2, 0)
-material_override = SubResource("Mat_wall")
-mesh = SubResource("BoxMesh_east")
+[node name="VillageDemo" parent="." instance=ExtResource("15")]
+script = ExtResource("16")
 
 [node name="WorldManager" type="Node3D" parent="." unique_id=789669805]
 script = ExtResource("3")
-spawn_points = Array[ExtResource("2_eb6dy")]([ExtResource("4"), ExtResource("5")])
+spawn_points = Array[ExtResource("2_eb6dy")]([ExtResource("4")])
 
 [node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="WorldManager" unique_id=1605736643]
 spawn_path = NodePath("..")
 
 [node name="ThirdPersonCamera" type="Camera3D" parent="." unique_id=1317531167]
+transform = Transform3D(0.707107, 0.0, -0.707107, -0.326732, 0.886844, -0.326732, 0.627093, 0.462069, 0.627093, 25.0, 16.0, 8.0)
 script = ExtResource("2")
 target_path = NodePath("../WorldManager/Player/Body")
 
@@ -141,3 +58,23 @@ hud_path = NodePath("../MobaCombatHUD")
 script = ExtResource("11")
 hud_path = NodePath("../MobaCombatHUD")
 controller_path = NodePath("../WorldManager/Player/Controller")
+
+[node name="Pickups" type="Node3D" parent="."]
+
+[node name="KnightArmetPickup" parent="Pickups" instance=ExtResource("17")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 17, 0.6, -12)
+
+[node name="KnightBreastplatePickup" parent="Pickups" instance=ExtResource("18")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0.6, -12)
+
+[node name="KnightGreavesPickup" parent="Pickups" instance=ExtResource("19")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0.6, -13.5)
+
+[node name="KnightSabatonsPickup" parent="Pickups" instance=ExtResource("20")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0.6, -10.5)
+
+[node name="WizardRobePickup" parent="Pickups" instance=ExtResource("21")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 17.5, 0.6, -10.5)
+
+[node name="RangerHoodPickup" parent="Pickups" instance=ExtResource("22")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14.5, 0.6, -13.5)
