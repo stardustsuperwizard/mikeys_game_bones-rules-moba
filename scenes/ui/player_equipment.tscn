@@ -1,0 +1,84 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/inventory/player_equipment.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://7oswlw660qvn" path="res://addons/universal_inventory/scenes/equipment_slot.tscn" id="2_slot"]
+
+[node name="PlayerEquipment" type="PanelContainer"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -395.0
+offset_top = 8.0
+offset_right = -262.0
+offset_bottom = 167.0
+grow_horizontal = 0
+script = ExtResource("1_script")
+id = "player_equipment"
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 5
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 5
+theme_override_constants/margin_bottom = 5
+
+[node name="Control" type="Control" parent="MarginContainer"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/Control"]
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_right = 34.0
+grow_vertical = 2
+alignment = 1
+
+[node name="Head" parent="MarginContainer/Control/VBoxContainer" instance=ExtResource("2_slot")]
+unique_name_in_owner = true
+layout_mode = 2
+slot_type = 1
+
+[node name="Chest" parent="MarginContainer/Control/VBoxContainer" instance=ExtResource("2_slot")]
+unique_name_in_owner = true
+layout_mode = 2
+slot_type = 2
+
+[node name="Legs" parent="MarginContainer/Control/VBoxContainer" instance=ExtResource("2_slot")]
+unique_name_in_owner = true
+layout_mode = 2
+slot_type = 3
+
+[node name="Feet" parent="MarginContainer/Control/VBoxContainer" instance=ExtResource("2_slot")]
+unique_name_in_owner = true
+layout_mode = 2
+slot_type = 4
+
+[node name="VBoxContainer2" type="VBoxContainer" parent="MarginContainer/Control"]
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -34.0
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="Neck" parent="MarginContainer/Control/VBoxContainer2" instance=ExtResource("2_slot")]
+unique_name_in_owner = true
+layout_mode = 2
+slot_type = 7
+
+[node name="Ring" parent="MarginContainer/Control/VBoxContainer2" instance=ExtResource("2_slot")]
+unique_name_in_owner = true
+layout_mode = 2
+slot_type = 8
+
+[node name="Weapon" parent="MarginContainer/Control/VBoxContainer2" instance=ExtResource("2_slot")]
+unique_name_in_owner = true
+layout_mode = 2
+slot_type = 5
+
+[node name="Shield" parent="MarginContainer/Control/VBoxContainer2" instance=ExtResource("2_slot")]
+unique_name_in_owner = true
+layout_mode = 2
+slot_type = 6

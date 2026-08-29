@@ -1,0 +1,14 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/player_inventory.tscn" id="1_inv"]
+[ext_resource type="PackedScene" path="res://scenes/ui/player_equipment.tscn" id="2_equip"]
+[ext_resource type="PackedScene" uid="uid://dfo6atm4fkkgd" path="res://addons/universal_inventory/scenes/quantity_selector.tscn" id="3_qty"]
+
+[node name="InventoryHUD" type="CanvasLayer"]
+
+[node name="PlayerInventory" parent="." instance=ExtResource("1_inv")]
+
+[node name="PlayerEquipment" parent="." instance=ExtResource("2_equip")]
+
+[node name="QuantitySelector" parent="." groups=["QuantitySelector"] instance=ExtResource("3_qty")]
+visible = false
