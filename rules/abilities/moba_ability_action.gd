@@ -55,15 +55,21 @@ func _init(p_actor: Actor, p_ability_id: StringName, p_context: MobaCastContext)
 
 
 func execute() -> ActionResult:
-	# Step 1: Load ability
+	# Steps 1-2: load the ability and the caster's combatant. Both guards funnel
+	# through one return so adding the toggle-off exit below stays within
+	# gdlint's max-returns budget; the failure reasons are unchanged.
 	var ability := MobaAbilityLibrary.get_ability(ability_id)
-	if ability == null:
-		return ActionResult.new(false, FAILURE_UNKNOWN_ABILITY)
+	var combatant := _get_combatant(actor) if ability != null else null
+	var precondition_failure := _check_preconditions(ability, combatant)
+	if precondition_failure != &"":
+		return ActionResult.new(false, precondition_failure)
 
-	# Step 2: Get combatant
-	var combatant := _get_combatant(actor)
-	if combatant == null:
-		return ActionResult.new(false, FAILURE_ILLEGAL_STATE)
+	# Check if this toggle ability is already active for this caster.
+	# A second press deactivates it immediately, bypassing cooldown/resource legality.
+	if ability.targeting_type == MobaAbility.TargetingType.TOGGLE:
+		if combatant.is_toggled_on(ability_id):
+			combatant.deactivate_toggle()
+			return ActionResult.new(true)
 
 	# Steps 1-4: state machine, cooldown/charges/resource legality, then silenced
 	var state_machine := _get_state_machine(actor)
@@ -128,6 +134,13 @@ func execute() -> ActionResult:
 		combatant.start_channel(
 			ability_id, ability, _filter_live_targets(resolved_targets), ability.channel_duration
 		)
+	elif ability.targeting_type == MobaAbility.TargetingType.TOGGLE:
+		# Toggle ability: drain per-second resource and apply effects on each drain tick.
+		# Effects are applied continuously via the toggle tracker's tick(), not at
+		# activation time. Same freed-target hazard as start_cast() above, and the same fix:
+		# filter freed entries out of the typed Array[Node] before it crosses that
+		# boundary; MobaToggleTracker's per-tick resolve() already guards null/freed.
+		combatant.start_toggle(ability_id, ability, _filter_live_targets(resolved_targets))
 	else:
 		# Instant ability: steps 8-9 run now, through the same resolve() the
 		# deferred cast path uses. A target that evaporated between commit
@@ -174,6 +187,16 @@ static func _filter_live_targets(targets: Array[Node]) -> Array[Node]:
 		if is_instance_valid(target):
 			live.append(target)
 	return live
+
+
+## Steps 1-2 preconditions: the ability must resolve and the actor must carry a
+## MobaCombatant. Returns &"" when both hold.
+static func _check_preconditions(ability: MobaAbility, combatant: MobaCombatant) -> StringName:
+	if ability == null:
+		return FAILURE_UNKNOWN_ABILITY
+	if combatant == null:
+		return FAILURE_ILLEGAL_STATE
+	return &""
 
 
 ## Find a combatant's MobaCombatant child node.
@@ -268,8 +291,13 @@ func _resolve_target(ability: MobaAbility) -> Dictionary:
 			# delay are not hit.
 			targets = []
 
+		MobaAbility.TargetingType.TOGGLE:
+			targets = MobaTargeting.resolve_toggle(actor, ability)
+
 		_:
-			# All other targeting types not implemented (SKILLSHOT, TOGGLE)
+			# Unreachable: every TargetingType above is implemented. Kept as a
+			# defensive default so a targeting type added to the enum without a
+			# branch here fails loudly instead of silently resolving no targets.
 			failure = FAILURE_TARGETING_NOT_IMPLEMENTED
 
 	return {"targets": targets, "failure": failure}

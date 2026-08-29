@@ -57,6 +57,8 @@ func clear_on_death() -> void:
 	if _combatant.is_channeling():
 		_combatant.break_channel()
 
+	_combatant.deactivate_toggle()
+
 	_combatant.clear_all_active_effects()
 	_combatant.notify_shield_changed()
 

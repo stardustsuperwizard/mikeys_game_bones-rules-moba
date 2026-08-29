@@ -37,12 +37,6 @@ const _ALL_ABILITY_IDS: Array[StringName] = [
 	&"channeled_ability",
 ]
 
-## Unimplemented targeting types that must each fail with targeting_not_implemented.
-## Maps ability id -> targeting type name, for assertion messages.
-const _UNIMPLEMENTED_TYPE_ABILITIES: Dictionary = {
-	&"toggle_ability": "TOGGLE",
-}
-
 
 static func run() -> bool:
 	var all_violations: Array[String] = []
@@ -53,7 +47,6 @@ static func run() -> bool:
 	all_violations.append_array(_test_illegal_state())
 	all_violations.append_array(_test_insufficient_resource())
 	all_violations.append_array(_test_single_charge_on_cooldown())
-	all_violations.append_array(_test_targeting_not_implemented_variants())
 	all_violations.append_array(_test_target_freed_before_activation())
 	all_violations.append_array(_test_target_freed_after_commit())
 	all_violations.append_array(_test_out_of_range())
@@ -445,69 +438,6 @@ static func _test_single_charge_on_cooldown() -> Array[String]:
 
 	# Cleanup
 	MobaAbilityLibrary._reset()
-
-	return violations
-
-
-## Test 7: Every unimplemented targeting type loads, validates, and activate()
-## returns targeting_not_implemented with nothing spent.
-static func _test_targeting_not_implemented_variants() -> Array[String]:
-	var violations: Array[String] = []
-
-	for ability_id: StringName in _UNIMPLEMENTED_TYPE_ABILITIES:
-		var type_name: String = _UNIMPLEMENTED_TYPE_ABILITIES[ability_id]
-
-		# Setup
-		MobaAbilityLibrary._reset()
-		_ensure_all_test_abilities_loaded()
-
-		var ability = MobaAbilityLibrary.get_ability(ability_id)
-		if ability == null:
-			violations.append(
-				"targeting_not_implemented(%s): fixture failed to load/validate" % type_name
-			)
-			MobaAbilityLibrary._reset()
-			continue
-
-		var caster_data = _create_test_actor()
-		var caster = caster_data["actor"]
-		var caster_combatant = caster_data["combatant"]
-		var target = _create_target_with_combatant()
-		target.global_position = Vector3(1, 0, 0)
-
-		var initial_resource = caster_combatant._current_resource
-		var initial_cooldown = caster_combatant._cooldowns.remaining(ability_id)
-
-		var context = MobaCastContext.new(caster, target, Vector3.FORWARD)
-		var action = MobaAbilityAction.new(caster, ability_id, context)
-		var result = action.execute()
-
-		if result.success:
-			violations.append("targeting_not_implemented(%s): activation should fail" % type_name)
-
-		if result.reason != MobaAbilityAction.FAILURE_TARGETING_NOT_IMPLEMENTED:
-			(
-				violations
-				. append(
-					(
-						"targeting_not_implemented(%s): reason should be 'targeting_not_implemented', got '%s'"
-						% [type_name, result.reason]
-					)
-				)
-			)
-
-		if caster_combatant._current_resource != initial_resource:
-			violations.append(
-				"targeting_not_implemented(%s): resource should not be spent" % type_name
-			)
-
-		if caster_combatant._cooldowns.remaining(ability_id) != initial_cooldown:
-			violations.append(
-				"targeting_not_implemented(%s): cooldown should not be started" % type_name
-			)
-
-		# Cleanup
-		MobaAbilityLibrary._reset()
 
 	return violations
 

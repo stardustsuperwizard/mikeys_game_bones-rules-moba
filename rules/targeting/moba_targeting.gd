@@ -32,6 +32,15 @@ static func resolve_self(caster: Node, _ability: MobaAbility) -> Array[Node]:
 	return [caster]
 
 
+## Resolve a TOGGLE targeting ability: target is always the caster.
+## Toggles always affect the caster; any other targets would go through
+## filter_valid_targets() if needed (see issue #263).
+static func resolve_toggle(caster: Node, _ability: MobaAbility) -> Array[Node]:
+	if caster == null:
+		return []
+	return [caster]
+
+
 ## Resolve a TARGETED ability: target is the explicitly provided target.
 static func resolve_targeted(_caster: Node, target: Node, _ability: MobaAbility) -> Array[Node]:
 	if target == null or not is_instance_valid(target):
