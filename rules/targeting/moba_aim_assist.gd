@@ -12,7 +12,6 @@
 class_name MobaAimAssist
 extends RefCounted
 
-
 ## Path to the device-multiplier data table.
 const _DATA_PATH := "res://rules/data/aim_assist.json"
 
@@ -87,10 +86,7 @@ static func select_nearest_in_cone(
 ##
 ## Returns: The slerp-interpolated direction toward the target, or the raw direction.
 static func resolve_direction(
-	raw_aim_direction: Vector3,
-	target: Node,
-	caster_position: Vector3,
-	magnetism: float
+	raw_aim_direction: Vector3, target: Node, caster_position: Vector3, magnetism: float
 ) -> Vector3:
 	if target == null or not is_instance_valid(target):
 		return raw_aim_direction
@@ -132,8 +128,7 @@ static func effective_magnetism(ability_magnetism: float, device_multiplier: flo
 ##
 ## Returns: locked_target_direction if present and valid, else raw_aim_direction
 static func resolve_locked_target(
-	locked_target_direction: Variant,
-	raw_aim_direction: Vector3
+	locked_target_direction: Variant, raw_aim_direction: Vector3
 ) -> Vector3:
 	if locked_target_direction is Vector3:
 		return locked_target_direction
@@ -188,31 +183,23 @@ static func _load_multiplier_table() -> void:
 			_multiplier_table["touch"] = data["touch"]
 
 
-## Get the world position of a node.
+## Get the world position of a candidate.
 ##
-## Tries multiple strategies to get a consistent position:
-## 1. If the node is a Node3D, use its global_position
-## 2. If the node has an Actor parent, use Actor.global_position
-## 3. If the node has a Body child (CharacterBody3D/CharacterBody2D), use its position
-## 4. Default to Vector3.ZERO
+## The contract for this module (see the class doc comment above) is purity
+## over supplied candidates: no scene-tree traversal to find a position
+## elsewhere. This only reads a position the candidate already bears
+## directly -- Node3D.global_position -- and never looks at siblings,
+## children, or parents to find one.
+##
+## Returns: The candidate's global_position if it is a Node3D, else
+##   Vector3.ZERO.
 static func _get_position(node: Node) -> Vector3:
 	if node == null:
 		return Vector3.ZERO
 
-	# Try Node3D directly
 	var node_3d := node as Node3D
 	if node_3d != null:
 		return node_3d.global_position
-
-	# Try as Actor
-	var actor := node as Actor
-	if actor != null:
-		return actor.global_position
-
-	# Try Body child
-	var body := node.get_node_or_null("Body") as Node3D
-	if body != null:
-		return body.global_position
 
 	return Vector3.ZERO
 
