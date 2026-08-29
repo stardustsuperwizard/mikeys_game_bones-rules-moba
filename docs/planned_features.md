@@ -17,7 +17,7 @@ human-directed; nothing here is approved architecture.
 Stated plainly, because there is a gap between what the code supports and what
 the running game does:
 
-`scenes/main.tscn` contains a 20x20 walled box, one directional light, one
+`scenes/headless_test.tscn` contains a 20x20 walled box, one directional light, one
 player capsule, and a camera. `WorldManager.spawn_points` has exactly one entry:
 the player. There is **no enemy and no door in the scene**.
 
@@ -48,7 +48,7 @@ These are small and unlock a disproportionate amount of existing code.
 actor scene (`scenes/enemy/enemy.tscn`) now exists with `SimpleAIController`,
 `hostile = true`, and a `MobaCombatant` carrying the melee-bruiser loadout.
 It is registered as the second entry in `WorldManager.spawn_points` in
-`scenes/main.tscn` and spawns at runtime at position (-2, 0, -3). The player
+`scenes/headless_test.tscn` and spawns at runtime at position (-2, 0, -3). The player
 scene also carries a `MobaCombatant`, `MobaStateMachine`, and
 `MobaAbilityCaster`; ability slots 1-4 are wired to the `ability_1`–`ability_4`
 input actions. A `Door` instance in the main scene is still needed.

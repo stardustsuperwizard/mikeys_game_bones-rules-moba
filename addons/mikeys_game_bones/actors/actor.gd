@@ -100,14 +100,15 @@ func request_interact(target_path: NodePath) -> void:
 	if target:
 		_resolve_interact(target, multiplayer.get_remote_sender_id())
 
-# Interact currently only ever resolves to opening a door -- Controller
-# returns a plain Node so future interactables (a chest, a lever) don't
-# require a Controller-level API change, but OpenAction is the only
-# interact Action implemented so far.
+# Controller returns a plain Node so interactables (a door, an item pickup,
+# a future chest or lever) don't require a Controller-level API change.
 func _resolve_interact(target: Node, requester_id: int) -> void:
 	var door := target as Door
 	if door:
 		ActionRunner.run(OpenAction.new(self, door), requester_id)
+		return
+	if target is ItemPickup3D:
+		ActionRunner.run(PickupAction.new(self, target), requester_id)
 
 func take_damage(amount: int) -> void:
 	var remaining := character_sheet.current_hp - amount

@@ -33,7 +33,7 @@ func _run() -> void:
 	# would pass against unfixed code, having never entered the stuck state.
 	_check_capture_recovery_rule()
 
-	var scene := (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	var scene := (load("res://scenes/headless_test.tscn") as PackedScene).instantiate()
 	root.add_child(scene)
 	await physics_frame
 	await physics_frame

@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://addons/universal_inventory/scenes/inventory_system.tscn" id="1"]
+
+[node name="InventorySystem" instance=ExtResource("1")]
+items_path = "res://resources/items/"
+default_currency = null

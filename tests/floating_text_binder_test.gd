@@ -67,7 +67,7 @@ func _run() -> void:
 
 
 # Builds an Actor with a CharacterBody3D named "Body" and a MobaCombatant named
-# "MobaCombatant", the same shape scenes/main.tscn addresses as
+# "MobaCombatant", the same shape scenes/headless_test.tscn addresses as
 # "WorldManager/Player/MobaCombatant". Added to the tree so the binder's
 # node_added discovery sees it.
 func _spawn_actor(actor_name: String, position: Vector3) -> MobaCombatant:

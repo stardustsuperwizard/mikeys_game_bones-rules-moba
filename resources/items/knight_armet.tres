@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ItemBase" load_steps=3 format=3]
+
+[ext_resource type="Script" uid="uid://c6xipxmcp476u" path="res://addons/universal_inventory/scripts/itemization/ItemBase.gd" id="1"]
+[ext_resource type="Texture2D" path="res://resources/items/icons/Male_Knight_Head_Armet.png" id="2"]
+
+[resource]
+script = ExtResource("1")
+name = "Knight's Armet"
+description = "A steel great helm favored by knights."
+icon = ExtResource("2")
+stackable = false
+max_stacks = 1
+base_value = 25
+slot_type = 1
+armor = 5

@@ -1,13 +1,17 @@
 [gd_scene format=3 uid="uid://bsuilty4lnjsl"]
 
 [ext_resource type="Script" uid="uid://bbkyrp8blv57x" path="res://scripts/third_person_camera_3d.gd" id="2"]
+[ext_resource type="Script" uid="uid://snsjljqxfyjg" path="res://addons/mikeys_game_bones/world/spawn_point.gd" id="2_eb6dy"]
 [ext_resource type="Script" uid="uid://cjdpbv8uumhmx" path="res://addons/mikeys_game_bones/world/world_manager.gd" id="3"]
 [ext_resource type="Resource" path="res://resources/player_spawn_point.tres" id="4"]
 [ext_resource type="Resource" path="res://resources/enemy_spawn_point.tres" id="5"]
 [ext_resource type="PackedScene" path="res://rules/ui/moba_combat_hud.tscn" id="6"]
-[ext_resource type="Script" path="res://scripts/combat_hud_binder.gd" id="7"]
-[ext_resource type="Script" path="res://scripts/floating_text_binder.gd" id="9"]
-[ext_resource type="Script" path="res://scripts/target_frame_binder.gd" id="11"]
+[ext_resource type="Script" uid="uid://xdlc00e4picu" path="res://scripts/combat_hud_binder.gd" id="7"]
+[ext_resource type="Script" uid="uid://dj7sjrerk23yy" path="res://scripts/floating_text_binder.gd" id="9"]
+[ext_resource type="Script" uid="uid://ckeakdr5gs4u4" path="res://scripts/target_frame_binder.gd" id="11"]
+[ext_resource type="PackedScene" path="res://scenes/ui/inventory_hud.tscn" id="12"]
+[ext_resource type="Script" uid="uid://cyh0d64pfygbl" path="res://addons/maaacks_game_template/base/nodes/utilities/pause_menu_controller.gd" id="13"]
+[ext_resource type="PackedScene" path="res://scenes/windows/pause_menu_layer.tscn" id="14"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(20, 0.2, 20)
@@ -107,7 +111,7 @@ mesh = SubResource("BoxMesh_east")
 
 [node name="WorldManager" type="Node3D" parent="." unique_id=789669805]
 script = ExtResource("3")
-spawn_points = Array[SpawnPoint]([ExtResource("4"), ExtResource("5")])
+spawn_points = Array[ExtResource("2_eb6dy")]([ExtResource("4"), ExtResource("5")])
 
 [node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="WorldManager" unique_id=1605736643]
 spawn_path = NodePath("..")
@@ -116,18 +120,24 @@ spawn_path = NodePath("..")
 script = ExtResource("2")
 target_path = NodePath("../WorldManager/Player/Body")
 
-[node name="MobaCombatHUD" parent="." instance=ExtResource("6")]
+[node name="MobaCombatHUD" parent="." unique_id=630945833 instance=ExtResource("6")]
 
-[node name="CombatHUDBinder" type="Node" parent="."]
+[node name="InventoryHUD" parent="." unique_id=1073688698 instance=ExtResource("12")]
+
+[node name="PauseMenuController" type="Node" parent="." unique_id=723061557]
+script = ExtResource("13")
+pause_menu_packed = ExtResource("14")
+
+[node name="CombatHUDBinder" type="Node" parent="." unique_id=484912787]
 script = ExtResource("7")
 hud_path = NodePath("../MobaCombatHUD")
 combatant_path = NodePath("../WorldManager/Player/MobaCombatant")
 
-[node name="FloatingTextBinder" type="Node" parent="."]
+[node name="FloatingTextBinder" type="Node" parent="." unique_id=784875447]
 script = ExtResource("9")
 hud_path = NodePath("../MobaCombatHUD")
 
-[node name="TargetFrameBinder" type="Node" parent="."]
+[node name="TargetFrameBinder" type="Node" parent="." unique_id=999945850]
 script = ExtResource("11")
 hud_path = NodePath("../MobaCombatHUD")
 controller_path = NodePath("../WorldManager/Player/Controller")
