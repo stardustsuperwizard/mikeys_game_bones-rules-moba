@@ -1,7 +1,7 @@
 ## MOBA ability targeting resolver.
 ##
 ## MobaTargeting provides the canonical strategies for resolving ability targets
-## based on targeting type (SELF, TARGETED, AREA, GROUND). It is the sole place
+## based on targeting type (SELF, TARGETED, SKILLSHOT, AREA, GROUND). It is the sole place
 ## in the codebase that reads Actor.hostile for ability targeting, centralizing
 ## the logic so future changes to hostility mechanics require only one-function
 ## changes rather than sweeping modifications.
@@ -10,8 +10,19 @@
 ## target (SELF, TARGETED) or a list (AREA, GROUND after filtering). All
 ## multi-target strategies pass through the shared filter_valid_targets() to
 ## apply allegiance, alive status, caster-inclusion, and stealth checks.
+##
+## SKILLSHOT is the one resolver that returns no targets: it spawns a
+## MobaProjectile instead, which applies the same filter to whatever it hits
+## later. See resolve_skillshot().
 class_name MobaTargeting
 extends RefCounted
+
+## The projectile scene SKILLSHOT resolution spawns.
+const PROJECTILE_SCENE_PATH := "res://rules/targeting/moba_projectile.tscn"
+
+## Loaded on first skillshot rather than preloaded: moba_projectile.gd names
+## MobaTargeting itself, and a preload here would make that a load-time cycle.
+static var _projectile_scene: PackedScene = null
 
 
 ## Resolve a SELF targeting ability: target is always the caster.
@@ -33,6 +44,62 @@ static func resolve_channeled(_caster: Node, target: Node, _ability: MobaAbility
 	if target == null or not is_instance_valid(target):
 		return []
 	return [target]
+
+
+## Resolve a SKILLSHOT ability: spawn a MobaProjectile at the caster, aimed
+## along context.aim_direction, and hand it the ability whose effects it will
+## apply when it eventually collides.
+##
+## Unlike every other resolver here, this one returns no targets: a skillshot
+## has none at activation time. Spawning the projectile *is* the resolution;
+## its damage and effects land later, asynchronously, on collision.
+##
+## The aim direction is consumed raw. No cone narrowing, no magnetism, no
+## lock-on -- aim assist is its own concern and does not belong in delivery.
+##
+## The projectile is parented to the caster's parent, not to the caster, so it
+## outlives the activation call and does not inherit the caster's movement.
+##
+## Args:
+##   ability: The MobaAbility being resolved
+##   context: The activation context supplying aim_direction
+##   caster: The ability caster
+##
+## Returns: The spawned MobaProjectile, or null when it could not be spawned --
+##   including when the live-projectile cap refuses it. A refused spawn is not
+##   a failed activation: the resource and cooldown were already committed, and
+##   §1 charges full price for a miss.
+static func resolve_skillshot(
+	ability: MobaAbility, context: MobaCastContext, caster: Node
+) -> MobaProjectile:
+	if ability == null or context == null or caster == null:
+		return null
+
+	if context.aim_direction.length_squared() <= 0.0:
+		return null
+
+	var parent := caster.get_parent()
+	if parent == null:
+		return null
+
+	var scene := _get_projectile_scene()
+	if scene == null:
+		return null
+
+	var projectile := scene.instantiate() as MobaProjectile
+	if projectile == null:
+		return null
+
+	# Hard cap, not a pool: a spawn over the limit is refused outright rather
+	# than paid for by freeing something already in flight.
+	if not projectile.try_reserve_slot():
+		projectile.free()
+		return null
+
+	parent.add_child(projectile)
+	projectile.global_position = _get_position(caster)
+	projectile.configure(ability, caster, context.aim_direction)
+	return projectile
 
 
 ## Resolve an AREA targeting ability: gather all combatants within area_radius
@@ -143,6 +210,13 @@ static func filter_valid_targets(
 		valid.append(candidate)
 
 	return valid
+
+
+## Load (once) and return the projectile scene resolve_skillshot() instances.
+static func _get_projectile_scene() -> PackedScene:
+	if _projectile_scene == null:
+		_projectile_scene = load(PROJECTILE_SCENE_PATH) as PackedScene
+	return _projectile_scene
 
 
 ## Query physics space for bodies within a sphere at the given position.
