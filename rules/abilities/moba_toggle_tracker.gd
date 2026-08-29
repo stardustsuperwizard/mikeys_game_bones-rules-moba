@@ -114,5 +114,14 @@ func tick(delta: float) -> void:
 		for target in _toggle_active.resolved_targets:
 			MobaAbilityAction.resolve(ability, target, _combatant)
 
+		# resolve() can clear this ledger from underneath the loop: a toggle whose
+		# own per-second effect kills its caster reaches
+		# MobaDeathHandler.clear_on_death(), which calls deactivate_toggle(). The
+		# while condition above is checked before the body, not after resolve(),
+		# so without this the next line dereferences null. MobaChannelTracker's
+		# tick loop re-checks after _apply_tick() for the same reason.
+		if _toggle_active == null:
+			return
+
 		# Consume the drain interval
 		_toggle_active.time_since_last_drain -= DRAIN_INTERVAL
