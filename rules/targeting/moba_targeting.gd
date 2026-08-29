@@ -13,6 +13,16 @@
 class_name MobaTargeting
 extends RefCounted
 
+## Default physics collision mask for an AREA/GROUND shape query. Named here
+## instead of a bare `1` at each call site.
+##
+## Not an @export: MobaTargeting is a static class with no instances (every
+## function here is `static`), so an @export var would never be read by
+## anything -- there is no inspector-editable object for it to live on. If a
+## per-ability collision mask is ever needed, it belongs on MobaAbility (and
+## its schema/exporter), not here.
+const DEFAULT_TARGETING_COLLISION_MASK := 1
+
 
 ## Resolve a SELF targeting ability: target is always the caster.
 static func resolve_self(caster: Node, _ability: MobaAbility) -> Array[Node]:
@@ -41,8 +51,7 @@ static func resolve_channeled(_caster: Node, target: Node, _ability: MobaAbility
 ## Args:
 ##   caster: The ability caster
 ##   ability: The MobaAbility being resolved
-##   origin: Optional origin position (defaults to caster's position)
-##   collision_layer_mask: Which collision layers to query
+##   origin: Optional origin position (defaults to caster's position when unset)
 ##   collision_mask: Which collision bodies to hit
 ##
 ## Returns: Array of valid targets within the area radius, filtered by allegiance,
@@ -50,22 +59,20 @@ static func resolve_channeled(_caster: Node, target: Node, _ability: MobaAbility
 static func resolve_area(
 	caster: Node,
 	ability: MobaAbility,
-	origin: Vector3 = Vector3.ZERO,
-	collision_layer_mask: int = 1,
-	collision_mask: int = 1,
+	origin: Variant = null,
+	collision_mask: int = DEFAULT_TARGETING_COLLISION_MASK,
 ) -> Array[Node]:
 	if caster == null:
 		return []
 
-	# Use caster position if no origin provided
-	var query_origin: Vector3 = origin
-	if origin == Vector3.ZERO:
-		query_origin = _get_position(caster)
+	# Use caster position when no origin was provided. `origin` is a Variant
+	# defaulting to null rather than Vector3.ZERO so an explicit query at the
+	# world origin is distinguishable from "unset" -- Vector3.ZERO is a
+	# legitimate coordinate, not a sentinel.
+	var query_origin: Vector3 = origin if origin is Vector3 else _get_position(caster)
 
 	# Query physics space for bodies in the area
-	var candidates := _query_area(
-		query_origin, ability.area_radius, collision_layer_mask, collision_mask, caster
-	)
+	var candidates := _query_area(query_origin, ability.area_radius, collision_mask, caster)
 
 	# Filter through the shared valid-target filter
 	return filter_valid_targets(candidates, caster, ability)
@@ -78,7 +85,6 @@ static func resolve_area(
 ##   caster: The ability caster
 ##   ground_point: The targeted ground location
 ##   ability: The MobaAbility being resolved
-##   collision_layer_mask: Which collision layers to query
 ##   collision_mask: Which collision bodies to hit
 ##
 ## Returns: Array of valid targets within the area radius, filtered by allegiance,
@@ -87,16 +93,13 @@ static func resolve_ground(
 	caster: Node,
 	ground_point: Vector3,
 	ability: MobaAbility,
-	collision_layer_mask: int = 1,
-	collision_mask: int = 1,
+	collision_mask: int = DEFAULT_TARGETING_COLLISION_MASK,
 ) -> Array[Node]:
 	if caster == null:
 		return []
 
 	# Query physics space for bodies at the ground point
-	var candidates := _query_area(
-		ground_point, ability.area_radius, collision_layer_mask, collision_mask, caster
-	)
+	var candidates := _query_area(ground_point, ability.area_radius, collision_mask, caster)
 
 	# Filter through the shared valid-target filter
 	return filter_valid_targets(candidates, caster, ability)
@@ -155,11 +158,7 @@ static func filter_valid_targets(
 ## Fails gracefully (returns empty array) if no physics world is available.
 ## Requires a reference node to get the physics world from.
 static func _query_area(
-	position: Vector3,
-	radius: float,
-	_collision_layer_mask: int,
-	collision_mask: int,
-	reference_node: Node
+	position: Vector3, radius: float, collision_mask: int, reference_node: Node
 ) -> Array[Node]:
 	var candidates: Array[Node] = []
 

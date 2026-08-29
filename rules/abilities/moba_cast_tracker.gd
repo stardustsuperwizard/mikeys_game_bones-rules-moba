@@ -86,12 +86,14 @@ func start(
 	context: MobaCastContext = null
 ) -> void:
 	# Create a target-list producer callable.
-	# For GROUND abilities, produce targets at resolution time (after cast delay).
+	# For GROUND abilities, produce targets at resolution time (after cast delay)
+	# through MobaAbilityAction._ground_target_producer() -- the same query
+	# implementation execute()'s instant branch calls immediately, so an instant
+	# and a delayed GROUND ability can never diverge on how they find targets.
 	# For other types, produce the pre-resolved targets.
 	var target_list_producer: Callable
 	if ability.targeting_type == MobaAbility.TargetingType.GROUND and context != null:
-		target_list_producer = func() -> Array[Node]:
-			return MobaTargeting.resolve_ground(context.caster, context.ground_point, ability)
+		target_list_producer = MobaAbilityAction._ground_target_producer(context, ability)
 	else:
 		target_list_producer = func() -> Array[Node]: return resolved_targets
 

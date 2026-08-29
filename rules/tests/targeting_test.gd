@@ -9,7 +9,13 @@ extends RefCounted
 const MobaAbility = preload("res://rules/abilities/moba_ability.gd")
 const MobaAbilityLibrary = preload("res://rules/abilities/moba_ability_library.gd")
 const MobaTargeting = preload("res://rules/targeting/moba_targeting.gd")
+const MobaCastContext = preload("res://rules/abilities/moba_cast_context.gd")
+const MobaAbilityAction = preload("res://rules/abilities/moba_ability_action.gd")
 const _BASELINE_STAT_BLOCK = preload("res://rules/data/stat_blocks/baseline.tres")
+
+## Fixture ability for the instant-GROUND producer scenario (Scenario H below):
+## cast_time == 0.0, GROUND, area_radius == _TEST_RADIUS.
+const _GROUND_ABILITY_FIXTURE := "res://rules/tests/fixtures/abilities/ground_ability.tres"
 
 ## Scenario clusters are spaced this far apart so one scenario's bodies can
 ## never fall inside another scenario's query radius. Every fixture in the
@@ -103,6 +109,54 @@ static func _make_ability(
 	return ability
 
 
+## A caster fixture that is simultaneously a real Actor (for MobaCastContext's
+## typed `caster: Actor` field, and for the allegiance filter's
+## `get_parent() as Actor` checks) and a real Node3D inside the tree (so
+## MobaTargeting's physics query can find a world through it).
+##
+## Actor extends Node, not Node3D (see addons/mikeys_game_bones/actors/actor.gd),
+## so a plain Actor -- even _TestActor above -- can never satisfy _query_area()'s
+## `reference_node as Node3D` check. That is exactly why every other scenario in
+## this suite passes a physics-fixture body, never an Actor, as "caster": the
+## production caller (MobaAbilityAction.execute(), MobaCastTracker.start()) always
+## passes the Actor itself, so driving GROUND resolution through those real entry
+## points with a working physics query needs a caster that is genuinely both.
+## Attaching the Actor script to a native Node3D is exactly what Godot's
+## set_script() is for -- a script's declared base only has to be an ancestor of
+## the object's native class, and Node3D is an ancestor of itself. Test-only
+## construction; nothing outside this file relies on it.
+##
+## Returns Node (not Node3D): the static analyzer statically proves Node3D and
+## Actor incompatible -- they are unrelated native siblings under Node -- and
+## refuses to compile a call that binds one where the other is expected, even
+## though the set_script() swap above makes it valid at runtime. Declaring the
+## return type as their common ancestor is what lets callers hand this to
+## MobaCastContext.new()'s `caster: Actor` parameter at all.
+static func _make_ground_caster(tree: SceneTree, position: Vector3) -> Node:
+	var caster := Node3D.new()
+	caster.set_script(_TestActor)
+	tree.root.add_child(caster)
+	caster.position = position
+	return caster
+
+
+## _make_ground_caster() plus a MobaCombatant and MobaStateMachine child,
+## matching the shape MobaAbilityAction.execute() expects
+## (get_node_or_null("MobaCombatant") / ("MobaStateMachine")) -- needed to drive
+## the instant-GROUND scenario through the real activation pipeline, legality
+## checks included, rather than calling MobaCombatant.start_cast() directly the
+## way the delayed scenario does.
+static func _make_ground_actor_caster(tree: SceneTree, position: Vector3) -> Dictionary:
+	var caster := _make_ground_caster(tree, position)
+	var combatant := _create_combatant()
+	caster.add_child(combatant)
+	var state_machine := MobaStateMachine.new()
+	state_machine.name = "MobaStateMachine"
+	state_machine._load_state_table()
+	caster.add_child(state_machine)
+	return {"caster": caster, "combatant": combatant}
+
+
 ## Every physics-backed scenario, built and asserted together.
 ##
 ## A body added to the tree does not register with the physics space until a
@@ -132,6 +186,8 @@ static func _test_physics_resolution() -> Array[String]:
 	var origin_friendly := Vector3(_CLUSTER_SPACING * 3.0, 0, 0)
 	var origin_ground := Vector3(_CLUSTER_SPACING * 4.0, 0, 0)
 	var origin_moved := Vector3(_CLUSTER_SPACING * 5.0, 0, 0)
+	var origin_delayed := Vector3(_CLUSTER_SPACING * 6.0, 0, 0)
+	var origin_instant := Vector3(_CLUSTER_SPACING * 7.0, 0, 0)
 
 	# Scenario A -- an area ability hits what is inside its radius, not outside.
 	var a_caster := _make_physics_fixture(tree, true, origin_area)
@@ -161,6 +217,22 @@ static func _test_physics_resolution() -> Array[String]:
 	var f_point := origin_moved + Vector3(20.0, 0, 0)
 	var f_caster := _make_physics_fixture(tree, true, origin_moved)
 	var f_target := _make_physics_fixture(tree, false, f_point + Vector3(1.0, 0, 0))
+
+	# Scenario G -- a delayed GROUND cast (cast_time > 0), driven through the
+	# real producer (MobaCombatant.start_cast() / tick()) instead of a direct
+	# MobaTargeting.resolve_ground() call. g_caster is the Node3D-backed Actor
+	# stand-in from _make_ground_caster() so MobaCastTracker's re-query at
+	# resolution time can actually reach a physics world.
+	var g_point := origin_delayed + Vector3(20.0, 0, 0)
+	var g_caster := _make_ground_caster(tree, origin_delayed)
+	var g_target := _make_physics_fixture(tree, false, g_point + Vector3(1.0, 0, 0))
+
+	# Scenario H -- an instant GROUND ability (cast_time == 0.0), driven
+	# through MobaAbilityAction.execute() -- the real activation-tick producer
+	# -- instead of a direct MobaTargeting.resolve_ground() call.
+	var h_point := origin_instant + Vector3(20.0, 0, 0)
+	var h_actor := _make_ground_actor_caster(tree, origin_instant)
+	var h_target := _make_physics_fixture(tree, false, h_point + Vector3(1.0, 0, 0))
 
 	# Let the space observe the bodies just added.
 	await tree.physics_frame
@@ -244,13 +316,98 @@ static func _test_physics_resolution() -> Array[String]:
 	if not MobaTargeting.resolve_ground(f_caster, f_point, ground_ability).has(f_target):
 		violations.append("ground_moved: target was not hit before it moved")
 
-	f_target.global_position = f_point + Vector3(50.0, 0, 0)
+	# Scenario G (part 1) -- delayed GROUND cast, driven through
+	# MobaCombatant.start_cast(). g_pre_move_targets is captured with a real
+	# query, before g_target moves, and handed to start_cast() as its
+	# resolved_targets argument -- the exact list a mutation that dropped the
+	# GROUND branch in MobaCastTracker.start() would fall back to instead of
+	# re-querying. It has to actually contain g_target for that fallback to be
+	# observable at resolution below.
+	var ground_delayed_ability := _make_ability(
+		"ground_delayed",
+		MobaAbility.TargetAllegiance.HOSTILE,
+		false,
+		MobaAbility.TargetingType.GROUND
+	)
+	ground_delayed_ability.cast_time = 1.0
+	ground_delayed_ability.base_damage = 10.0
+	ground_delayed_ability.damage_type = MobaAbility.DamageType.PHYSICAL
 
-	# Frame 2: let the space observe the new position.
+	var g_pre_move_targets := MobaTargeting.resolve_ground(
+		g_caster, g_point, ground_delayed_ability
+	)
+	if not g_pre_move_targets.has(g_target):
+		violations.append("ground_delayed: target was not hittable before it moved")
+
+	var g_context := MobaCastContext.new(g_caster, null, Vector3.ZERO, g_point)
+	var g_combatant := _create_combatant()
+	var g_target_combatant := g_target.get_node_or_null("MobaCombatant") as MobaCombatant
+	var g_health_before: float = (
+		g_target_combatant._current_health if g_target_combatant != null else 0.0
+	)
+
+	g_combatant.start_cast(
+		&"ground_delayed",
+		ground_delayed_ability,
+		g_pre_move_targets,
+		ground_delayed_ability.cast_time,
+		g_context
+	)
+	g_combatant.tick(0.5)
+	if not g_combatant.is_casting():
+		violations.append("ground_delayed: cast should still be in progress mid-delay")
+
+	# Scenario H -- instant GROUND ability, driven through
+	# MobaAbilityAction.execute(). h_target never moves; the point of this
+	# scenario is that execute() resolves it without any tick() call, in the
+	# same activation tick.
+	MobaAbilityLibrary._reset()
+	MobaAbilityLibrary._ensure_loaded("res://rules/data/abilities/")
+	MobaAbilityLibrary._load_single_ability(_GROUND_ABILITY_FIXTURE)
+	var ground_instant_ability := MobaAbilityLibrary.get_ability(&"ground_ability")
+	var h_combatant: MobaCombatant = h_actor["combatant"]
+	var h_target_combatant := h_target.get_node_or_null("MobaCombatant") as MobaCombatant
+	var h_health_before: float = (
+		h_target_combatant._current_health if h_target_combatant != null else 0.0
+	)
+
+	if ground_instant_ability == null:
+		violations.append("ground_instant: fixture failed to load")
+	else:
+		h_combatant.register_ability(ground_instant_ability)
+		var h_context := MobaCastContext.new(h_actor["caster"], null, Vector3.ZERO, h_point)
+		var h_action := MobaAbilityAction.new(h_actor["caster"], &"ground_ability", h_context)
+		var h_result := h_action.execute()
+		if not h_result.success:
+			violations.append(
+				"ground_instant: activation should succeed, got: %s" % h_result.reason
+			)
+		if h_combatant.is_casting():
+			violations.append("ground_instant: an instant ability should never enter a cast")
+		if h_target_combatant == null or h_target_combatant._current_health >= h_health_before:
+			violations.append("ground_instant: target should be hit within the activation tick")
+	MobaAbilityLibrary._reset()
+
+	f_target.global_position = f_point + Vector3(50.0, 0, 0)
+	g_target.global_position = g_point + Vector3(200.0, 0, 0)
+
+	# Frame 2: let the space observe the new positions.
 	await tree.physics_frame
 
 	if MobaTargeting.resolve_ground(f_caster, f_point, ground_ability).has(f_target):
 		violations.append("ground_moved: target that left the radius was still hit")
+
+	# Scenario G (part 2) -- resolve the delayed cast now that g_target has
+	# left area_radius. A mutation that dropped the GROUND branch in
+	# MobaCastTracker.start() would fall back to g_pre_move_targets (asserted
+	# above to actually contain g_target) instead of re-querying, and would
+	# hit g_target anyway -- that is what actually catches that mutation, not
+	# merely "g_target was never hit".
+	g_combatant.tick(1.0)
+	if g_combatant.is_casting():
+		violations.append("ground_delayed: cast should have resolved by now")
+	if g_target_combatant != null and g_target_combatant._current_health != g_health_before:
+		violations.append("ground_delayed: target that left the radius before resolution was hit")
 
 	var fixtures: Array[Node3D] = [
 		a_caster,
@@ -268,9 +425,13 @@ static func _test_physics_resolution() -> Array[String]:
 		e_at_point,
 		f_caster,
 		f_target,
+		g_target,
+		h_target,
 	]
 	for body in fixtures:
 		body.get_parent().queue_free()
+	g_caster.queue_free()
+	(h_actor["caster"] as Node3D).queue_free()
 
 	return violations
 
