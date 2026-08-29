@@ -74,11 +74,13 @@ func start(
 
 
 ## Deactivate the currently active toggle, if any. A no-op if no toggle is active.
+##
+## Clearing the ledger is the whole teardown: whatever the toggle already
+## drained stays spent, the same way a channel tick's resource is never
+## refunded. Unlike MobaChannelTracker.break_channel(), there is no
+## on-deactivate outcome to apply, so no null guard is needed either -- the
+## assignment is already a no-op when nothing is active.
 func deactivate() -> void:
-	if _toggle_active == null:
-		return
-
-	# Clear the active toggle
 	_toggle_active = null
 
 
