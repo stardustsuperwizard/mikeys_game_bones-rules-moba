@@ -108,6 +108,10 @@ var _cast_tracker: MobaCastTracker = null
 ## not _ready() has run. Advanced from tick(), like the MobaCooldowns ledger.
 var _channel_tracker: MobaChannelTracker = null
 
+## Toggle ability ledger. Created on first use so it is available whether or
+## not _ready() has run. Advanced from tick(), like the MobaCooldowns ledger.
+var _toggle_tracker: MobaToggleTracker = null
+
 ## Death/respawn ledger. Created on first use so it is available whether or
 ## not _ready() has run, like the cast/channel trackers above.
 var _death_handler: MobaDeathHandler = null
@@ -809,7 +813,12 @@ func commit_activate(ability_id: StringName) -> int:
 	# For a channeled ability, resource_cost is the per-tick cost: each tick
 	# (including the first, at t = 0) spends it independently, so commit must
 	# not also spend it here or the first tick would be charged twice.
-	if ability.channel_duration <= 0.0:
+	# For a toggle ability, resource_cost is the per-second drain rate: drain is
+	# charged per second by the tracker's own tick, not at commit.
+	if (
+		ability.channel_duration <= 0.0
+		and ability.targeting_type != MobaAbility.TargetingType.TOGGLE
+	):
 		spend_resource(ability.resource_cost)
 
 	# Start cooldown with current haste
@@ -905,6 +914,33 @@ func break_channel() -> void:
 	_get_channel_tracker().break_channel()
 
 
+## The toggle ledger for this combatant, created on first use.
+func _get_toggle_tracker() -> MobaToggleTracker:
+	if _toggle_tracker == null:
+		_toggle_tracker = MobaToggleTracker.new(self)
+	return _toggle_tracker
+
+
+## True while a toggle ability is active for the given ability_id.
+func is_toggled_on(ability_id: StringName) -> bool:
+	return _get_toggle_tracker().is_toggled_on(ability_id)
+
+
+## Start a toggle that will drain per-second resource.
+## Called by MobaAbilityAction when an ability with targeting_type == TOGGLE is activated.
+func start_toggle(
+	ability_id: StringName,
+	ability: MobaAbility,
+	resolved_targets: Array[Node],
+) -> void:
+	_get_toggle_tracker().start(ability_id, ability, resolved_targets)
+
+
+## Deactivate any active toggle.
+func deactivate_toggle() -> void:
+	_get_toggle_tracker().deactivate()
+
+
 ## Advance time by delta seconds.
 ## Accumulates resource and health regeneration continuously (not gated by one-second intervals).
 ## Health regeneration clamps at maximum and emits health_changed.
@@ -927,6 +963,10 @@ func tick(delta: float) -> void:
 	# Advance in-progress channel and apply ticks at their interval.
 	# Channels complete when their duration reaches zero.
 	_get_channel_tracker().tick(delta)
+
+	# Advance active toggle and drain resource at 1-second intervals.
+	# Toggle deactivates on silence or resource exhaustion.
+	_get_toggle_tracker().tick(delta)
 
 	# Advance cooldowns
 	_cooldowns.tick(delta)
