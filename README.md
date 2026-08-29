@@ -17,10 +17,36 @@ The following are the main, but certainly not the only, soft goals of the projec
 ### Technical
 **Game Engine:** [Godot 4](https://godotengine.org) (client and server)
 
+**Third-Party Addons:**  
+These live under `addons/` but are excluded from git (`.gitignore` has `addons/*`,
+`!addons/mikeys_*` — only the first-party `mikeys_*` addons are tracked). Anyone
+setting up the project needs to install these locally; without them, `project.godot`
+references autoloads and a plugin that won't exist.
+* [Maaack's Game Template](https://github.com/Maaack/Godot-Game-Template)
+  (`addons/maaacks_game_template`) — v1.5.3, from the
+  [Godot Asset Library](https://godotengine.org/asset-library/asset/2709). Provides
+  the main menu, pause/options menus, credits, and scene loader. Its example scenes
+  were copied out into the project proper (`scenes/opening/`, `scenes/menus/`,
+  `scenes/windows/`, etc.) rather than referenced in place; only its reusable
+  `base/` autoloads and framework scripts are still loaded from `addons/`.
+* Universal Inventory (`addons/universal_inventory`) — ships no version metadata or
+  plugin.cfg; re-source it the same way it was originally obtained if it needs
+  reinstalling. Provides the inventory/equipment/tooltip system, wired up via
+  `scenes/inventory/`, `scenes/ui/`, `scripts/inventory/`.
+  **Required patch after (re)installing:** several of its own scripts hardcode
+  `res://scenes/...` and `res://scripts/...` paths, assuming the addon sits at the
+  project root rather than nested under `addons/universal_inventory/`. Prefix each
+  of the following with `res://addons/universal_inventory/`, or the inventory UI and
+  tooltips fail to load:
+    - `scripts/inventory/InventoryView.gd` — the `INVENTORY_SLOT_SCENE` preload
+    - `scripts/tooltip/ItemTooltip.gd` — the `default_label` preload
+    - `scripts/tooltip/sections/{Name,Description,Price,Slot,Equipped,Affixes}Section.gd`
+      — each one's `label_path`
+    - `scenes/quantity_selector.tscn` — the `P_Red03.png` texture `ext_resource`
+
 **Future Game Assets:**  
 These assets are not yet a part of the project but have been scoped in the past for inclusion.
 * [quaternius](https://quaternius.com)
-* [Godot-Game-Template](https://github.com/Maaack/Godot-Game-Template)
 * [Godot D20 Framework](https://dax272.itch.io/godot-d20-framework)
 
 ## Player Controls
