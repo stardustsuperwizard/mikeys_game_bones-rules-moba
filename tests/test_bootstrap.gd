@@ -33,6 +33,7 @@ var _expected_suites: Array[String] = [
 	"Ability Library Test",
 	"Ability Activation Test",
 	"Targeting Test",
+	"Projectile Test",
 	"Cast Cancel Test",
 	"Channel Test",
 	"Brace Ability Test",
@@ -61,14 +62,16 @@ func _ready() -> void:
 	if tree_script != null:
 		return
 
-	# The targeting suite is the one suite that awaits physics frames: a body
-	# only registers with the physics space once a frame has been processed.
-	# It has to finish BEFORE _finalize is queued -- call_deferred fires at the
-	# end of the current frame, so a suite that suspends after that point would
-	# have the summary printed out from under it, reporting every later suite
-	# as never run. Resolving it here keeps its _check() in _expected_suites
-	# order below while confining the awaits to a point where nothing is queued.
+	# The targeting and projectile suites are the two that await physics
+	# frames: a body only registers with the physics space once a frame has
+	# been processed. Both have to finish BEFORE _finalize is queued --
+	# call_deferred fires at the end of the current frame, so a suite that
+	# suspends after that point would have the summary printed out from under
+	# it, reporting every later suite as never run. Resolving them here keeps
+	# their _check() calls in _expected_suites order below while confining the
+	# awaits to a point where nothing is queued.
 	var targeting_passed: bool = await TargetingTest.run()
+	var projectile_passed: bool = await ProjectileTest.run()
 
 	# Queue completion logic BEFORE any suites run, so it executes even if
 	# a suite aborts due to compilation error or runtime error.
@@ -86,6 +89,7 @@ func _ready() -> void:
 	_check("Ability Library Test", AbilityLibraryTest.run())
 	_check("Ability Activation Test", AbilityActivationTest.run())
 	_check("Targeting Test", targeting_passed)
+	_check("Projectile Test", projectile_passed)
 	_check("Cast Cancel Test", CastCancelTest.run())
 	_check("Channel Test", ChannelTest.run())
 	_check("Brace Ability Test", BraceAbilityTest.run())

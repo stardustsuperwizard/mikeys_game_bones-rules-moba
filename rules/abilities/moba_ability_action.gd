@@ -10,6 +10,8 @@
 ## 7. Resolution -- damage, then effects (crowd control/buffs/debuffs/heal/shield)
 ##    via resolve(). Immediate when cast_time == 0; deferred to
 ##    MobaCastTracker when cast_time > 0, which calls the same resolve().
+##    SKILLSHOT is the exception: spawning its projectile is its resolution,
+##    and the projectile applies the effects when it collides.
 ##
 ## Failure reasons returned as StringName:
 ## - unknown_ability: ability_id not found in library
@@ -85,7 +87,18 @@ func execute() -> ActionResult:
 	# - cast_time > 0: deferred to ABILITY_CAST, resolve when cast completes
 	# - channel_duration > 0: deferred to ABILITY_CHANNEL, ticks applied repeatedly
 	# - cast_time == 0 and channel_duration == 0: instant, apply immediately
-	if ability.cast_time > 0.0:
+	if ability.targeting_type == MobaAbility.TargetingType.SKILLSHOT:
+		# Spawning the projectile IS the resolution for a skillshot. It does
+		# not go through resolve(), the cast tracker, or the channel tracker
+		# the way self/targeted/area/ground do, because its effects are
+		# applied later, asynchronously, when the projectile collides.
+		#
+		# The resource was spent and the cooldown started at commit (step 6),
+		# whether or not this projectile ever reaches anything -- §1 charges
+		# a miss full price -- and that stands even when the live-projectile
+		# cap refuses the spawn and resolve_skillshot() returns null.
+		MobaTargeting.resolve_skillshot(ability, context, actor)
+	elif ability.cast_time > 0.0:
 		# Enter ABILITY_CAST state
 		if state_machine != null:
 			state_machine.try_enter(MobaState.ABILITY_CAST, ability.cast_time)
@@ -234,6 +247,12 @@ func _resolve_target(ability: MobaAbility) -> Dictionary:
 				failure = resolution.failure
 			else:
 				targets = [resolution.target]
+
+		MobaAbility.TargetingType.SKILLSHOT:
+			# No targets at activation. A skillshot's targets are whatever its
+			# projectile happens to reach later, so resolution here is a
+			# no-op and step 7 spawns the projectile instead.
+			targets = []
 
 		MobaAbility.TargetingType.AREA:
 			targets = MobaTargeting.resolve_area(actor, ability)

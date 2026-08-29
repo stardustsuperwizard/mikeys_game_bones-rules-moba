@@ -40,7 +40,6 @@ const _ALL_ABILITY_IDS: Array[StringName] = [
 ## Unimplemented targeting types that must each fail with targeting_not_implemented.
 ## Maps ability id -> targeting type name, for assertion messages.
 const _UNIMPLEMENTED_TYPE_ABILITIES: Dictionary = {
-	&"skillshot_ability": "SKILLSHOT",
 	&"toggle_ability": "TOGGLE",
 }
 
