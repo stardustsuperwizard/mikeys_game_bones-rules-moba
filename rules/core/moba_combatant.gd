@@ -137,6 +137,13 @@ func _seed_actor_character_sheet() -> void:
 	if parent_actor == null:
 		return
 
+	# A bare headless fixture is an Actor with no character_sheet: the sheet is
+	# statically typed to the game-side CharacterSheet, which rules/ must not
+	# name, so a test Actor cannot carry one. Seeding into it faults rather than
+	# no-opping, so skip it the same way a missing Actor is skipped.
+	if parent_actor.character_sheet == null:
+		return
+
 	# Seed max_hp and current_hp from the stat block
 	parent_actor.character_sheet.max_hp = int(
 		_runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
