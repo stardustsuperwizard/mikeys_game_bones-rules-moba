@@ -70,14 +70,21 @@ static func _create_combatant() -> MobaCombatant:
 	return combatant
 
 
-## Build one physics fixture: an Actor carrying a StaticBody3D that has a
-## collision shape and a MobaCombatant. Returns the body, which is what a shape
-## query reports as the collider and what the filter sees as a candidate.
-static func _make_physics_fixture(tree: SceneTree, hostile: bool, position: Vector3) -> Node3D:
+## Build one physics fixture matching the shipped scene layout exactly
+## (scenes/enemy/enemy.tscn, scenes/player/player.tscn): Actor(Node) ->
+## Body(CharacterBody3D with a CollisionShape3D child), with MobaCombatant as
+## a *sibling* of Body -- a direct child of the Actor, not of the collider.
+##
+## Returns the Actor, which is what production passes as caster
+## (MobaAbilityAction.actor) and what a normalised query candidate now is
+## (see MobaTargeting._normalize_to_actor()) -- the same node
+## MobaAbilityAction._get_combatant() looks up MobaCombatant on.
+static func _make_physics_fixture(tree: SceneTree, hostile: bool, position: Vector3) -> Actor:
 	var actor := _TestActor.new()
 	actor.hostile = hostile
 
-	var body := StaticBody3D.new()
+	var body := CharacterBody3D.new()
+	body.name = "Body"
 	body.collision_layer = 1
 	body.collision_mask = 1
 
@@ -87,14 +94,20 @@ static func _make_physics_fixture(tree: SceneTree, hostile: bool, position: Vect
 	collision.shape = sphere
 	body.add_child(collision)
 
-	body.add_child(_create_combatant())
-
 	actor.add_child(body)
+	actor.add_child(_create_combatant())
 	tree.root.add_child(actor)
 
 	# global_position requires the node to be inside the tree.
 	body.global_position = position
-	return body
+	return actor
+
+
+## Reposition an Actor fixture built by _make_physics_fixture(). Actor's own
+## global_position (the Actor -> Body bridge in actor.gd) is get-only, so a
+## move has to land on the Body child, the actual Node3D.
+static func _move_physics_fixture(actor: Actor, position: Vector3) -> void:
+	(actor.get_node("Body") as Node3D).global_position = position
 
 
 static func _make_ability(
@@ -110,21 +123,21 @@ static func _make_ability(
 
 
 ## A caster fixture that is simultaneously a real Actor (for MobaCastContext's
-## typed `caster: Actor` field, and for the allegiance filter's
-## `get_parent() as Actor` checks) and a real Node3D inside the tree (so
-## MobaTargeting's physics query can find a world through it).
+## typed `caster: Actor` field, and for the allegiance filter's `as Actor`
+## checks) and a real Node3D inside the tree (so MobaTargeting's physics
+## query can find a world through it), but with no "Body" child of its own.
 ##
-## Actor extends Node, not Node3D (see addons/mikeys_game_bones/actors/actor.gd),
-## so a plain Actor -- even _TestActor above -- can never satisfy _query_area()'s
-## `reference_node as Node3D` check. That is exactly why every other scenario in
-## this suite passes a physics-fixture body, never an Actor, as "caster": the
-## production caller (MobaAbilityAction.execute(), MobaCastTracker.start()) always
-## passes the Actor itself, so driving GROUND resolution through those real entry
-## points with a working physics query needs a caster that is genuinely both.
-## Attaching the Actor script to a native Node3D is exactly what Godot's
-## set_script() is for -- a script's declared base only has to be an ancestor of
-## the object's native class, and Node3D is an ancestor of itself. Test-only
-## construction; nothing outside this file relies on it.
+## Actor extends Node, not Node3D (see addons/mikeys_game_bones/actors/actor.gd);
+## MobaTargeting._get_spatial_anchor() bridges that by falling back to an
+## Actor's "Body" child, but this fixture has none, so it has to be Node3D
+## itself. Attaching the Actor script to a native Node3D is exactly what
+## Godot's set_script() is for -- a script's declared base only has to be an
+## ancestor of the object's native class, and Node3D is an ancestor of
+## itself. Test-only construction; nothing outside this file relies on it.
+## Scenarios A-F use the shipped-scene-shaped _make_physics_fixture() Actor
+## (with a real "Body" child) as caster instead; this stand-in exists only
+## for G/H, which need MobaCastTracker's re-query and the real activation
+## pipeline to reach a physics world through a caster with no Body.
 ##
 ## Returns Node (not Node3D): the static analyzer statically proves Node3D and
 ## Actor incompatible -- they are unrelated native siblings under Node -- and
@@ -388,8 +401,8 @@ static func _test_physics_resolution() -> Array[String]:
 			violations.append("ground_instant: target should be hit within the activation tick")
 	MobaAbilityLibrary._reset()
 
-	f_target.global_position = f_point + Vector3(50.0, 0, 0)
-	g_target.global_position = g_point + Vector3(200.0, 0, 0)
+	_move_physics_fixture(f_target, f_point + Vector3(50.0, 0, 0))
+	_move_physics_fixture(g_target, g_point + Vector3(200.0, 0, 0))
 
 	# Frame 2: let the space observe the new positions.
 	await tree.physics_frame
@@ -409,7 +422,7 @@ static func _test_physics_resolution() -> Array[String]:
 	if g_target_combatant != null and g_target_combatant._current_health != g_health_before:
 		violations.append("ground_delayed: target that left the radius before resolution was hit")
 
-	var fixtures: Array[Node3D] = [
+	var fixtures: Array[Actor] = [
 		a_caster,
 		a_inside,
 		a_outside,
@@ -428,8 +441,8 @@ static func _test_physics_resolution() -> Array[String]:
 		g_target,
 		h_target,
 	]
-	for body in fixtures:
-		body.get_parent().queue_free()
+	for fixture in fixtures:
+		fixture.queue_free()
 	g_caster.queue_free()
 	(h_actor["caster"] as Node3D).queue_free()
 

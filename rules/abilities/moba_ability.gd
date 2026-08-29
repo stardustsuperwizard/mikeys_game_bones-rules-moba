@@ -102,6 +102,11 @@ enum OnChannelBreak {
 ## Target allegiance filter for multi-target abilities (AREA/GROUND).
 @export var target_allegiance: TargetAllegiance = TargetAllegiance.HOSTILE
 
+## Physics collision mask used by an AREA/GROUND ability's shape query
+## (MobaTargeting._query_area). Exported per ability rather than a shared
+## constant so different abilities can target different physics layers.
+@export var targeting_collision_mask: int = 1
+
 # ---------------------------------------------------------------------------
 # Damage
 # ---------------------------------------------------------------------------

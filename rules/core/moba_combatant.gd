@@ -429,8 +429,16 @@ func notify_health_and_resource_changed() -> void:
 ## so both write through the same seam.
 func sync_character_sheet_hp() -> void:
 	var parent_actor := get_parent() as Actor
-	if parent_actor != null:
-		parent_actor.character_sheet.current_hp = int(_current_health)
+	if parent_actor == null:
+		return
+
+	# A bare headless fixture is an Actor with no character_sheet (see the
+	# matching guard in _seed_actor_character_sheet() above) -- writing into
+	# it faults rather than no-opping, so skip it the same way.
+	if parent_actor.character_sheet == null:
+		return
+
+	parent_actor.character_sheet.current_hp = int(_current_health)
 
 
 ## The shield pool ledger for this combatant, created on first use.

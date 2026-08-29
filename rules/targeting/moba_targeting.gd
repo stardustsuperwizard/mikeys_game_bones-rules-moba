@@ -13,16 +13,6 @@
 class_name MobaTargeting
 extends RefCounted
 
-## Default physics collision mask for an AREA/GROUND shape query. Named here
-## instead of a bare `1` at each call site.
-##
-## Not an @export: MobaTargeting is a static class with no instances (every
-## function here is `static`), so an @export var would never be read by
-## anything -- there is no inspector-editable object for it to live on. If a
-## per-ability collision mask is ever needed, it belongs on MobaAbility (and
-## its schema/exporter), not here.
-const DEFAULT_TARGETING_COLLISION_MASK := 1
-
 
 ## Resolve a SELF targeting ability: target is always the caster.
 static func resolve_self(caster: Node, _ability: MobaAbility) -> Array[Node]:
@@ -52,7 +42,6 @@ static func resolve_channeled(_caster: Node, target: Node, _ability: MobaAbility
 ##   caster: The ability caster
 ##   ability: The MobaAbility being resolved
 ##   origin: Optional origin position (defaults to caster's position when unset)
-##   collision_mask: Which collision bodies to hit
 ##
 ## Returns: Array of valid targets within the area radius, filtered by allegiance,
 ##   alive status, and caster inclusion rules.
@@ -60,7 +49,6 @@ static func resolve_area(
 	caster: Node,
 	ability: MobaAbility,
 	origin: Variant = null,
-	collision_mask: int = DEFAULT_TARGETING_COLLISION_MASK,
 ) -> Array[Node]:
 	if caster == null:
 		return []
@@ -71,8 +59,12 @@ static func resolve_area(
 	# legitimate coordinate, not a sentinel.
 	var query_origin: Vector3 = origin if origin is Vector3 else _get_position(caster)
 
-	# Query physics space for bodies in the area
-	var candidates := _query_area(query_origin, ability.area_radius, collision_mask, caster)
+	# Query physics space for bodies in the area. Collision mask comes from the
+	# ability (an @export, not a shared const) so different abilities can
+	# target different physics layers.
+	var candidates := _query_area(
+		query_origin, ability.area_radius, ability.targeting_collision_mask, caster
+	)
 
 	# Filter through the shared valid-target filter
 	return filter_valid_targets(candidates, caster, ability)
@@ -85,7 +77,6 @@ static func resolve_area(
 ##   caster: The ability caster
 ##   ground_point: The targeted ground location
 ##   ability: The MobaAbility being resolved
-##   collision_mask: Which collision bodies to hit
 ##
 ## Returns: Array of valid targets within the area radius, filtered by allegiance,
 ##   alive status, and caster inclusion rules.
@@ -93,13 +84,16 @@ static func resolve_ground(
 	caster: Node,
 	ground_point: Vector3,
 	ability: MobaAbility,
-	collision_mask: int = DEFAULT_TARGETING_COLLISION_MASK,
 ) -> Array[Node]:
 	if caster == null:
 		return []
 
-	# Query physics space for bodies at the ground point
-	var candidates := _query_area(ground_point, ability.area_radius, collision_mask, caster)
+	# Query physics space for bodies at the ground point. Collision mask comes
+	# from the ability (an @export, not a shared const) so different abilities
+	# can target different physics layers.
+	var candidates := _query_area(
+		ground_point, ability.area_radius, ability.targeting_collision_mask, caster
+	)
 
 	# Filter through the shared valid-target filter
 	return filter_valid_targets(candidates, caster, ability)
@@ -152,8 +146,9 @@ static func filter_valid_targets(
 
 
 ## Query physics space for bodies within a sphere at the given position.
-## Returns the bodies themselves (typically CharacterBody3D, StaticBody3D, Area3D, etc.)
-## that have a MobaCombatant child.
+## Colliders are normalised to their owning Actor (see _normalize_to_actor())
+## before being checked for a MobaCombatant child, since production scenes
+## put MobaCombatant on the Actor, not on the collider body itself.
 ##
 ## Fails gracefully (returns empty array) if no physics world is available.
 ## Requires a reference node to get the physics world from.
@@ -162,13 +157,14 @@ static func _query_area(
 ) -> Array[Node]:
 	var candidates: Array[Node] = []
 
-	# Get the physics space state from the reference node's world. Fail gracefully if it doesn't exist.
-	# get_world_3d() likewise logs an engine error when the node is not in a
-	# world yet, so the tree check has to come first.
+	# Get the physics space state through the reference node's spatial anchor.
+	# Fail gracefully if it doesn't exist. get_world_3d() likewise logs an
+	# engine error when the node is not in a world yet, so the tree check has
+	# to come first.
 	var space_state: PhysicsDirectSpaceState3D = null
-	var reference_3d := reference_node as Node3D
-	if reference_3d != null and reference_3d.is_inside_tree():
-		var world := reference_3d.get_world_3d()
+	var anchor := _get_spatial_anchor(reference_node)
+	if anchor != null and anchor.is_inside_tree():
+		var world := anchor.get_world_3d()
 		if world != null:
 			space_state = world.direct_space_state
 	if space_state == null:
@@ -184,14 +180,33 @@ static func _query_area(
 	query.transform.origin = position
 	query.collision_mask = collision_mask
 
-	var results = space_state.intersect_shape(query)
+	var results: Array[Dictionary] = space_state.intersect_shape(query)
 	for result in results:
 		if result is Dictionary and "collider" in result:
-			var body = result["collider"] as Node
-			if body != null and body.get_node_or_null("MobaCombatant") != null:
-				candidates.append(body)
+			var body: Node = result["collider"] as Node
+			if body == null:
+				continue
+			var candidate := _normalize_to_actor(body)
+			if candidate.get_node_or_null("MobaCombatant") != null:
+				candidates.append(candidate)
 
 	return candidates
+
+
+## Normalise a physics collider to the node the rest of targeting (and
+## MobaAbilityAction._get_combatant()) expects a candidate to be.
+##
+## Production scenes are Actor(Node) -> Body(CharacterBody3D/2D), with
+## MobaCombatant as a sibling of Body under the Actor -- so the collider
+## itself never carries MobaCombatant, only its parent Actor does. Fall back
+## to the collider itself when it has no Actor parent so a bare headless
+## fixture (a collider with MobaCombatant attached directly, no Actor) still
+## resolves.
+static func _normalize_to_actor(collider: Node) -> Node:
+	var actor := collider.get_parent() as Actor
+	if actor != null:
+		return actor
+	return collider
 
 
 ## Check if a candidate is alive.
@@ -204,8 +219,9 @@ static func _is_candidate_alive(candidate: Node) -> bool:
 
 ## Check if a candidate matches the ability's target allegiance.
 ##
-## When either the candidate or caster has no parent Actor, treat the candidate
-## as hostile (allows headless test fixtures without full scenes to resolve).
+## When either the candidate or caster is not itself an Actor, treat the
+## candidate as hostile (allows headless test fixtures without full scenes
+## to resolve).
 static func _matches_allegiance(candidate: Node, caster: Node, target_allegiance: int) -> bool:
 	match target_allegiance:
 		MobaAbility.TargetAllegiance.ANY:
@@ -227,13 +243,16 @@ static func _matches_allegiance(candidate: Node, caster: Node, target_allegiance
 
 ## Check if a candidate is hostile to the caster.
 ##
-## Returns true if their Actor.hostile values differ, treating headless
-## fixtures (no parent Actor) as hostile.
+## Candidates are already normalised to their Actor by _query_area() (see
+## _normalize_to_actor()), and production always passes the Actor itself as
+## caster -- so both sides are read directly, not via get_parent(). Returns
+## true if their Actor.hostile values differ, treating headless fixtures
+## (either side not an Actor) as hostile.
 static func _is_hostile_to(candidate: Node, caster: Node) -> bool:
-	var candidate_actor := candidate.get_parent() as Actor
-	var caster_actor := caster.get_parent() as Actor
+	var candidate_actor := candidate as Actor
+	var caster_actor := caster as Actor
 
-	# If either has no parent Actor, treat candidate as hostile
+	# If either side is not an Actor, treat candidate as hostile
 	if candidate_actor == null or caster_actor == null:
 		return true
 
@@ -243,13 +262,16 @@ static func _is_hostile_to(candidate: Node, caster: Node) -> bool:
 
 ## Check if a candidate is friendly to the caster.
 ##
-## Returns true if their Actor.hostile values match, treating headless
-## fixtures (no parent Actor) as hostile.
+## Candidates are already normalised to their Actor by _query_area() (see
+## _normalize_to_actor()), and production always passes the Actor itself as
+## caster -- so both sides are read directly, not via get_parent(). Returns
+## true if their Actor.hostile values match, treating headless fixtures
+## (either side not an Actor) as hostile.
 static func _is_friendly_to(candidate: Node, caster: Node) -> bool:
-	var candidate_actor := candidate.get_parent() as Actor
-	var caster_actor := caster.get_parent() as Actor
+	var candidate_actor := candidate as Actor
+	var caster_actor := caster as Actor
 
-	# If either has no parent Actor, treat candidate as hostile (not friendly)
+	# If either side is not an Actor, treat candidate as hostile (not friendly)
 	if candidate_actor == null or caster_actor == null:
 		return false
 
@@ -266,18 +288,42 @@ static func _is_candidate_visible(_candidate: Node) -> bool:
 	return true
 
 
+## Resolve a spatial anchor (a Node3D) for a caster/reference node.
+##
+## Production always passes the Actor itself (Actor extends Node, not
+## Node3D -- see addons/mikeys_game_bones/actors/actor.gd), whose actual
+## Node3D presentation lives on its "Body" child. If the node is already a
+## Node3D, use it directly (covers headless test fixtures that pass a body
+## or a Node3D-scripted stand-in). Otherwise fall back to its Body child,
+## null if neither exists.
+static func _get_spatial_anchor(node: Node) -> Node3D:
+	if node == null:
+		return null
+
+	var node_3d := node as Node3D
+	if node_3d != null:
+		return node_3d
+
+	return node.get_node_or_null("Body") as Node3D
+
+
 ## Get world position of a node, with a default fallback.
 ##
 ## global_position is only readable once a Node3D is inside the tree -- reading
 ## it earlier still returns a value but logs an engine error, which turns the
 ## documented "no physics world" path into pages of error spam. Guard on the
 ## tree instead of relying on that.
+##
+## Prefers the Actor.global_position bridge (which already knows how to read
+## a CharacterBody3D or CharacterBody2D "Body" child) over re-implementing
+## the 2D/3D handling here, so that logic stays in the one place Actor owns.
 static func _get_position(node: Node) -> Vector3:
-	if node == null:
+	var anchor := _get_spatial_anchor(node)
+	if anchor == null or not anchor.is_inside_tree():
 		return Vector3.ZERO
 
-	var node_3d := node as Node3D
-	if node_3d != null and node_3d.is_inside_tree():
-		return node_3d.global_position
+	var actor := node as Actor
+	if actor != null:
+		return actor.global_position
 
-	return Vector3.ZERO
+	return anchor.global_position

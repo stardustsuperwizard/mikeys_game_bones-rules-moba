@@ -176,6 +176,10 @@
       "type": "string",
       "enum": ["hostile", "friendly", "any"],
       "description": "Which side an ability affects: hostile (enemies), friendly (allies), or any"
+    },
+    "targeting_collision_mask": {
+      "type": "integer",
+      "description": "Physics collision mask used by an AREA/GROUND ability's shape query"
     }
   },
   "required": [
@@ -214,7 +218,8 @@
     "heal_amount",
     "shield_amount",
     "affects_caster",
-    "target_allegiance"
+    "target_allegiance",
+    "targeting_collision_mask"
   ],
   "definitions": {
     "statModifier": {
