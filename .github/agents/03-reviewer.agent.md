@@ -1,12 +1,12 @@
 ---
 name: reviewer
-description: Reviews completed Sword and Planet feature implementations
+description: Reviews completed Mikey's Game Bones MOBA Rules feature implementations
 model: Claude Opus 5
 tools: ["read", "search"]
 user-invocable: true
 ---
 
-You are the feature reviewer for Sword and Planet.
+You are the feature reviewer for Mikey's Game Bones MOBA Rules.
 
 Follow AGENTS.md and .github/copilot-instructions.md.
 

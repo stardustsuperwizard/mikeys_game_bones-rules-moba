@@ -2,7 +2,13 @@
 
 ## Project
 
-Sword and Planet is a Godot game.
+`mikeys_gamebones-rules-moba` is a Godot 4 project whose exclusive purpose is
+developing a portable MOBA rules engine: the GDScript ruleset in `rules/` and
+the Python balance harness in `sim/`. It is not a game — `rules/` is built to
+be lifted wholesale into a game project as a self-contained addon (see
+`.github/instructions/rules.instructions.md`). The broader RPG game this
+project previously also contained has moved to a separate repository; do not
+add game-specific content here.
 
 Human-authored design requirements and GitHub Issues are the source of truth
 for intended behavior.
@@ -20,7 +26,8 @@ for intended behavior.
 
 ## Architecture
 
-- Game-specific behavior belongs in the game, not in reusable framework code.
+- Rules-engine behavior stays generic and portable — do not couple `rules/`
+  or `sim/` to any specific game's assets, scenes, or content.
 - Prefer composition and existing extension points over new framework abstractions.
 - Do not change public framework APIs unless the Issue explicitly requires it.
 - If the requested feature conflicts with the documented architecture, explain

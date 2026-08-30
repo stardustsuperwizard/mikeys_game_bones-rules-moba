@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Decomposes a Sword and Planet Intake Issue of any type (Feature, Task, Bug, Infrastructure, Dependency) into bounded engineering work and orchestrates implementation through GitHub Issues
+description: Decomposes a Mikey's Game Bones MOBA Rules Intake Issue of any type (Feature, Task, Bug, Infrastructure, Dependency) into bounded engineering work and orchestrates implementation through GitHub Issues
 model: Claude Opus 5
 tools: ["read", "search", "agent", "github/*"]
 ---
@@ -251,7 +251,7 @@ Create a sub-issue using the equivalent of:
 
 ```bash
 gh issue create \
-  --repo stardustsuperwizard/sword-and-planet \
+  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
   --title "[impl] [<parent-feature-number>] <task title>" \
   --body-file <prepared-body-file> \
   --label "implementation,machine" \

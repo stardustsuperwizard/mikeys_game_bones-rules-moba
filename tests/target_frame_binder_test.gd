@@ -1,4 +1,4 @@
-# Headless integration test for TargetFrameBinder's wiring in scenes/headless_test.tscn.
+# Headless integration test for TargetFrameBinder's wiring in scenes/main.tscn.
 #
 # Run with:
 #   godot --headless --path . --script tests/target_frame_binder_test.gd
@@ -38,7 +38,7 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	var scene := (load("res://scenes/headless_test.tscn") as PackedScene).instantiate()
+	var scene := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(scene)
 	await physics_frame
 	await physics_frame
@@ -46,9 +46,9 @@ func _run() -> void:
 	var frame := scene.get_node_or_null("MobaTargetFrame") as MobaTargetFrame
 	var binder := scene.get_node_or_null("TargetFrameBinder") as TargetFrameBinder
 	if frame == null:
-		_fail("setup: scenes/headless_test.tscn has no MobaTargetFrame")
+		_fail("setup: scenes/main.tscn has no MobaTargetFrame")
 	if binder == null:
-		_fail("setup: scenes/headless_test.tscn has no TargetFrameBinder")
+		_fail("setup: scenes/main.tscn has no TargetFrameBinder")
 	if not _failures.is_empty():
 		return _finish()
 

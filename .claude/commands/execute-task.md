@@ -4,12 +4,12 @@ argument-hint: <task-issue-number>
 ---
 
 Implement Implementation Task Issue #$ARGUMENTS in
-stardustsuperwizard/sword-and-planet.
+stardustsuperwizard/mikeys_gamebones-rules-moba.
 
 First fetch it so you have the real contract, not a guess:
 
 ```bash
-gh issue view $ARGUMENTS --repo stardustsuperwizard/sword-and-planet \
+gh issue view $ARGUMENTS --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
   --json number,title,body,url,parent,state,labels
 ```
 

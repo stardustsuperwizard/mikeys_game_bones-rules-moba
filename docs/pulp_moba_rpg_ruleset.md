@@ -1,8 +1,10 @@
-# Pulp MOBA-Inspired RPG Ruleset — Baseline Design
+# MOBA Combat Ruleset - Baseline Design
 
 ## Purpose
 
-This document defines a starting combat ruleset for a computer role-playing game that supports both single-player and multiplayer play.
+This document defines a starting, setting-agnostic combat ruleset for a
+portable engine. A consuming game may support single-player, multiplayer, or
+both; those product choices are outside this repository.
 
 The design goals are:
 
@@ -11,7 +13,8 @@ The design goals are:
 - Gamepad-first controls, with full parity on keyboard + mouse and touch.
 - Classless character development.
 - A small equipped combat kit rather than large MMO-style action bars.
-- A pulp-adventure tone, with Barsoom as the primary inspiration while remaining flexible enough to support other public-domain adventure, fantasy, science-fiction, occult, lost-world, and weird-fiction settings.
+- Setting-neutral mechanics that a consuming game can express through its own
+  fiction, art, and content.
 - No character leveling in the initial ruleset.
 - Enough numerical structure to allow automated balance testing.
 

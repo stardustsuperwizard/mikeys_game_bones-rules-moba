@@ -37,7 +37,7 @@ func _run() -> void:
 ## references the rest of the test needs. Returns an empty Dictionary (and
 ## records a failure) if any expected node is missing.
 func _setup() -> Dictionary:
-	var scene := (load("res://scenes/headless_test.tscn") as PackedScene).instantiate()
+	var scene := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(scene)
 	await physics_frame
 	await physics_frame

@@ -1,14 +1,16 @@
-# Planned Features
+# Historical Game Backlog
 
-A high-level backlog of what the game still needs, derived from a review of the
-repository as of 2026-08-19.
+This document is retained as a record of the former Mikey's Game Bones MOBA Rules RPG
+backlog, reviewed on 2026-08-19. It is not the roadmap for
+`mikeys_gamebones-rules-moba` and does not authorize work in this repository.
 
-This is a **feature inventory, not a design document**. Items are described at
-the level of "what is missing and roughly where it would go." Detailed design
-belongs in the relevant design doc or in the GitHub Issue that implements it.
+The active MOBA rules-engine roadmap is
+[`rules/README.md`](rules/README.md). Design authority and the repository scope
+are described in [`DESIGN.md`](DESIGN.md) and [`../AGENTS.md`](../AGENTS.md).
 
-Implementation notes are suggestions only. Per `DESIGN.md`, design authority is
-human-directed; nothing here is approved architecture.
+The historical notes below may help explain older files that remain during the
+repository transition, but game-specific features, scenes, and presentation are
+out of scope for this project.
 
 ---
 
@@ -17,7 +19,7 @@ human-directed; nothing here is approved architecture.
 Stated plainly, because there is a gap between what the code supports and what
 the running game does:
 
-`scenes/headless_test.tscn` contains a 20x20 walled box, one directional light, one
+`scenes/main.tscn` contains a 20x20 walled box, one directional light, one
 player capsule, and a camera. `WorldManager.spawn_points` has exactly one entry:
 the player. There is **no enemy and no door in the scene**.
 
@@ -48,7 +50,7 @@ These are small and unlock a disproportionate amount of existing code.
 actor scene (`scenes/enemy/enemy.tscn`) now exists with `SimpleAIController`,
 `hostile = true`, and a `MobaCombatant` carrying the melee-bruiser loadout.
 It is registered as the second entry in `WorldManager.spawn_points` in
-`scenes/headless_test.tscn` and spawns at runtime at position (-2, 0, -3). The player
+`scenes/main.tscn` and spawns at runtime at position (-2, 0, -3). The player
 scene also carries a `MobaCombatant`, `MobaStateMachine`, and
 `MobaAbilityCaster`; ability slots 1-4 are wired to the `ability_1`–`ability_4`
 input actions. A `Door` instance in the main scene is still needed.

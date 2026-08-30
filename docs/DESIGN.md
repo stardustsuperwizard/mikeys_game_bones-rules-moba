@@ -1,21 +1,27 @@
-# Sword and Planet — Design
+# Mikey's Game Bones MOBA Rules - Design
 
 ## Concept
 
-Sword and Planet is a role-playing game inspired by early 20th-century
-sword-and-planet adventure fiction.
+Mikey's Game Bones MOBA Rules is a portable, mechanics-first combat rules
+engine for Godot 4. The GDScript module in `rules/` and Python harness in
+`sim/` are designed to be reused by consuming games without coupling to a
+specific setting, world, asset set, or narrative.
+
+The baseline combat specification is maintained in
+[`pulp_moba_rpg_ruleset.md`](pulp_moba_rpg_ruleset.md). Its setting-specific
+examples are illustrative only; they do not define content for this repository.
 
 ## Design Authority
 
-Game mechanics, world design, art direction, and intended player experience
-are human-directed.
+Combat mechanics, data schemas, and balance targets are human-directed.
 
-AI agents may implement specifications but should not invent major game
-mechanics or architectural direction unless explicitly asked to propose options.
+AI agents may implement specifications but should not invent major mechanics,
+game-specific content, or architectural direction unless explicitly asked to
+propose options.
 
 ## Current Development Principle
 
-Build the smallest playable systems needed to test the game concept.
+Build the smallest portable rules systems needed to test the combat model.
 
-Avoid creating generalized systems until real game features demonstrate
-that the abstraction is needed.
+Avoid abstractions until real rules-engine behavior demonstrates that they are
+needed. A consuming game owns presentation, scenes, progression, and narrative.

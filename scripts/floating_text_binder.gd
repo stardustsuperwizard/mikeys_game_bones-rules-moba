@@ -61,7 +61,7 @@ func _on_node_added(node: Node) -> void:
 ## Watch the MobaCombatant child of node, if it has one.
 ##
 ## An Actor carries its combatant as a child named MobaCombatant -- the same
-## shape scenes/headless_test.tscn's CombatHUDBinder addresses as
+## shape scenes/main.tscn's CombatHUDBinder addresses as
 ## "../WorldManager/Player/MobaCombatant".
 func _watch_combatant_child_of(node: Node) -> void:
 	var combatant := node.get_node_or_null("MobaCombatant") as MobaCombatant

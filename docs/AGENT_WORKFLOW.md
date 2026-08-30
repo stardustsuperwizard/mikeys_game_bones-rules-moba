@@ -1,6 +1,6 @@
 # Agent Workflow and Model Routing
 
-How Sword and Planet uses GitHub Copilot agents, and which model runs which
+How Mikey's Game Bones MOBA Rules uses GitHub Copilot agents, and which model runs which
 role. Optimized for cost and quality; latency is explicitly not a goal.
 
 Verified against GitHub documentation on 2026-08-21. Model availability and
@@ -79,7 +79,7 @@ Error: Model "claude-opus-5" from --model flag is not available.
 ```
 
 which is what killed the first planner run
-([run 32452540331](https://github.com/stardustsuperwizard/sword-and-planet/actions/runs/32452540331)).
+([run 32452540331](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/actions/runs/32452540331)).
 The id was right — `claude-opus-5` is a documented Copilot CLI model — and the
 `copilot-requests: write` permission was present. It was an entitlement
 resolution, and there is a live history of those going wrong:
@@ -503,7 +503,7 @@ keeping a mirror in sync. The board is gone and so is the secret. **Delete
 it** if it is still set:
 
 ```bash
-gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/sword-and-planet
+gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/mikeys_gamebones-rules-moba
 ```
 
 ### Step 1 — Planning
@@ -1109,7 +1109,7 @@ Run the same derivation locally at any time, no workflow involved:
 
 #### Why this replaced a Projects v2 board
 
-Status used to live on the [Sword and Planet
+Status used to live on the [Mikey's Game Bones MOBA Rules
 Workflow](https://github.com/users/stardustsuperwizard/projects/1) project,
 written by eleven steps across four workflows through a shared
 `set-project-status` composite action. Three problems, in order of how fatal:

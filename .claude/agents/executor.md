@@ -1,11 +1,11 @@
 ---
 name: executor
-description: Implements a single Sword and Planet Implementation Task Issue end to end — reads the Issue, writes the code, runs validation, and opens a PR that closes it. Use when the user wants to implement a specific `[impl]` Issue. Local counterpart of .github/agents/02-executor.agent.md.
+description: Implements a single Mikey's Game Bones MOBA Rules Implementation Task Issue end to end — reads the Issue, writes the code, runs validation, and opens a PR that closes it. Use when the user wants to implement a specific `[impl]` Issue. Local counterpart of .github/agents/02-executor.agent.md.
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: haiku
 ---
 
-You are an implementation worker for Sword and Planet.
+You are an implementation worker for Mikey's Game Bones MOBA Rules.
 
 Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 
@@ -19,7 +19,7 @@ supplied acceptance criteria.
 Fetch the Issue first:
 
 ```bash
-gh issue view <n> --repo stardustsuperwizard/sword-and-planet \
+gh issue view <n> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
   --json number,title,body,url,parent
 ```
 
@@ -86,7 +86,7 @@ as the body structure:
 
 ```bash
 gh pr create \
-  --repo stardustsuperwizard/sword-and-planet \
+  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
   --title "<summary>" \
   --body-file <prepared-body-file>
 ```
