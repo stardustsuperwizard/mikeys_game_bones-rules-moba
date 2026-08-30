@@ -1,12 +1,20 @@
 # Ruleset Implementation Roadmap
 
 The MOBA combat ruleset in [`../pulp_moba_rpg_ruleset.md`](../pulp_moba_rpg_ruleset.md),
-decomposed into 33 GitHub Issues (#20–#52) grouped into eight batches.
+decomposed into 33 GitHub Issues (#20–#52) grouped into eight batches, plus three
+Issues (#276–#278) added by the 2026-08-30 revision.
 
 Batches run from a minimum vertical slice to the complete ruleset. Each is a coherent,
 mergeable increment: the game builds, runs, and is playable at the end of every batch.
 
-Written 2026-08-20. Issues are unassigned; nothing has been delegated to an agent yet.
+Written 2026-08-20.
+
+**Revised 2026-08-30 — execution order changed; four architectural decisions corrected.**
+Multiplayer is now a first-class feature of this game rather than a later extension, so
+networking moves ahead of the remaining content, input-polish, and PvE batches. A
+repository audit also invalidated the stated premise for scheduling networking last, and
+disproved two of the architectural decisions recorded below. See **Execution order** and
+the corrected rows in the table that follows.
 
 ---
 
@@ -17,9 +25,9 @@ each one. They are not open for an implementation session to revisit.
 
 | Decision | Rationale |
 | --- | --- |
-| All ruleset code lives in `rules/` at the repository root | Lifted wholesale into `addons/mikeys_game_bones` as `mikeys_game_rules_moba` later, without editing a file inside it |
+| All ruleset code lives in `rules/` at the repository root | ~~Lifted wholesale into `addons/mikeys_game_bones` as `mikeys_game_rules_moba` later, without editing a file inside it~~ **Superseded by #276.** `rules/` stays a coherent module with a one-way dependency arrow, and the extraction contract test still enforces that — but it is no longer destined for an addon. This repository is a MOBA, not a framework host |
 | Nothing in `rules/` references `res://scripts/`, `res://scenes/`, or `res://resources/` | The dependency arrow points one way. Enforced by an automated contract test in #20 |
-| `rules/` depends only on Godot 4 and the public `mikeys_game_bones` API | `addons/` is never modified by a ruleset Issue |
+| `rules/` depends only on Godot 4 and the game's own source tree | **Revised by #276**, which deletes `addons/` entirely. What the MOBA used is absorbed into the game; the rest is deleted. There is no addon to depend on or to avoid modifying |
 | Global `class_name` identifiers are prefixed `Moba` | Godot has no namespaces — one flat global registry shared with every addon. `Ability`, `Buff`, and `StatModifier` would collide with the third-party addons goal 4 commits to adopting, and this module ships into other projects. Accepted cost: two naming conventions in the repo. `.tres` authoring requires a registered `class_name`, so `preload()` constants are not an available dodge |
 | All rules state hangs off one `MobaCombatant` node, a child of `Actor` | Keeps the whole ruleset behind a single attachment point, and keeps game rules out of framework code per `AGENTS.md` |
 | Combat math is pure and node-free, in `MobaFormulas` only | Unit-testable headless, and mirrorable by the Python harness |
@@ -32,8 +40,77 @@ each one. They are not open for an implementation session to revisit.
 | Aim assist multipliers are anchored on **touch** at 1.0x, not gamepad — a deliberate deviation from §55 | Ratios are unchanged; it is a change of units. But with gamepad at 1.0x and touch at 1.5x, everything above 0.667 authored clamps on touch — including §55's own 0.7 for dashes — so distinct abilities collapse to full lock on the least precise device. Anchoring on touch means no multiplier exceeds 1.0 and the clamp can never fire. See #38 |
 | Touch is the design target; keyboard + mouse stays the development scheme | §5 already says a mechanic that cannot be executed on all three is a rules problem, and §57 treats `touch_viable: false` as a design smell. Designing to the narrowest input and developing on the widest are not in conflict |
 | Ruleset UI lives in `rules/ui/` | A ruleset whose HUD lives elsewhere is not portable. Signals in, nothing out; no rules logic in UI |
-| Game-flow UI is out of scope for the entire backlog | Main menu, pause, settings, host/join, character creation, loadout editor — a third-party addon is intended for these |
-| Networking follows the existing `Actor.try_attack` / `_resolve_attack` shape | Server-authoritative resolve with client request already exists in the framework; #47 makes it real rather than retrofitting |
+| Game-flow UI is out of scope for the entire backlog **except host/join** | **Revised.** Settings, character creation, and a loadout editor stay out; a third-party addon is still intended for them. But host/join, main menu, and pause are how a player reaches a multiplayer session, and a first-class multiplayer feature cannot have its only entry point declared out of scope. #278 owns them |
+| Networking follows the request-and-resolve shape recorded by #276 | ~~Server-authoritative resolve with client request already exists in the framework~~ **The premise was false.** `Actor._resolve_attack()` is unreachable in the shipped game — both controllers return `null` from `get_attack_target()` when a `MobaCombatant` is present, and both production scenes have one. #276 deletes it, after recording the pattern in `docs/`. The shape is still right; it was never actually in service |
+
+---
+
+## Execution order
+
+**Revised 2026-08-30.** Batches keep their names, membership, and internal coherence. What
+changed is the order they run in.
+
+Multiplayer is a first-class feature of this game, not an extension of the single-player
+build. Single-player against bots remains fully supported and must not regress — it becomes
+one session mode of a multiplayer game rather than the default that networking is bolted
+onto later. The backlog as written encoded the opposite, scheduling networking second-to-last.
+
+| Order | Batch | Issues | Status |
+| --- | --- | --- | --- |
+| 1 | 0 — Foundations | #20–#22 | done |
+| 2 | 1 — Minimum vertical slice | #23–#29 | done |
+| 3 | 2 — Effects and full resolution | #30–#35 | done |
+| 4 | 3 — Targeting and input *(partial)* | #36–#38 | #36, #37 done; #38 in flight |
+| 5 | **6a — Framework removal and the authority chokepoint** | **#276, #277** | **new** |
+| 6 | **6b — Multiplayer session layer** | **#278** | **new** |
+| 7 | **6c — Server-authoritative combat** | **#47, #48** | moved forward |
+| 8 | 3 — Targeting and input *(remainder)* | #39, #40, #41 | deferred |
+| 9 | 4 — Content and remaining ability mechanics | #42, #43, #44 | deferred |
+| 10 | 5 — PvE AI | #45, #46 | deferred |
+| 11 | 7 — Balance, conformance, and mobile | #49–#52 | unchanged |
+
+### Why networking moved
+
+**The stated reason for deferring it was factually wrong.** Batch 6 was scheduled late
+because "the existing code already has the right shape — `Actor._resolve_attack()` is
+server-authoritative with client request, and every ruleset Issue routes activation through
+`ActionRunner` and `Authority` for exactly this reason." A repository audit found neither
+half holds:
+
+- `Actor._resolve_attack()` is unreachable in the shipped game and is deleted by #276.
+- Of the three player-originated commands, only ability activation passes through
+  `ActionRunner` → `Authority`. Basic attack and cast-cancel call `MobaCombatant` mutators
+  directly. `Authority.can_perform()` is itself inert — `Actor.owner_id` is `0` in both
+  production scenes and never assigned outside test fixtures, so it returns `true`
+  unconditionally.
+
+So the argument that deferred networking was an argument that the work was *already mostly
+done*. It is not started. #277 is what makes the latent structure real.
+
+**§64 argues for doing it early anyway.** It calls the authority model "decision-critical
+before any multiplayer combat code is written" and "worth locking in before §55–59 get
+implemented in the engine layer, since retrofitting authority models is expensive."
+Deferring to Batch 6 was in tension with the ruleset's own guidance from the start.
+
+### What the reorder costs
+
+`#47 Depends on: #44`, which depends on #42 and #43 — all deferred behind it now. That
+dependency is **soft**: #44 is data authoring (two weapons, eight abilities, four loadouts,
+four enemy profiles), and #47 needs *an* ability and *a* skillshot to test against, not the
+full prototype set. Power Strike, Shield Bash, projectiles, aim assist, and the melee
+bruiser loadout all already exist. Multiplayer combat can be built and tested on them.
+
+Two genuine couplings remain, and they are costs rather than blockers:
+
+- **#40 (jump and the Airborne state)** — movement prediction and reconciliation must cover
+  every movement mode. Landing jump after prediction means extending it.
+- **#42 (dash and displacement)** — #47's own notes flag that §64 makes server-side dash
+  path validation a consequence of the authority decision.
+
+Extending a correct authority model to cover a new movement mode is substantially cheaper
+than retrofitting authority onto four movement modes that already shipped, which is exactly
+what §64 warns about. Both #40 and #42 should carry an acceptance criterion for prediction
+and server-side validation coverage when they land.
 
 ---
 
@@ -180,10 +257,21 @@ work at all.
 
 Covers §64. §66 item 9.
 
-Scheduled here rather than earlier because the existing code already has the right shape —
-`Actor._resolve_attack()` is server-authoritative with client request, and every ruleset
-Issue routes activation through `ActionRunner` and `Authority` for exactly this reason.
-#47 also closes the per-peer spawn and despawn gap in `planned_features.md` §3.2.
+**Moved forward — see Execution order.** This batch now runs directly after the
+targeting-and-input work that is already in flight, ahead of the remaining Batch 3, 4, and
+5 issues.
+
+It also gained two prerequisites the original plan assumed were already satisfied:
+
+| # | What it delivers | Why #47 needs it |
+| --- | --- | --- |
+| #276 | Deletes `addons/`; absorbs what the MOBA uses into the game | #47 twice instructs the implementer to read and match `Actor._resolve_attack()`. That code is dead and is deleted here, after the request-and-resolve pattern is recorded in `docs/` |
+| #277 | Routes every player-originated command through `ActionRunner` → `Authority`, and gives the gate a real `owner_id` to check | #47 assumes this chokepoint exists. Today one of three commands passes through it |
+| #278 | Transport, peer lifecycle, state replication, host/join entry points | #47 resolves combat on top of a session layer that does not currently exist. There is no `MultiplayerSynchronizer` anywhere in the project, and nothing connects `peer_connected` |
+
+**Scope correction.** #47 carries an acceptance criterion for per-peer spawn and despawn,
+which #278 also claims. #278 owns peer lifecycle; #47 should drop that criterion, which
+already sits oddly against its own Out of Scope list.
 
 ---
 
@@ -217,18 +305,24 @@ points, each of which leaves the repository in a coherent state:
 | **Batch 1** | A minimum vertical slice: one ability, end to end, visible on screen, with real statistics behind it | 10 |
 | **Batch 2** | Full combat resolution — effects, crowd control, sustain, casting, death — but targeted abilities only | 16 |
 | **Batch 3** | All six targeting types, projectiles, aim assist, and all three control schemes' input model | 22 |
-| **Batch 4** | The §53 first prototype, complete and playable. **The natural place to stop and judge the design** | 25 |
-| **Batch 5** | Meaningful PvE with threat and enemy ability policies | 27 |
-| **Batch 6** | Multiplayer combat | 29 |
-| **Batch 7** | The complete ruleset, the balance harness, drift protection, and touch | 33 |
+| **Batch 6** | Multiplayer: a host and clients in one session, with server-authoritative combat. **The point at which this is the game it claims to be** | 25 |
+| **Batch 3 remainder** | Lock-on and the reticle, jump and Airborne, gamepad camera look | 28 |
+| **Batch 4** | The §53 first prototype, complete and playable. **The natural place to stop and judge the design** | 31 |
+| **Batch 5** | Meaningful PvE with threat and enemy ability policies | 33 |
+| **Batch 7** | The complete ruleset, the balance harness, drift protection, and touch | 37 |
+
+Counts include #276, #277, and #278. Batch 6 now precedes the Batch 3 remainder, Batch 4,
+and Batch 5 — see **Execution order**.
 
 ---
 
 ## Deliberately not in this backlog
 
-- **Game-flow UI.** Main menu, pause, settings, host/join, character creation, and a
-  loadout editor. A third-party addon is intended for these; loadouts are authored as data
-  files until then.
+- **Game-flow UI, except the parts multiplayer requires.** Settings, character creation,
+  and a loadout editor stay out; a third-party addon is intended for them, and loadouts are
+  authored as data files until then. **Host/join, main menu, and pause moved in scope** with
+  #278 — they are how a player reaches a session, and multiplayer is now a first-class
+  feature rather than a later extension.
 - **Character progression.** No leveling, no ability learning, no discipline advancement.
   §54 says the initial ruleset has no character levels.
 - **Equipment and inventory.** `planned_features.md` §1.5 tracks it separately.
