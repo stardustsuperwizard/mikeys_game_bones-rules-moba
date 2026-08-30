@@ -58,19 +58,3 @@ static func _basic_attack_damage(combatant: MobaCombatant) -> float:
 static func open(_actor: Actor, door: Door) -> ActionResult:
 	door.set_open(true)
 	return ActionResult.new(true)
-
-
-# ItemPickup3D.item_base is a plain Resource at the framework level (Bones
-# has no notion of the universal_inventory addon); the cast to ItemBase is
-# what makes it a real item here in game code.
-static func pickup(_actor: Actor, pickup_target: ItemPickup3D) -> ActionResult:
-	var item_base := pickup_target.item_base as ItemBase
-	if not item_base:
-		return ActionResult.new(false, &"invalid_item")
-
-	var inventory = InventorySystem.get_player_inventory()
-	if not inventory or not inventory.create_item(item_base):
-		return ActionResult.new(false, &"inventory_full")
-
-	pickup_target.queue_free()
-	return ActionResult.new(true)

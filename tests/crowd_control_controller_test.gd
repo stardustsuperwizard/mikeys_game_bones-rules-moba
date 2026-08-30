@@ -27,7 +27,7 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	var scene := (load("res://scenes/headless_test.tscn") as PackedScene).instantiate()
+	var scene := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(scene)
 	await physics_frame
 	await physics_frame

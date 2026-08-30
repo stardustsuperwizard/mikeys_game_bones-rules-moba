@@ -11,7 +11,6 @@
 [ext_resource type="Resource" path="res://resources/player_respawn_policy.tres" id="9"]
 [ext_resource type="Script" path="res://rules/input/moba_input_router.gd" id="10"]
 [ext_resource type="Script" path="res://rules/input/moba_input_scheme.gd" id="11"]
-[ext_resource type="PackedScene" path="res://resources/characters/player_body_visual.tscn" id="12"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 height = 2.0
@@ -41,17 +40,13 @@ shape = SubResource("CapsuleShape3D_1")
 position = Vector3(0, 1, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Body"]
-visible = false
 mesh = SubResource("CapsuleMesh_1")
 position = Vector3(0, 1, 0)
 
 [node name="FrontIndicator" type="MeshInstance3D" parent="Body"]
-visible = false
 mesh = SubResource("BoxMesh_1")
 material_override = SubResource("StandardMaterial3D_1")
 position = Vector3(0, 1, -0.55)
-
-[node name="CharacterVisual" parent="Body" instance=ExtResource("12")]
 
 [node name="Controller" type="Node" parent="."]
 script = ExtResource("3")
