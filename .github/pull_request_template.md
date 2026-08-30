@@ -1,5 +1,5 @@
 <!--
-Sword and Planet uses one issue → one pull request → one squashed commit.
+Mikey's Game Bones MOBA Rules uses one issue → one pull request → one squashed commit.
 See CONTRIBUTING.md and docs/AGENT_WORKFLOW.md.
 
 A review, audit, or exploratory PR has no originating Issue. Replace the

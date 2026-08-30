@@ -1,14 +1,16 @@
-# Planned Features
+# Historical Game Backlog
 
-A high-level backlog of what the game still needs, derived from a review of the
-repository as of 2026-08-19.
+This document is retained as a record of the former Mikey's Game Bones MOBA Rules RPG
+backlog, reviewed on 2026-08-19. It is not the roadmap for
+`mikeys_gamebones-rules-moba` and does not authorize work in this repository.
 
-This is a **feature inventory, not a design document**. Items are described at
-the level of "what is missing and roughly where it would go." Detailed design
-belongs in the relevant design doc or in the GitHub Issue that implements it.
+The active MOBA rules-engine roadmap is
+[`rules/README.md`](rules/README.md). Design authority and the repository scope
+are described in [`DESIGN.md`](DESIGN.md) and [`../AGENTS.md`](../AGENTS.md).
 
-Implementation notes are suggestions only. Per `DESIGN.md`, design authority is
-human-directed; nothing here is approved architecture.
+The historical notes below may help explain older files that remain during the
+repository transition, but game-specific features, scenes, and presentation are
+out of scope for this project.
 
 ---
 

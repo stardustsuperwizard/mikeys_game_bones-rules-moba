@@ -1,17 +1,17 @@
 ---
 name: code-review
 description: >-
-  Repository conventions and architecture constraints for Sword and Planet, a
-  Godot 4 project. Use whenever reviewing a pull request's diff in this
-  repository — GDScript, scenes (.tscn), resources (.tres), or
+  Repository conventions and architecture constraints for Mikey's Game Bones
+  MOBA Rules, a portable Godot 4 rules engine. Use whenever reviewing a pull
+  request's diff in this repository — GDScript, scenes (.tscn), resources (.tres), or
   project.godot — for architecture fit, scope discipline, and Godot
   convention adherence.
 ---
 
-# Sword and Planet code review
+# Mikey's Game Bones MOBA Rules code review
 
-Sword and Planet is a 3D role-playing game built with Godot 4. This skill
-carries the review-relevant subset of `AGENTS.md` and
+Mikey's Game Bones MOBA Rules is a portable Godot 4 MOBA combat rules engine.
+This skill carries the review-relevant subset of `AGENTS.md` and
 `.github/copilot-instructions.md` so pull request review can check a diff
 against them without those files being open in context.
 
@@ -38,10 +38,10 @@ Flag, don't just note in passing:
 
 ## Architecture
 
-- Reusable behavior belongs under `addons/`; Sword and Planet-specific
-  behavior belongs outside it. A diff that adds game-specific logic inside
-  an addon, or duplicates addon behavior in game code instead of extending
-  it, is a fit issue worth flagging.
+- Rules-engine behavior belongs under `rules/`; reusable framework behavior
+  belongs under `addons/`. A diff that adds game-specific logic to either
+  location, or duplicates framework behavior instead of using an extension
+  point, is a fit issue worth flagging.
 - Public framework APIs under `addons/` should not change unless the linked
   Issue explicitly calls for it.
 - The player/Actor stack follows: `Actor` (gameplay identity/state),

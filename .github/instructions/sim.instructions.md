@@ -8,7 +8,8 @@ applyTo: "sim/**"
 statistical work GDScript cannot do well: Monte Carlo simulation, build generation across
 thousands of loadouts, and property-based testing.
 
-This is a Godot game with a Python harness attached, not a Python project.
+This is a portable Godot rules engine with a Python harness attached, not a
+standalone Python project.
 
 ## Data
 

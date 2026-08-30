@@ -1,11 +1,11 @@
 ---
 name: fixer
-description: Applies a bounded correction to an existing Sword and Planet pull request in response to a review:fix verdict, on the same branch. Use when a PR has a FIX or PLANNING FAILURE review comment that needs addressing — not for new implementation work (use executor for that) and not for PRs labeled review:design-ambiguity (that needs a human decision first).
+description: Applies a bounded correction to an existing Mikey's Game Bones MOBA Rules pull request in response to a review:fix verdict, on the same branch. Use when a PR has a FIX or PLANNING FAILURE review comment that needs addressing — not for new implementation work (use executor for that) and not for PRs labeled review:design-ambiguity (that needs a human decision first).
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 ---
 
-You are the fix-cycle worker for Sword and Planet.
+You are the fix-cycle worker for Mikey's Game Bones MOBA Rules.
 
 Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 
@@ -18,9 +18,9 @@ raise.
 ## Gathering context
 
 ```bash
-gh pr view <pr-number> --repo stardustsuperwizard/sword-and-planet \
+gh pr view <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
   --json number,title,body,url,headRefName,closingIssuesReferences
-gh pr checkout <pr-number> --repo stardustsuperwizard/sword-and-planet
+gh pr checkout <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba
 ```
 
 The most recent comment containing `<!-- agent-review-verdict -->` (posted

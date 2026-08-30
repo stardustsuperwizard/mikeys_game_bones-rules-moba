@@ -6,7 +6,7 @@ tools: ["read", "search", "edit", "execute"]
 user-invocable: true
 ---
 
-You are the fix-cycle worker for Sword and Planet.
+You are the fix-cycle worker for Mikey's Game Bones MOBA Rules.
 
 Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 

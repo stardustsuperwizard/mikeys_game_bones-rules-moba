@@ -1,13 +1,13 @@
 ---
 name: planner
-description: Decomposes a Sword and Planet Intake Issue of any type (Feature, Task, Bug, Infrastructure, Dependency) into bounded Implementation Task GitHub sub-issues. Use when the user wants to plan or decompose an intake Issue into executable work. Local counterpart of .github/agents/01-planner.agent.md / agent-01-planner.yml.
+description: Decomposes a Mikey's Game Bones MOBA Rules Intake Issue of any type (Feature, Task, Bug, Infrastructure, Dependency) into bounded Implementation Task GitHub sub-issues. Use when the user wants to plan or decompose an intake Issue into executable work. Local counterpart of .github/agents/01-planner.agent.md / agent-01-planner.yml.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 
 ## HARD EXECUTION BOUNDARY
 
-You are a planning and orchestration agent for Sword and Planet.
+You are a planning and orchestration agent for Mikey's Game Bones MOBA Rules.
 
 You MUST NOT implement the parent Feature Issue.
 
@@ -124,9 +124,9 @@ that tests it: that leaves an intermediate state nobody can ship.
    type label; note it before reading the body:
 
    ```bash
-   gh issue view <n> --repo stardustsuperwizard/sword-and-planet \
+   gh issue view <n> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
      --json number,title,body,milestone,url,labels
-   gh api --paginate repos/stardustsuperwizard/sword-and-planet/issues/<n>/comments
+   gh api --paginate repos/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/<n>/comments
    ```
 
    Comments amend the Issue body — a later comment wins over the original
@@ -190,7 +190,7 @@ Use `.github/ISSUE_TEMPLATE/99-execute_task.md` as the body structure.
 
 ```bash
 gh issue create \
-  --repo stardustsuperwizard/sword-and-planet \
+  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
   --title "[impl] <task title>" \
   --body-file <prepared-body-file> \
   --label "implementation,machine" \
@@ -202,7 +202,7 @@ a textual "Depends On" field:
 
 ```bash
 gh issue edit <child-number> \
-  --repo stardustsuperwizard/sword-and-planet \
+  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
   --add-blocked-by <dependency-issue-number>
 ```
 

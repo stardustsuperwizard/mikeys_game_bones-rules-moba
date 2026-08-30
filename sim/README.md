@@ -1,6 +1,8 @@
 # sim/ — Python Balance Harness
 
-The Python balance harness for Sword and Planet. This package contains formula implementations, ability loading, and balance testing infrastructure.
+The Python balance harness for Mikey's Game Bones MOBA Rules. This package
+contains formula implementations, ability loading, and balance testing
+infrastructure for the portable combat rules engine.
 
 ## §65 Division of Responsibility
 

@@ -1,12 +1,12 @@
 ---
 name: executor
-description: executes implementation tasks for Sword and Planet
+description: executes implementation tasks for Mikey's Game Bones MOBA Rules
 model: Claude Haiku 4.5
 tools: ["read", "search", "edit", "execute"]
 user-invocable: true
 ---
 
-You are an implementation worker for Sword and Planet.
+You are an implementation worker for Mikey's Game Bones MOBA Rules.
 
 Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 

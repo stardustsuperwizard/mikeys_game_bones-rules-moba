@@ -1,111 +1,56 @@
-# Sword and Planet
-**Sword and Planet Roleplaying Game** features a default setting that is based around 20th century pulp adventure stories as well as original content. This is an open source project that is being made to have fun!
+# Mikey's Game Bones MOBA Rules
 
-## About the Project
+`mikeys_gamebones-rules-moba` is a portable MOBA combat rules engine for Godot
+4. It contains a reusable GDScript rules module in [`rules/`](rules/) and a
+Python balance harness in [`sim/`](sim/). It is not a complete game, and it does
+not include game-specific scenes, content, assets, or world design.
 
-### Philosophy
-**Game Style**: This is a single player and multiplayer 3D game that will feature "low poly" or "stylized graphics" made popular by the game [World of Warcraft](https://worldofwarcraft.blizzard.com/en-us/) and game rules will be based on the popular and fast [MOBA](https://en.wikipedia.org/wiki/Multiplayer_online_battle_arena) gameplay. Players will have the ability to be both player characters or as a literal all powerful Game Master in the style of [Neverwinter Nights](https://en.wikipedia.org/wiki/Neverwinter_Nights).
+The rules module is intended to be lifted wholesale into a Godot game project
+as a self-contained addon. It depends only on Godot 4 and the public
+`mikeys_game_bones` API.
 
-**Goals:**  
-The following are the main, but certainly not the only, soft goals of the project (ie not time boxed or SMART).  
-* Produce an open-source computer role-play game for both single player and multiplayer play.
-* Implement Game Master functionality that allows play groups to create curated game experiences whether in a planned session or ad-hoc in a persistent world.
-* Foster creative story telling and "bring to life" story ideas.
-* Learn to develop automated and AI workflows to build an end product using natural language (currently, English).
-* Enable game development for a busy dad, during his limited downtime.
+## Included Systems
 
-### Technical
-**Game Engine:** [Godot 4](https://godotengine.org) (client and server)
+- Combat statistics, damage resolution, cooldowns, resources, and effects.
+- Ability and loadout data authored as Godot resources.
+- Device-agnostic combat intents, targeting, and input constraints.
+- AI, networking, state, UI, and data extension points needed by a MOBA combat
+	ruleset.
+- A Python harness for deterministic formula checks and statistical balance
+	simulations.
 
-**Future Game Assets:**  
-These assets are not yet a part of the project but have been scoped in the past for inclusion.
-* [quaternius](https://quaternius.com)
-* [Godot-Game-Template](https://github.com/Maaack/Godot-Game-Template)
-* [Godot D20 Framework](https://dax272.itch.io/godot-d20-framework)
+## Repository Layout
 
-## Player Controls
+| Path | Purpose |
+| --- | --- |
+| [`rules/`](rules/) | Portable Godot MOBA rules module. |
+| [`sim/`](sim/) | Python balance harness and its tests. |
+| [`docs/pulp_moba_rpg_ruleset.md`](docs/pulp_moba_rpg_ruleset.md) | Baseline combat design. |
+| [`docs/rules/README.md`](docs/rules/README.md) | Implementation roadmap and issue batches. |
+| [`AGENTS.md`](AGENTS.md) | Architecture and contribution constraints. |
 
-These are the bindings that exist in the current build. The full control design
-— gamepad, keyboard + mouse, and touch — is specified in
-[docs/pulp_moba_rpg_ruleset.md](docs/pulp_moba_rpg_ruleset.md) §5. Touch is not
-bound at all yet, and the combat actions listed below as *bound, not yet used*
-are waiting on the ability system.
+## Development
 
-### Keyboard
+Godot validation checks that resources and scripts load correctly:
 
-| Action | Key |
-|---|---|
-| Move Forward | W |
-| Move Back | S |
-| Turn Left | A |
-| Turn Right | D |
-| Strafe Left | Q |
-| Strafe Right | E |
-| Jump | Space |
-| Recenter Camera | C |
+```bash
+.github/scripts/validate-godot.sh
+```
 
-### Mouse
+Run the balance harness from the repository root:
 
-| Action | Input |
-|---|---|
-| Contextual action | Left click |
-| Look around | Right click and drag |
-| Zoom in / out | Scroll wheel |
+```bash
+pip install -e "./sim[dev]"
+pytest sim/
+```
 
-### Gamepad
+The Python harness may invoke Godot to regenerate exported ability data. Set
+`GODOT_BIN` when the Godot executable is not available on `PATH`. See
+[`sim/README.md`](sim/README.md) for its full setup and test commands.
 
-| Action | Input |
-|---|---|
-| Move forward / back | Left stick, up / down |
-| Strafe left / right | Left stick, left / right |
-| Turn left / right | Right stick, left / right |
-| Jump | Left stick click (L3) |
-| Recenter camera | Right stick click (R3) |
+## Scope
 
-The right stick turns the character rather than orbiting the camera, because
-camera look is currently mouse-only. Ruleset §5.1 puts the right stick on the
-camera; that swap happens once stick-driven camera orbit exists.
-
-### Bound, not yet used
-
-These actions exist in the `InputMap` so the ability system has something to
-bind against when it lands. Nothing reads them today.
-
-| Action | Keyboard / Mouse | Gamepad |
-|---|---|---|
-| Basic attack | Left click | Right trigger |
-| Ability 1–4 | 1 / 2 / 3 / 4 | A / B / X / Y |
-| Targeting lock-on | Tab or middle click | Right bumper |
-| Contextual defense | Shift | Left bumper |
-
-Left click is a single contextual action button — what it does depends on what
-you clicked:
-
-| Clicked | Result |
-|---|---|
-| Ground | Walk there |
-| Hostile character | Walk into melee range, then attack |
-| Door or other interactable | Walk into range, then use it |
-| Wall | Walk up to it and stop against it |
-| Sky, or anything else | Nothing |
-
-Each click issues one order that the character carries out on its own, turning
-to face where it is headed. A new click replaces the order, any keyboard
-movement cancels it, and an order the character cannot reach is abandoned
-rather than walked into forever. There is no pathfinding yet, so orders only
-work along a clear line to the destination.
-
-
-## A note about Generative AI
-Generative AI is being used in this project. 
-
-This was a deliberate choice due to limited time and a desire to design and play a game that no one else is making (see goals). Generative AI is being used across many industries and as of 2026 there is the assumption that the technology is not going to be, "going away" in the near future. One of the drivers behind this fun project is to continue to build skills that will be relevant in the future software world. 
-
-It is okay if you do not wish to play a game that has been made this way. You do not have to play this game. It was made for someone else. If you like the concept of the game and would like to contribute you can fork the repo and replace the AI code with human written code and play the game your way. You can also submit a PR with human written code in it that either replaces or enhances machine written code.
-
-### Human made content
-While generative AI is used to produce the code infrastructure to play the game, the "promise" of AI is to enable creative pursuits by and for humans. This game is not being created to be a second job that has to be debugged late at night, it is to create interactive stories to explore! To that end, generative AI's role in story telling should minimal and mostly around helping humans make their ideas coherent and real, not writing content.
-
----
-
-This project is designed with heart :heart: by humans and built with speed :fast_forward: by machines.
+This repository develops reusable combat rules and balance tooling only. A
+consuming game owns its presentation, assets, scenes, progression, narrative,
+and other game-specific systems. The former Mikey's Game Bones MOBA Rules RPG now lives in a
+separate repository.
