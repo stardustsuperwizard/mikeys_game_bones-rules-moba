@@ -1,0 +1,6 @@
+{
+  "_comment": "Device-specific magnetism multipliers for aim assist. Anchored on touch (1.0) rather than gamepad (was 1.0 in §55) to ensure clamp never fires with magnetism in [0,1]. Ratios unchanged from §55: gamepad ÷ touch = 0.67, mouse ÷ touch = 0.23. With gamepad at 1.0× in §55, touch was 1.5×, causing every magnetism > 0.667 to silently clamp to full lock on touch; anchoring on touch prevents this.",
+  "mouse": 0.23,
+  "gamepad": 0.67,
+  "touch": 1.0
+}
