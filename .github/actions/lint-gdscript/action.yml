@@ -17,7 +17,9 @@ inputs:
     description: >-
       Path to a file listing one GDScript path per line to target. An
       empty or missing file is a clean no-op -- gdtoolkit is never even
-      installed.
+      installed. Entries that are not present in the working tree (a
+      change's deleted paths) are dropped, so a list left with nothing on
+      disk is that same no-op.
     required: true
 
 outputs:
@@ -71,11 +73,35 @@ runs:
           exit 0
         fi
 
+        mapfile -t RAW_FILES < "$FILES_LIST_FILE"
+
+        # A change that deletes a .gd file still lists it as a changed path,
+        # but it is not on disk in this checkout -- pointing gdformat or
+        # gdlint at it makes them report "Cannot open file" and fail the
+        # check with no finding behind it. Drop paths that no longer exist;
+        # a deletion-only change then has nothing left to lint, which is the
+        # same clean no-op an empty list already gets above.
+        FILES=()
+        for file in "${RAW_FILES[@]}"; do
+          [ -n "$file" ] || continue
+          if [ -f "$file" ]; then
+            FILES+=("$file")
+          else
+            echo "Skipping deleted file: $file"
+          fi
+        done
+
+        if [ "${#FILES[@]}" -eq 0 ]; then
+          echo "No GDScript files remain after dropping deleted paths." \
+            > gdscript-lint-report.md
+          echo "clean=true" >> "$GITHUB_OUTPUT"
+          echo "formatted=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
         # Pinned to the 4.x line: gdtoolkit's parser targets Godot 4.x
         # GDScript syntax, matching setup-godot's default (4.7.1-stable).
         pip install --quiet "gdtoolkit==4.*"
-
-        mapfile -t FILES < "$FILES_LIST_FILE"
 
         echo "Targeting ${#FILES[@]} file(s):"
         printf '  %s\n' "${FILES[@]}"
