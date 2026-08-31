@@ -148,7 +148,10 @@ Before implementing a feature:
 3. Keep rules-engine behavior inside `rules/`, with its one-way dependency
    arrow intact, unless the Issue explicitly changes that boundary.
 
-Do not modify third-party addon code unless explicitly requested.
+**This project takes no third-party addons** (decided 2026-08-31) — there is no
+third-party code here to modify. `addons/mikeys_game_bones/` is first-party and is
+protected until #276 removes it: use the types it holds, do not change them. Only
+#276, #277 and #278 may modify that directory.
 
 ## Actor Architecture
 
