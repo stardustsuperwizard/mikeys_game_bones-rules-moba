@@ -38,18 +38,24 @@ Flag, don't just note in passing:
 
 ## Architecture
 
-- Rules-engine behavior belongs under `rules/`; reusable framework behavior
-  belongs under `addons/`. A diff that adds game-specific logic to either
-  location, or duplicates framework behavior instead of using an extension
-  point, is a fit issue worth flagging.
-- Public framework APIs under `addons/` should not change unless the linked
-  Issue explicitly calls for it.
+- Rules-engine behavior belongs under `rules/`, which keeps a one-way
+  dependency arrow — the game depends on the rules, never the reverse. A diff
+  that puts game-specific logic in `rules/`, or makes `rules/` reference
+  `res://scripts/`, `res://scenes/` or `res://resources/`, is a fit issue worth
+  flagging.
+- The shared types (`Actor`, `Controller`, `ActorBody3D`, `Action`,
+  `ActionResult`) should not change unless the linked Issue explicitly calls for
+  it. Until #276 lands they live in `addons/mikeys_game_bones/`, which is
+  otherwise protected: only #276, #277 and #278 may modify it.
+  This project takes **no third-party addons**.
 - The player/Actor stack follows: `Actor` (gameplay identity/state),
   `ActorBody3D` (the Actor in the 3D world), `Controller` (control intent).
   Game-specific controllers/bodies should extend these, not replace or
   bypass the separation.
 - Prefer composition and existing extension points over new inheritance
-  hierarchies or new framework abstractions.
+  hierarchies or new abstractions. This repository removed its framework layer
+  (#276) after roughly two thirds of it proved unreachable; a new abstraction
+  needs a second caller before it earns a name.
 
 ## Godot conventions
 
@@ -66,7 +72,7 @@ Flag, don't just note in passing:
 - Gameplay input should go through named Input Map actions
   (`project.godot`), not hard-coded keys. Existing input actions and their
   semantics should be preserved unless the Issue changes them.
-- Prefer signals or existing framework extension points for loose coupling.
+- Prefer signals or existing extension points for loose coupling.
   Flag a new autoload/global singleton introduced just to wire two unrelated
   systems together.
 
