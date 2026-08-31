@@ -4,10 +4,17 @@ applyTo: "rules/**"
 
 # Ruleset module (`rules/`)
 
-`rules/` implements the MOBA combat ruleset in `docs/pulp_moba_rpg_ruleset.md`. It is built
-to be lifted wholesale into `addons/mikeys_game_bones/` as a first-party addon named
-`mikeys_game_rules_moba` **without editing a single file inside it**. Most rules below exist
-to keep that true.
+`rules/` implements the MOBA combat ruleset in `docs/pulp_moba_rpg_ruleset.md`. It is a
+self-contained module with a strictly one-way dependency arrow: the game depends on
+`rules/`, never the reverse. Most rules below exist to keep that true.
+
+**Why the module stays self-contained** (revised 2026-08-30): it was originally to be lifted
+wholesale into `addons/mikeys_game_bones/` as `mikeys_game_rules_moba`. #276 removes
+`addons/` entirely and that destination no longer exists. The isolation is kept for a better
+reason — client and server must run identical simulation, so the rules must be loadable
+without dragging in scenes, input, or presentation. That is the same reason Heroes of
+Newerth kept `hon_shared` separate from `hon_client` and `hon_server`, and it is what makes
+#47 tractable.
 
 `docs/rules/README.md` holds the batch roadmap and the reasoning behind these decisions.
 
@@ -16,22 +23,30 @@ to keep that true.
 - **No outward references.** Nothing here may reference `res://scripts/`, `res://scenes/`,
   or `res://resources/`. The dependency arrow points one way: the game depends on `rules/`,
   never the reverse. Enforced by `rules/tests/extraction_contract_test.gd`.
-- **Dependencies are Godot 4 and `addons/mikeys_game_bones/` only.** Use `Actor`, `Action`,
-  `ActionResult`, `ActionRunner`, `Authority`, `Controller`, `ActorBody3D`, `GameObject`.
-  Do not use `PlayerController3D`, `PlayerBody3D`, `ThirdPersonCamera3D`, or `Rules`.
-- **Never modify `addons/`.** If the ruleset appears to need a framework change, stop and
-  say so in the PR rather than making it. Game rules do not belong in reusable framework
-  code — see `AGENTS.md`.
+- **Dependencies are Godot 4 and the game's own shared types only.** Use `Actor`, `Action`,
+  `ActionResult`, `ActionRunner`, `Authority`, `Controller`, `ActorBody3D`. Do not use
+  `PlayerController3D`, `PlayerBody3D`, `ThirdPersonCamera3D`, or `Rules`.
+  `GameObject` was on this list and is deleted by #276 — nothing ever read it.
+  Reference these by global `class_name`, never by `res://` path, which is what keeps the
+  contract test passing wherever the files live.
+- **Do not reach sideways into the game to change it.** If the ruleset appears to need a
+  change in `scripts/` or `scenes/`, stop and say so in the PR rather than making it. This
+  replaces the former "never modify `addons/`" rule, which #276 makes moot by deleting
+  `addons/` — and which, read literally, would block #276 itself. **#276, #277, and #278 are
+  explicitly authorized to change the files this rule otherwise protects.**
 
 ## Naming
 
 - **Every global `class_name` is prefixed `Moba`** — `MobaAbility`, `MobaCombatant`,
   `MobaFormulas`. Godot has no namespaces: `class_name` is one flat registry shared with
-  every installed addon, and this module is destined to ship into other people's projects.
-- This deliberately differs from the bare names in `addons/mikeys_game_bones/` and
-  `scripts/` — `Actor`, `Rules`, `Door`, `CharacterSheet`. **Two naming conventions in this
-  repository is an accepted, deliberate cost.** Do not "fix" the inconsistency in either
-  direction, and do not rename the existing bare-named classes.
+  every installed addon. The original reason — that this module ships into other people's
+  projects — no longer holds after #276, but the practice stands: this project intends to
+  adopt third-party addons, and an unprefixed `Ability` or `StatModifier` will collide with
+  one sooner or later.
+- This deliberately differs from the bare names in `scripts/` — `Actor`, `CharacterSheet`.
+  **Two naming conventions in this repository is an accepted, deliberate cost.** Do not
+  "fix" the inconsistency in either direction, and do not rename the existing bare-named
+  classes. A mass rename of ~100 `Moba*` classes is a large, risky, zero-value refactor.
 
 ## Data
 

@@ -57,8 +57,13 @@ input actions. A `Door` instance in the main scene is still needed.
 
 ### 0.2 Minimum viable UI
 
-There is currently no UI of any kind. Health exists only as `print()` output in
-`../addons/mikeys_game_bones/actors/actor.gd`.
+~~There is currently no UI of any kind. Health exists only as `print()` output
+in `../addons/mikeys_game_bones/actors/actor.gd`.~~
+
+> **Resolved.** The combat HUD landed in #29 and #35 — health and resource bars,
+> ability slots, cast bar, status tray, floating combat text, and target frame,
+> all under `rules/ui/`. The `print()` in `Actor.take_damage()` is on a dead path
+> deleted by #276.
 
 Minimum useful set:
 
@@ -79,9 +84,17 @@ at a `SpawnPoint`. This is closer to a latent bug than a missing feature.
 
 ### 0.4 Game state and entry points
 
-No main menu, no pause, no quit, no host/join UI. Multiplayer is currently
-reachable only through the `--server` and `--connect=<address>` command-line
-flags handled by the networking addon.
+No main menu, no pause, no quit, no host/join UI.
+
+> **Corrected 2026-08-30.** This previously claimed multiplayer was "reachable
+> only through the `--server` and `--connect=<address>` command-line flags
+> handled by the networking addon." Those flags do nothing. `network_bootstrap.gd`
+> parses them in a `_ready()` on a node that is never autoloaded (only
+> `TestBootstrap` is) and never placed in a scene; its `plugin.gd` is a bare
+> `@tool extends EditorPlugin` that only registers the addon. **There is no
+> working multiplayer entry point today.** #276 deletes the addon, costing
+> nothing functional; #278 builds a transport that runs, plus real host/join
+> entry points.
 
 ---
 
@@ -114,8 +127,18 @@ Needs an `Ability` resource, the four-slot combat loadout, per-ability cooldown
 timers, and a resource pool.
 
 **Implementation note:** modeling abilities as `Action` subclasses lets them
-reuse `ActionRunner` and `Authority`, and inherit the server-authoritative
-request/resolve split that `Actor._resolve_attack()` already establishes.
+reuse `ActionRunner` and `Authority`. ~~and inherit the server-authoritative
+request/resolve split that `Actor._resolve_attack()` already establishes.~~
+
+> **Corrected 2026-08-30.** The first half happened — `MobaAbilityAction`
+> extends `Action` and runs through `ActionRunner`. The second half did not.
+> `Actor._resolve_attack()` is unreachable in the shipped game and is deleted by
+> #276, which records the request/resolve pattern in `docs/` first. And the
+> chokepoint is not universal: of the three player-originated commands, only
+> ability activation passes the gate — basic attack and cast-cancel call
+> `MobaCombatant` mutators directly, and `Authority.can_perform()` returns
+> `true` unconditionally because `owner_id` is never assigned outside tests.
+> #277 makes it real.
 
 ### 1.3 Targeting modes
 
@@ -254,9 +277,11 @@ plain data dictionary, which is most of what runtime GM spawning needs.
 
 ### 3.2 Multiplayer session layer
 
-The networking addon provides transport only. Its own comments state that the
-consuming game must own per-peer spawning and despawning; that file does not
-exist in this repository.
+**Tracked by #278.** There is no working transport: the networking addon's
+bootstrap is never autoloaded and never scened, so it never runs, and #276
+deletes it. Its own comments state that the consuming game must own per-peer
+spawning and despawning in `runtime/session_spawner.gd`; this repository has no
+`runtime/` directory and that file was never written.
 
 Missing:
 
@@ -265,7 +290,10 @@ Missing:
 - Disconnect and reconnect handling.
 - A lobby or session browser.
 
-Combat is already server-authoritative in shape, which is a good foundation.
+Combat is server-authoritative in *shape* — one gated command out of three
+(see §1.2's correction) — which is a partial foundation. #277 completes it.
+There is also no `MultiplayerSynchronizer` anywhere in the project and nothing
+connects `multiplayer.peer_connected`, so no state replicates at all today.
 
 ### 3.3 Dialogue and narrative tools
 
