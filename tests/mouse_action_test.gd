@@ -364,31 +364,6 @@ func _run_interaction_scenarios(
 	ability_dummy.queue_free()
 	await physics_frame
 
-	# --- click a door -> approach and open -----------------------------
-	if _actors_lost("door click", [body, controller]):
-		return false
-	var door := _make_door(scene, Vector3(-2, 1, 2))
-	await physics_frame
-	await _click_world_point(controller, camera, door.global_position)
-	var opened := await _wait_until(
-		func() -> bool:
-			if not is_instance_valid(body) or not is_instance_valid(door):
-				return false
-			return door.is_open(),
-		360
-	)
-	if not is_instance_valid(body) or not is_instance_valid(door):
-		_fail("door click: actor was freed during test")
-	elif not opened:
-		_fail(
-			(
-				"door click: door never opened (player at %v, door at %v)"
-				% [body.global_position, door.global_position]
-			)
-		)
-	else:
-		print("PASS door click -> closed and opened the door")
-
 	# --- keyboard movement cancels a live click order ------------------
 	if _actors_lost("keyboard cancel", [body, controller]):
 		return false
@@ -464,25 +439,6 @@ func _make_dummy(parent: Node, position: Vector3) -> Actor:
 	(dummy.get_node("Body") as Node3D).position = position
 	parent.add_child(dummy)
 	return dummy
-
-
-func _make_door(parent: Node, position: Vector3) -> Door:
-	var door := Door.new()
-	door.name = "TestDoor"
-	door.set_script(load("res://addons/mikeys_game_bones/things/props/door.gd"))
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(1, 2, 0.3)
-	shape.shape = box
-	door.add_child(shape)
-	var mesh := MeshInstance3D.new()
-	var box_mesh := BoxMesh.new()
-	box_mesh.size = Vector3(1, 2, 0.3)
-	mesh.mesh = box_mesh
-	door.add_child(mesh)
-	parent.add_child(door)
-	door.global_position = position
-	return door
 
 
 # The reconciliation rule that keeps mouse capture from sticking: release only

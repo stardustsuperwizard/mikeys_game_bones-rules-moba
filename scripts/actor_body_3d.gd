@@ -47,10 +47,20 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
-	var target := actor.controller.get_attack_target() if actor.controller else null
-	if target:
-		actor.try_attack(target)
-
-	var interact_target := actor.controller.get_interact_target() if actor.controller else null
-	if interact_target:
-		actor.try_interact(interact_target)
+	# Poll the controller's attack seam once the body has moved for the frame,
+	# and deliberately discard what it returns.
+	#
+	# This looks like a dead call and is not. The flat Actor.try_attack() path
+	# that used to consume the return value is gone, but get_attack_target() was
+	# never a pure query: it is where PlayerController3D and EnemyAIController3D
+	# arm the pending basic-attack cycle (_basic_attack_pending /
+	# _pending_attack_target) and apply taunt re-pointing. Their own
+	# _physics_process resolves that cycle through MobaCombatant.basic_attack().
+	# Nothing else calls it, so dropping this line silently disables every basic
+	# attack in the game -- player and enemy alike -- while still compiling and
+	# still passing a scene-load check.
+	#
+	# The interact seam had no such second life: Door was its only consumer and
+	# nothing remains in the "interactables" group, so that poll is gone.
+	if actor.controller:
+		actor.controller.get_attack_target()
