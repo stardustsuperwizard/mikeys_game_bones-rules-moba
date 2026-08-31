@@ -1,7 +1,7 @@
 [gd_scene load_steps=14 format=3]
 
-[ext_resource type="Script" path="res://addons/mikeys_game_bones/actors/actor.gd" id="1"]
-[ext_resource type="Script" path="res://addons/mikeys_game_bones/actors/bodies/actor_body_3d.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/actor.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/actor_body_3d.gd" id="2"]
 [ext_resource type="Script" path="res://scripts/enemy_ai_controller_3d.gd" id="3"]
 [ext_resource type="Resource" path="res://resources/enemy_character_sheet.tres" id="4"]
 [ext_resource type="Script" path="res://rules/core/moba_combatant.gd" id="5"]

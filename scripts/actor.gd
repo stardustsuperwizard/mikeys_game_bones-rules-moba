@@ -31,9 +31,9 @@ func _ready() -> void:
 	game_object = GameObject.new(StringName(name), object_definition)
 
 # Bridges whichever presentation body this Actor has (see
-# actors/bodies/actor_body_3d.gd / actor_body_2d.gd) into a single
-# presentation-neutral position, so Controller/PlayerController/SimpleAIController
-# never need to know or care whether they're driving a 3D or a 2D actor.
+# scripts/actor_body_3d.gd) into a single presentation-neutral position, so
+# Controller/PlayerController/SimpleAIController never need to know or care
+# whether they're driving a 3D or a 2D actor.
 # 2D's XY plane maps onto 3D's XZ ground plane (Y stays up).
 #
 # Deliberately not cached via @onready: Godot readies children before their
