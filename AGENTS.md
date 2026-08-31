@@ -31,6 +31,13 @@ levels" is what makes creation-time and between-match choice the build system.
 Stat optimisation is a **feature**, not a complexity cost to mitigate. Working out
 the best combination is the retention loop.
 
+The character system is decided (#280, 2026-08-31): one primary and one secondary
+Discipline, four action abilities drawn from those two, a modest respecable stat
+pool on top of the §6 baseline, free weapon choice, and fully editable between
+matches — the character stays the same character, the kit is the tunable part.
+Templates ship as data, not as a class concept in `rules/`. Do not reopen these in
+an implementation session.
+
 Three modes share one ruleset and one character: arena (base), PvE tower defense
 (expansion), MOBA (expansion). See `docs/GAME_MODES.md` for what is shared, what each
 mode adds, and the sequencing.

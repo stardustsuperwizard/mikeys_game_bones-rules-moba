@@ -36,13 +36,22 @@ The ability-picking model comes from it, and it solved several problems this des
 
 | GW1 | Here |
 | --- | --- |
-| 8 skill slots from a pool of hundreds, two professions | 4 action slots + 1 passive, six Disciplines (§4, §3) |
+| **Primary and secondary profession; skills drawn from both** | **Primary and secondary Discipline; four action abilities drawn from both (#280 D1)** |
+| 8 skill slots from a pool of hundreds | 4 action slots + 1 passive, from six Disciplines (§4, §3) |
 | Build theorycrafting *was* the metagame | The intended retention loop |
-| PvP characters created instantly at max power | No grind to be competitive |
-| **Skills unlocked account-wide, not per character** | **The answer to "how does the learned pool grow" without character levels** |
+| Attributes freely re-set outside combat | Stats freely respecable between matches (#280 D2) |
+| PvP characters created instantly at max power | Everything available from the start; no grind to be competitive (#280 D6) |
+| Skills unlocked account-wide, not per character | **Deferred** — the model if a progression hook is ever wanted, and it adds progression without character levels, keeping §54 intact |
 
-That last row matters: it is progression a returning player accrues, satisfying the
-progression itch while keeping ruleset §54's "no character levels initially" intact.
+**The character system is decided** (#280, 2026-08-31): one primary and one secondary
+Discipline, abilities from those two only, a modest respecable stat pool on top of the §6
+baseline, free weapon choice, fully editable between matches, and templates shipped as data
+rather than as a class concept. Six Disciplines gives 30 ordered pairs — a roster-sized
+identity space nobody had to author.
+
+The accepted cost is that a three-Discipline build is illegal. Taken deliberately: an
+unconstrained pick offers no *decision*, only "find the best four", and converges on one
+build. Constraint is what makes optimisation fun.
 
 ---
 
