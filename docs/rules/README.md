@@ -73,10 +73,26 @@ onto later. The backlog as written encoded the opposite, scheduling networking s
 | 5 | **6a — Framework removal and the authority chokepoint** | **#276, #277** | **new** |
 | 6 | **6b — Multiplayer session layer** | **#278** | **new** |
 | 7 | **6c — Server-authoritative combat** | **#47, #48** | moved forward |
-| 8 | 3 — Targeting and input *(remainder)* | #39, #40, #41 | deferred |
-| 9 | 4 — Content and remaining ability mechanics | #42, #43, #44 | deferred |
-| 10 | 5 — PvE AI | #45, #46 | deferred |
-| 11 | 7 — Balance, conformance, and mobile | #49–#52 | unchanged |
+| 8 | **Arena completion — identity and match shape** | **#280, #281, #282, #283** | **new** |
+| 9 | 3 — Targeting and input *(remainder)* | #39, #40, #41 | deferred |
+| 10 | 4 — Content and remaining ability mechanics | #42, #43, #44 | deferred |
+| 11 | 5 — PvE AI | #45, #46 | deferred |
+| 12 | **6d — PvE tower defense (expansion)** | **#284** | **new** |
+| 13 | 7 — Balance, conformance, and mobile | #49–#52 | unchanged |
+| — | MOBA mode (expansion) | *not yet filed* | — |
+
+**Order 8 is what turns multiplayer combat into a game.** #281 gives a match its shape
+(best-of-N rounds), #280 gives the player a character that is theirs, and #282 and #283 make
+that character visible to other people. Combat without them is a sandbox; with them the
+arena is shippable.
+
+**Order 12 sits after Batch 5** because tower defense wants #45's threat model — creeps
+choosing between towers and the player is exactly the PvE target-selection problem — and
+because `docs/GAME_MODES.md` gates it: **arena ships complete before tower defense starts.**
+
+**MOBA mode has no Issue yet.** It is the third expansion in `docs/GAME_MODES.md` and is
+deliberately unfiled: it is the most expensive of the three and its shape depends on what the
+arena and tower defense modes teach. #47 and #48 are its *combat networking*, not the mode.
 
 ### Why networking moved
 
@@ -313,15 +329,22 @@ points, each of which leaves the repository in a coherent state:
 | --- | --- | --- |
 | **Batch 1** | A minimum vertical slice: one ability, end to end, visible on screen, with real statistics behind it | 10 |
 | **Batch 2** | Full combat resolution — effects, crowd control, sustain, casting, death — but targeted abilities only | 16 |
-| **Batch 3** | All six targeting types, projectiles, aim assist, and all three control schemes' input model | 22 |
-| **Batch 6** | Multiplayer: a host and clients in one session, with server-authoritative combat. **The point at which this is the game it claims to be** | 25 |
-| **Batch 3 remainder** | Lock-on and the reticle, jump and Airborne, gamepad camera look | 28 |
-| **Batch 4** | The §53 first prototype, complete and playable. **The natural place to stop and judge the design** | 31 |
-| **Batch 5** | Meaningful PvE with threat and enemy ability policies | 33 |
-| **Batch 7** | The complete ruleset, the balance harness, drift protection, and touch | 37 |
+| **Batch 3** *(partial)* | Skillshot, ground, area and toggle targeting, projectiles, aim assist, and the device-agnostic input layer | 19 |
+| **Batch 6** | Multiplayer: a host and clients in one session, with server-authoritative combat | 24 |
+| **Arena complete** | A character that is yours, a match with a shape, and a lobby to stand in as them. **The point at which this is the game it claims to be** | 28 |
+| **Batch 3 remainder** | Lock-on and the reticle, jump and Airborne, gamepad camera look | 31 |
+| **Batch 4** | The §53 first prototype, complete and playable. **The natural place to stop and judge the design** | 34 |
+| **Batch 5** | Meaningful PvE with threat and enemy ability policies | 36 |
+| **Tower defense** | The second mode: waves, towers, and your champion, solo or co-op | 37 |
+| **Batch 7** | The complete ruleset, the balance harness, drift protection, and touch | 41 |
 
-Counts include #276, #277, and #278. Batch 6 now precedes the Batch 3 remainder, Batch 4,
-and Batch 5 — see **Execution order**.
+Counts are cumulative over all 41 filed Issues — the original 33 (#20–#52), plus #276–#278
+and #280–#284. The **Batch 3** row is now *partial* (#36–#38 only): the reorder moved #39–#41
+after multiplayer, so stopping at Batch 6 means stopping with three of Batch 3's six Issues
+done. **The previous edition of this table double-counted them, which put every row below it
+one too high.**
+
+Batch 6 now precedes the Batch 3 remainder, Batch 4, and Batch 5 — see **Execution order**.
 
 ---
 

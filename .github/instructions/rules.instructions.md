@@ -48,7 +48,7 @@ Newerth kept `hon_shared` separate from `hon_client` and `hon_server`, and it is
 - This deliberately differs from the bare names in `scripts/` — `Actor`, `CharacterSheet`.
   **Two naming conventions in this repository is an accepted, deliberate cost.** Do not
   "fix" the inconsistency in either direction, and do not rename the existing bare-named
-  classes. A mass rename of ~100 `Moba*` classes is a large, risky, zero-value refactor.
+  classes.
 
 ## Data
 
