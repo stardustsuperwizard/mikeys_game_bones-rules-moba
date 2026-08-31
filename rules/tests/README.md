@@ -5,8 +5,8 @@ Unit tests, integration tests, and automated regression tests.
 ## Extraction Contract Test
 
 The **extraction contract test** (`extraction_contract_test.gd`) verifies that the rules module
-maintains the strict architectural boundary required for it to be extracted wholesale into
-`addons/mikeys_game_rules_moba` without editing a single file.
+maintains a strict one-way dependency arrow: no files under `rules/` reference the game's
+implementation in `res://scripts/`, `res://scenes/`, or `res://resources/`.
 
 ### What it checks
 
@@ -17,7 +17,7 @@ The test ensures that no files under `rules/` contain outward references to:
 
 These prefixes represent game-specific code, scenes, and assets outside the ruleset module.
 The `rules/` directory must be self-contained and depend only on Godot 4 and
-`addons/mikeys_game_bones/`.
+the game's shared types in `scripts/`.
 
 ### How it runs
 

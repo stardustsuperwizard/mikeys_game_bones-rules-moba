@@ -1,8 +1,9 @@
 ## Root module for MOBA combat ruleset implementation.
-## This module is designed to be extracted wholesale into addons/mikeys_game_rules_moba
-## without editing a single file. All code here follows strict architectural constraints:
+## This module is a self-contained package with a one-way dependency arrow:
+## the game depends on the rules, never the reverse. All code here follows
+## strict architectural constraints:
 ## - No outward references to res://scripts/, res://scenes/, or res://resources/
-## - Dependencies only on Godot 4 and addons/mikeys_game_bones/
+## - Dependencies only on Godot 4 and the game's shared types
 ## - All global class_name identifiers prefixed with "Moba"
 class_name MobaRules
 

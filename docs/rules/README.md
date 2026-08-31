@@ -164,8 +164,8 @@ Godot loads `.tres` directly and never reads the generated JSON. The export exis
 so the Python harness needs no `.tres` parser.
 
 **Confirmed 2026-08-20 on #20:** the `Moba` prefix is adopted. The repository now carries
-two naming conventions deliberately — `addons/mikeys_game_bones/` and `scripts/` keep their
-bare names (`Actor`, `Rules`, `Door`, `CharacterSheet`) and are not renamed.
+two naming conventions deliberately — `rules/` carries the `Moba` prefix, while `scripts/`
+keeps its bare names (`Actor`, `Rules`, `Door`, `CharacterSheet`), which are not renamed.
 
 ---
 

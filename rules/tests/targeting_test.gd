@@ -127,7 +127,7 @@ static func _make_ability(
 ## checks) and a real Node3D inside the tree (so MobaTargeting's physics
 ## query can find a world through it), but with no "Body" child of its own.
 ##
-## Actor extends Node, not Node3D (see addons/mikeys_game_bones/actors/actor.gd);
+## Actor extends Node, not Node3D (see scripts/actor.gd);
 ## MobaTargeting._get_spatial_anchor() bridges that by falling back to an
 ## Actor's "Body" child, but this fixture has none, so it has to be Node3D
 ## itself. Attaching the Actor script to a native Node3D is exactly what

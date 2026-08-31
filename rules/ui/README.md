@@ -1,9 +1,8 @@
 # Ruleset HUD and Visual Feedback
 
-This directory ships with the ruleset addon. Everything here is extracted
-wholesale into `addons/mikeys_game_rules_moba` alongside `rules/core/` and
-`rules/abilities/`, so nothing in it may reference `res://scenes/`,
-`res://scripts/`, or `res://resources/` — `rules/tests/extraction_contract_test.gd`
+This directory is part of the rules module. Like all of `rules/`, nothing here may
+reference `res://scenes/`, `res://scripts/`, or `res://resources/` — the one-way
+dependency arrow must stay intact. `rules/tests/extraction_contract_test.gd`
 enforces that.
 
 ## Signals in, nothing out

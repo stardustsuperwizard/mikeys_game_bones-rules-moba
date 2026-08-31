@@ -1,15 +1,14 @@
-# MOBA Rules Module Extraction Contract
+# MOBA Rules Module
 
 This module implements the complete MOBA combat ruleset specified in `docs/pulp_moba_rpg_ruleset.md`.
-The entire `rules/` directory is designed to be extracted wholesale into `addons/mikeys_game_bones/`
-as the first-party addon `mikeys_game_rules_moba` **without editing a single file inside it**.
+The `rules/` directory is a self-contained module with a strictly one-way dependency arrow: the game depends on the rules, never the reverse.
 
 ## Architectural Constraints
 
 - **No outward dependencies**: Nothing here references `res://scripts/`, `res://scenes/`, or `res://resources/`.
   The dependency arrow points one way: the game depends on `rules/`, never the reverse.
-- **Limited inbound dependencies**: Code here depends only on Godot 4 and the public API of `addons/mikeys_game_bones/`.
-- **Naming convention**: Every global `class_name` is prefixed with `Moba` to avoid collisions when extracted into other projects.
+- **Limited inbound dependencies**: Code here depends only on Godot 4 and the game's own shared types, enabling client and server to run identical simulation.
+- **Naming convention**: Every global `class_name` is prefixed with `Moba` to make the `rules/` module boundary legible at every call site.
 - **Pure, testable combat math**: All formulas live in a single module, are static, take plain values, and touch no scene tree.
 - **Deterministic simulation**: Systems advance on explicit `tick(delta)` calls from their owner, enabling headless testing and Python mirroring.
 

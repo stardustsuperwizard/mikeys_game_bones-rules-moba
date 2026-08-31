@@ -6,9 +6,9 @@
 ## the HUD through a NodePath export rather than an autoload singleton.
 ##
 ## Combatants are spawned by WorldManager rather than authored into the scene,
-## and addons/mikeys_game_bones/world/world_manager.gd is framework code that
-## emits no spawn signal, so discovery goes through SceneTree's built-in
-## node_added signal plus one startup sweep for combatants already in the tree.
+## and scripts/world_manager.gd emits no spawn signal, so discovery goes through
+## SceneTree's built-in node_added signal plus one startup sweep for combatants
+## already in the tree.
 ##
 ## Impact position is read from combatant.get_parent().global_position, the same
 ## duck-typed pattern already used by moba_ability_action.gd::_get_position() and
