@@ -1,6 +1,6 @@
 [gd_resource type="Resource" script_class="SpawnPoint" load_steps=4 format=3]
 
-[ext_resource type="Script" path="res://addons/mikeys_game_bones/world/spawn_point.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/spawn_point.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/enemy/enemy.tscn" id="2"]
 [ext_resource type="Resource" path="res://resources/enemy_character_sheet.tres" id="3"]
 

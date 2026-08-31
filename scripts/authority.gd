@@ -1,6 +1,7 @@
 class_name Authority
 extends RefCounted
 
+
 # 0 means unowned/AI-controlled -- only ever reachable via a local (not RPC)
 # call on the server, so any requester is fine. Otherwise the requester must
 # be the actor's own owning peer.
