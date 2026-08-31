@@ -2,8 +2,8 @@
 ##
 ## MobaDamage is a RefCounted value object that encapsulates a damage event:
 ## the raw amount, damage type (PHYSICAL/MAGICAL/TRUE), the source, and the
-## attacker's penetration stats. It is constructed by Rules.attack() and passed
-## to MobaCombatant.apply_damage() for resolution.
+## attacker's penetration stats. It is passed to MobaCombatant.apply_damage()
+## for resolution.
 class_name MobaDamage
 extends RefCounted
 

@@ -46,11 +46,3 @@ func _physics_process(delta: float) -> void:
 		velocity.z = move_toward(velocity.z, 0, SPEED)
 
 	move_and_slide()
-
-	var target := actor.controller.get_attack_target() if actor.controller else null
-	if target:
-		actor.try_attack(target)
-
-	var interact_target := actor.controller.get_interact_target() if actor.controller else null
-	if interact_target:
-		actor.try_interact(interact_target)
