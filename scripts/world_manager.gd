@@ -5,6 +5,7 @@ extends Node3D
 
 @onready var _spawner: MultiplayerSpawner = get_node_or_null("MultiplayerSpawner")
 
+
 func _ready() -> void:
 	add_to_group("world_manager")
 	if _spawner:
@@ -17,6 +18,7 @@ func _ready() -> void:
 
 	for spawn_point in spawn_points:
 		spawn(spawn_point)
+
 
 # Assumes WorldManager stays attached to the room's own root node (identity
 # transform, direct children) so spawn_point.transform reproduces the old
@@ -38,6 +40,7 @@ func spawn(spawn_point: SpawnPoint, authority_id: int = 1) -> Actor:
 	if _spawner:
 		return _spawner.spawn(data) as Actor
 	return _spawn_actor(data)
+
 
 func _spawn_actor(data: Dictionary) -> Actor:
 	var actor := (load(data["scene_path"]) as PackedScene).instantiate() as Actor
