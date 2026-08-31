@@ -45,8 +45,7 @@ Flag, don't just note in passing:
   flagging.
 - The shared types (`Actor`, `Controller`, `ActorBody3D`, `Action`,
   `ActionResult`) should not change unless the linked Issue explicitly calls for
-  it. Until #276 lands they live in `addons/mikeys_game_bones/`, which is
-  otherwise protected: only #276, #277 and #278 may modify it.
+  it. These types live in `scripts/`.
   This project takes **no third-party addons**.
 - The player/Actor stack follows: `Actor` (gameplay identity/state),
   `ActorBody3D` (the Actor in the 3D world), `Controller` (control intent).

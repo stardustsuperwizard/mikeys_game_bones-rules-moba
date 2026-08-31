@@ -3,9 +3,9 @@
 ## Verifies that no files under rules/ contain outward references to
 ## res://scripts/, res://scenes/, or res://resources/.
 ##
-## The rules module is designed to be extracted wholesale into
-## addons/mikeys_game_rules_moba without editing a single file.
-## This test enforces the architectural constraint that allows that extraction.
+## This test enforces the one-way dependency arrow: the rules module must
+## never reference the game's implementation, enabling client and server
+## to run identical simulation.
 class_name ExtractionContractTest
 
 const RULES_DIR := "res://rules/"

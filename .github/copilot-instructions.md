@@ -143,8 +143,9 @@ Before implementing a feature:
 
 1. Inspect the existing shared types and extension points in `scripts/`.
 2. Prefer using or extending those over duplicating their behavior.
-   **Until #276 lands these types physically live in `addons/mikeys_game_bones/`**, not
-   `scripts/` — #276 is what moves them. Treat the names, not the paths, as the contract.
+   These types (`Actor`, `ActorBody3D`, `Controller`, `WorldManager`, `SpawnPoint`,
+   `Action`, `ActionResult`, `ActionRunner`, `Authority`) live in `scripts/`.
+   Match on the type names, treating them as the contract.
 3. Keep rules-engine behavior inside `rules/`, with its one-way dependency
    arrow intact, unless the Issue explicitly changes that boundary.
 

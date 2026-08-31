@@ -78,12 +78,9 @@ for intended behavior.
   name.
 - Do not change the shared types (`Actor`, `Controller`, `ActorBody3D`,
   `Action`, `ActionResult`) unless the Issue explicitly requires it.
-  **Until #276 lands these live in `addons/mikeys_game_bones/`**, not `scripts/`;
-  #276 is the Issue that moves them. Match on the type names, not the path.
-- **`addons/` is protected until #276 removes it.** Do not modify anything under
-  it. If work appears to need a change there, stay out and say so in the PR.
-  #276, #277 and #278 are the only Issues authorized to touch it — #276 to
-  delete it, the other two because they inherit the seams it holds.
+  These types live in `scripts/`. Match on the type names as the contract.
+- Do not modify third-party addon code unless explicitly requested. (There are
+  no first-party addons to protect; #276 deleted `addons/` entirely.)
 - If the requested feature conflicts with the documented architecture, explain
   the conflict rather than silently working around it.
 
