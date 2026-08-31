@@ -373,12 +373,11 @@ static func _is_candidate_visible(_candidate: Node) -> bool:
 
 ## Resolve a spatial anchor (a Node3D) for a caster/reference node.
 ##
-## Production always passes the Actor itself (Actor extends Node, not
-## Node3D -- see scripts/actor.gd), whose actual
-## Node3D presentation lives on its "Body" child. If the node is already a
-## Node3D, use it directly (covers headless test fixtures that pass a body
-## or a Node3D-scripted stand-in). Otherwise fall back to its Body child,
-## null if neither exists.
+## Production always passes the Actor itself (Actor extends Node, not Node3D
+## -- see scripts/actor.gd), whose actual Node3D presentation lives on its
+## "Body" child. If the node is already a Node3D, use it directly (covers
+## headless test fixtures that pass a body or a Node3D-scripted stand-in).
+## Otherwise fall back to its Body child, null if neither exists.
 static func _get_spatial_anchor(node: Node) -> Node3D:
 	if node == null:
 		return null
