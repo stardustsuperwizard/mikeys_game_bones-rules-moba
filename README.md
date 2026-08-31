@@ -8,7 +8,13 @@ self-contained module in [`rules/`](rules/), with a Python balance harness in
 `rules/` keeps a strictly one-way dependency arrow — the game depends on the
 rules, never the reverse — enforced by `rules/tests/extraction_contract_test.gd`.
 That isolation exists so client and server can run identical simulation, which
-is what makes server-authoritative multiplayer (#47) tractable.
+is what makes server-authoritative multiplayer tractable. Multiplayer is a
+first-class feature of this game, not a later extension: #277 makes the
+authority gate universal, #278 builds the session layer, and #47 resolves
+combat on top of both.
+
+Three modes share one ruleset and one character — arena brawler (base game),
+PvE tower defense, and MOBA. See [`docs/GAME_MODES.md`](docs/GAME_MODES.md).
 
 > **Revised 2026-08-30.** This was previously described as a portable rules
 > engine "intended to be lifted wholesale into a Godot game project as a

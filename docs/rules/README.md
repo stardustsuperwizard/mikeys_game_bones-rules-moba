@@ -2,14 +2,20 @@
 
 The MOBA combat ruleset in [`../pulp_moba_rpg_ruleset.md`](../pulp_moba_rpg_ruleset.md),
 decomposed into 33 GitHub Issues (#20–#52) grouped into eight batches, plus three
-Issues (#276–#278) added by the 2026-08-30 revision.
+Issues (#276–#278) added by the 2026-08-30 revision and five (#280–#284) by the
+2026-08-31 revision.
 
 Batches run from a minimum vertical slice to the complete ruleset. Each is a coherent,
 mergeable increment: the game builds, runs, and is playable at the end of every batch.
 
 Written 2026-08-20.
 
-**Revised 2026-08-30 — execution order changed; four architectural decisions corrected.**
+**Revised 2026-08-30** — execution order changed; four architectural decisions corrected.
+**Revised again 2026-08-31** — three decisions added (no third-party addons; three modes, one
+ruleset, one character; character creation as a design pillar), and the game-flow UI row
+revised a second time. See `docs/GAME_MODES.md` for the mode architecture.
+
+On the 2026-08-30 change:
 Multiplayer is now a first-class feature of this game rather than a later extension, so
 networking moves ahead of the remaining content, input-polish, and PvE batches. A
 repository audit also invalidated the stated premise for scheduling networking last, and
