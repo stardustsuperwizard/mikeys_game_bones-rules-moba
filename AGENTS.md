@@ -15,6 +15,13 @@ is what makes server-authoritative multiplayer tractable.
 Single-player against bots stays fully supported; it is one session mode rather
 than the default that networking is bolted onto afterwards. See #277 and #278.
 
+**The player builds a character; the game ships no premade heroes.** This is the
+project's distinguishing design claim and it is ruleset §2 and §54, not a new
+direction — roles emerge from the equipped kit, and `MobaAbility.Discipline`
+already enumerates all six §3 disciplines. Because §54 specifies no character
+levels, creation-time choice *is* the build system. Treat the four loadouts in
+#44 as developer presets and test fixtures, never as the shipped selection.
+
 > **Revised 2026-08-30.** This section previously read: "a Godot 4 project whose
 > exclusive purpose is developing a portable MOBA rules engine… **It is not a
 > game**… do not add game-specific content here." That is no longer true and was
@@ -35,8 +42,11 @@ for intended behavior.
 - Make the smallest change necessary to satisfy the Issue.
 - Do not implement functionality listed as out of scope.
 - Do not refactor unrelated code.
-- Do not add third-party dependencies unless explicitly requested.
-- Do not modify third-party code unless explicitly requested.
+- **Do not add third-party dependencies or addons.** Decided 2026-08-31: this
+  project builds what it needs. This reverses the older "use components that
+  already exist in the wild" goal, which served a reusable framework that no
+  longer exists (#276). If a task looks like it wants a plugin, say so in the
+  PR rather than adding one.
 
 ## Architecture
 

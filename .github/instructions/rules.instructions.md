@@ -39,10 +39,12 @@ Newerth kept `hon_shared` separate from `hon_client` and `hon_server`, and it is
 
 - **Every global `class_name` is prefixed `Moba`** — `MobaAbility`, `MobaCombatant`,
   `MobaFormulas`. Godot has no namespaces: `class_name` is one flat registry shared with
-  every installed addon. The original reason — that this module ships into other people's
-  projects — no longer holds after #276, but the practice stands: this project intends to
-  adopt third-party addons, and an unprefixed `Ability` or `StatModifier` will collide with
-  one sooner or later.
+  every installed addon. Both original reasons are now void — this module no longer ships
+  into other projects (#276), and as of 2026-08-31 the project takes no third-party addons,
+  so the registry holds only this project's classes and Godot's built-ins. The prefix stays
+  on a weaker but honest argument: it makes the `rules/` module boundary legible at every
+  call site, and renaming ~100 classes is a large, risky, zero-value refactor. Keep by
+  inertia, not by argument.
 - This deliberately differs from the bare names in `scripts/` — `Actor`, `CharacterSheet`.
   **Two naming conventions in this repository is an accepted, deliberate cost.** Do not
   "fix" the inconsistency in either direction, and do not rename the existing bare-named
@@ -92,7 +94,9 @@ Newerth kept `hon_shared` separate from `hon_client` and `hon_server`, and it is
 
 - Prefer typed GDScript.
 - Use Godot's built-in physics. Do not write custom collision or gravity systems.
-- Do not add third-party dependencies.
+- **Do not add third-party dependencies or addons.** Decided 2026-08-31: this project
+  builds what it needs. If something looks like it wants a plugin, say so in the PR rather
+  than adding one.
 - Run `.github/scripts/validate-godot.sh` and report the exact command and its result. Exit
   code 127 means Godot was not on PATH — that is "could not validate", not "validated
   successfully".

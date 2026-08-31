@@ -28,7 +28,7 @@ each one. They are not open for an implementation session to revisit.
 | All ruleset code lives in `rules/` at the repository root | ~~Lifted wholesale into `addons/mikeys_game_bones` as `mikeys_game_rules_moba` later, without editing a file inside it~~ **Superseded by #276.** `rules/` stays a coherent module with a one-way dependency arrow, and the extraction contract test still enforces that — but it is no longer destined for an addon. This repository is a MOBA, not a framework host |
 | Nothing in `rules/` references `res://scripts/`, `res://scenes/`, or `res://resources/` | The dependency arrow points one way. Enforced by an automated contract test in #20 |
 | `rules/` depends only on Godot 4 and the game's own source tree | **Revised by #276**, which deletes `addons/` entirely. What the MOBA used is absorbed into the game; the rest is deleted. There is no addon to depend on or to avoid modifying |
-| Global `class_name` identifiers are prefixed `Moba` | Godot has no namespaces — one flat global registry shared with every addon. `Ability`, `Buff`, and `StatModifier` would collide with the third-party addons goal 4 commits to adopting, and this module ships into other projects. Accepted cost: two naming conventions in the repo. `.tres` authoring requires a registered `class_name`, so `preload()` constants are not an available dodge |
+| Global `class_name` identifiers are prefixed `Moba` | ~~`Ability`, `Buff`, and `StatModifier` would collide with the third-party addons goal 4 commits to adopting, and this module ships into other projects~~ **Both rationales are now void** — #276 ends the ship-into-other-projects plan, and the project takes no third-party addons (row below). The prefix stays anyway, on a weaker but honest argument: it makes the `rules/` module boundary legible at every call site, and renaming ~100 classes is a large, risky, zero-value refactor. Keep by inertia, not by argument. `.tres` authoring requires a registered `class_name`, so `preload()` constants are not an available dodge |
 | All rules state hangs off one `MobaCombatant` node, a child of `Actor` | Keeps the whole ruleset behind a single attachment point, and keeps game rules out of framework code per `AGENTS.md` |
 | Combat math is pure and node-free, in `MobaFormulas` only | Unit-testable headless, and mirrorable by the Python harness |
 | Game content is authored as `.tres` in the Godot inspector; a headless export produces JSON for Python only | §57 permits "JSON **or** converted Godot `Resource` files"; §65 requires shared *data*, not a shared format. Serves bones design goal 3, and typed `@export` fields make invalid enums unrepresentable rather than caught-by-test |
@@ -39,8 +39,10 @@ each one. They are not open for an implementation session to revisit.
 | Combat kit is 4 action slots + 1 dedicated passive slot; passives never compete for an action slot | §62's open question, answered on #43. A dedicated slot makes `occupies_equipped_slot` a field with one legal value, so it is never added |
 | Aim assist multipliers are anchored on **touch** at 1.0x, not gamepad — a deliberate deviation from §55 | Ratios are unchanged; it is a change of units. But with gamepad at 1.0x and touch at 1.5x, everything above 0.667 authored clamps on touch — including §55's own 0.7 for dashes — so distinct abilities collapse to full lock on the least precise device. Anchoring on touch means no multiplier exceeds 1.0 and the clamp can never fire. See #38 |
 | Touch is the design target; keyboard + mouse stays the development scheme | §5 already says a mechanic that cannot be executed on all three is a rules problem, and §57 treats `touch_viable: false` as a design smell. Designing to the narrowest input and developing on the widest are not in conflict |
+| **No third-party addons** | Decided 2026-08-31. The project builds what it needs. This reverses bones design goal 4 ("use components that already exist in the wild") for this repository: that goal served a reusable framework, and #276 ended the framework. Practical effect — game-flow UI, character creation, and the loadout editor are this project's work, not a plugin's |
+| **Character creation is a design pillar, not deferred UI** | Decided 2026-08-31. The player builds a character rather than picking from premade heroes. This is not a new direction: it is ruleset §2 (Classless Character Design) and §54 ("These are not classes. They are pools of abilities that can be combined freely"), and the data model already carries it — `MobaAbility.Discipline` enumerates all six §3 disciplines and every authored ability declares one. What is missing is the player-facing surface. With §54's "no character levels initially", creation is the *only* moment a player makes build choices, which makes it the build system rather than a pre-game formality |
 | Ruleset UI lives in `rules/ui/` | A ruleset whose HUD lives elsewhere is not portable. Signals in, nothing out; no rules logic in UI |
-| Game-flow UI is out of scope for the entire backlog **except host/join** | **Revised.** Settings, character creation, and a loadout editor stay out; a third-party addon is still intended for them. But host/join, main menu, and pause are how a player reaches a multiplayer session, and a first-class multiplayer feature cannot have its only entry point declared out of scope. #278 owns them |
+| Game-flow UI is in scope, built in-house | **Revised twice.** Originally "out of scope for the entire backlog … a third-party addon is intended for these." Host/join, main menu, and pause came in scope with #278 — a first-class multiplayer feature cannot have its only entry point declared out of scope. Character creation and the loadout editor came in scope as the design pillar above. Nothing here is deferred to a plugin: the project takes no third-party addons. Settings remains unscheduled, but it is deferred, not excluded |
 | Networking follows the request-and-resolve shape recorded by #276 | ~~Server-authoritative resolve with client request already exists in the framework~~ **The premise was false.** `Actor._resolve_attack()` is unreachable in the shipped game — both controllers return `null` from `get_attack_target()` when a `MobaCombatant` is present, and both production scenes have one. #276 deletes it, after recording the pattern in `docs/`. The shape is still right; it was never actually in service |
 
 ---
@@ -318,13 +320,14 @@ and Batch 5 — see **Execution order**.
 
 ## Deliberately not in this backlog
 
-- **Game-flow UI, except the parts multiplayer requires.** Settings, character creation,
-  and a loadout editor stay out; a third-party addon is intended for them, and loadouts are
-  authored as data files until then. **Host/join, main menu, and pause moved in scope** with
-  #278 — they are how a player reaches a session, and multiplayer is now a first-class
-  feature rather than a later extension.
+- **Settings UI.** Deferred, not excluded, and built in-house when it is scheduled —
+  the project takes no third-party addons. Host/join, main menu, and pause moved in scope
+  with #278; character creation and the loadout editor moved in scope as a design pillar.
+  Loadouts stay authored as `.tres` until the creation surface lands.
 - **Character progression.** No leveling, no ability learning, no discipline advancement.
-  §54 says the initial ruleset has no character levels.
+  §54 says the initial ruleset has no character levels. **This is not the same as character
+  creation**, which is in scope — §54's "no character levels" is precisely what makes
+  creation-time choice the whole build system rather than an opening move.
 - **Equipment and inventory.** `planned_features.md` §1.5 tracks it separately.
 - **Navigation and pathfinding.** `planned_features.md` §2.1. Dashes and AI chase are
   straight lines.
