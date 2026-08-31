@@ -123,9 +123,11 @@ Decisions already made by the planner. The implementer must not reinterpret
 or redesign these without escalating the task.
 -->
 
-- Use existing framework APIs under `addons/` rather than duplicating behavior.
+- Use the existing shared types rather than duplicating their behavior.
+  Until #276 lands they live in `addons/mikeys_game_bones/`, which is otherwise
+  protected — use it, do not modify it.
 - Preserve the Actor / ActorBody3D / Controller separation.
-- Do not add third-party dependencies.
+- Do not add third-party dependencies or addons.
 
 <!--
 - <task-specific architecture constraint>

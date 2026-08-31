@@ -2,7 +2,23 @@
 
 ## Project Context
 
-This repo (`mikeys_gamebones-rules-moba`) is a Godot 4 project whose exclusive purpose is developing a portable MOBA rules engine — the GDScript ruleset in `rules/` and the Python balance harness in `sim/`. The RPG game this project previously also contained has moved to a separate repository; do not add game-specific content here. Read and follow `AGENTS.md` before making repository changes.
+This repo (`mikeys_gamebones-rules-moba`) is a Godot 4 **MOBA**. Its combat ruleset lives
+as a self-contained module in `rules/`, with a Python balance harness in `sim/` and the
+playable game in `scenes/` and `scripts/`. Game content, scenes, and game-flow UI that serve
+this game are **in scope**.
+
+Multiplayer is a first-class feature, not a later extension (#277, #278). Three modes share
+one ruleset and one character — arena brawler, PvE tower defense, MOBA — see
+`docs/GAME_MODES.md`. Read and follow `AGENTS.md` before making repository changes.
+
+> **Revised 2026-08-31.** This paragraph previously read: *"a Godot 4 project whose exclusive
+> purpose is developing a portable MOBA rules engine … The RPG game this project previously
+> also contained has moved to a separate repository; **do not add game-specific content
+> here**."* That is no longer true and was actively blocking — this repository contains a
+> playable game, and #278, #280, #281, #282, #283 and #284 all require game content or
+> game-flow UI that the old wording forbade outright. Because this file declares itself the
+> contract of record for cloud sessions, the stale text would have overridden the corrected
+> `AGENTS.md`.
 
 ## Path-Scoped Instructions
 
@@ -113,29 +129,47 @@ rather than expanding the task to fix it.
 
 ## Project Architecture
 
-The project uses reusable framework functionality provided under `addons/`
-and game-specific implementation outside reusable framework code.
+The project is a MOBA in three layers: the self-contained combat ruleset in
+`rules/`, the game that drives it in `scripts/` and `scenes/`, and the Python
+balance harness in `sim/`. `rules/` has a one-way dependency arrow — the game
+depends on the rules, never the reverse.
+
+> **Revised 2026-08-30.** This previously read "the project uses reusable
+> framework functionality provided under `addons/` and game-specific
+> implementation outside reusable framework code." #276 deletes `addons/`
+> entirely; there is no framework layer to sit outside of.
 
 Before implementing a feature:
 
-1. Inspect the existing framework APIs and extension points.
-2. Prefer using or extending those APIs over duplicating framework behavior.
-3. Keep rules-engine behavior generic and portable, outside reusable addons,
-   unless the Issue explicitly changes the framework.
+1. Inspect the existing shared types and extension points in `scripts/`.
+2. Prefer using or extending those over duplicating their behavior.
+   **Until #276 lands these types physically live in `addons/mikeys_game_bones/`**, not
+   `scripts/` — #276 is what moves them. Treat the names, not the paths, as the contract.
+3. Keep rules-engine behavior inside `rules/`, with its one-way dependency
+   arrow intact, unless the Issue explicitly changes that boundary.
 
 Do not modify third-party addon code unless explicitly requested.
 
 ## Actor Architecture
 
-The existing 3D player implementation follows the framework's Actor model:
+The 3D player implementation separates identity, presentation, and intent:
 
-- `Actor` represents gameplay identity/state.
-- `ActorBody3D` represents the Actor in the 3D world.
+- `Actor` represents gameplay identity and the node anchor everything else
+  hangs off — `MobaCombatant`, `Controller`, `Body`.
+- `ActorBody3D` represents the Actor in the 3D world and owns the
+  `is_multiplayer_authority()` movement gate.
 - `Controller` supplies control intent.
-- Game-specific controllers and bodies extend the appropriate framework
-  classes rather than replacing them.
+- Game-specific controllers and bodies extend these rather than replacing them.
 
 Preserve this separation unless an Issue explicitly changes the architecture.
+
+> **Revised 2026-08-30.** These types previously lived in
+> `addons/mikeys_game_bones/` and were described as "the framework's Actor
+> model." #276 deletes `addons/` and absorbs the live parts into `scripts/`.
+> The separation above is what survived a genre change and is worth keeping;
+> the framework framing around it is not. `Actor`'s combat members
+> (`take_damage`, `die`, `try_attack`, `attack_cooldown`) are superseded by
+> `MobaCombatant` and are deleted by the same Issue — do not build on them.
 
 ## Scenes and Nodes
 
@@ -172,7 +206,7 @@ Perform character physics and movement through Godot's physics lifecycle.
 
 ## Signals and Coupling
 
-Prefer signals or existing framework extension points when communication does
+Prefer signals or existing extension points when communication does
 not require direct ownership.
 
 Avoid creating global dependencies or new autoload singletons merely to

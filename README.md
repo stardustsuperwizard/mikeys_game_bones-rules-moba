@@ -1,13 +1,27 @@
 # Mikey's Game Bones MOBA Rules
 
-`mikeys_gamebones-rules-moba` is a portable MOBA combat rules engine for Godot
-4. It contains a reusable GDScript rules module in [`rules/`](rules/) and a
-Python balance harness in [`sim/`](sim/). It is not a complete game, and it does
-not include game-specific scenes, content, assets, or world design.
+This repository is a MOBA built in Godot 4. Its combat ruleset lives as a
+self-contained module in [`rules/`](rules/), with a Python balance harness in
+[`sim/`](sim/) and the playable game in [`scenes/`](scenes/) and
+[`scripts/`](scripts/).
 
-The rules module is intended to be lifted wholesale into a Godot game project
-as a self-contained addon. It depends only on Godot 4 and the public
-`mikeys_game_bones` API.
+`rules/` keeps a strictly one-way dependency arrow — the game depends on the
+rules, never the reverse — enforced by `rules/tests/extraction_contract_test.gd`.
+That isolation exists so client and server can run identical simulation, which
+is what makes server-authoritative multiplayer tractable. Multiplayer is a
+first-class feature of this game, not a later extension: #277 makes the
+authority gate universal, #278 builds the session layer, and #47 resolves
+combat on top of both.
+
+Three modes share one ruleset and one character — arena brawler (base game),
+PvE tower defense, and MOBA. See [`docs/GAME_MODES.md`](docs/GAME_MODES.md).
+
+> **Revised 2026-08-30.** This was previously described as a portable rules
+> engine "intended to be lifted wholesale into a Godot game project as a
+> self-contained addon," depending on a `mikeys_game_bones` framework addon.
+> #276 removes `addons/` entirely: what the game used is absorbed into its own
+> source tree and the rest is deleted. This is a MOBA, not a framework host.
+> See [`docs/rules/README.md`](docs/rules/README.md).
 
 ## Included Systems
 
