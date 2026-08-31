@@ -15,12 +15,25 @@ is what makes server-authoritative multiplayer tractable.
 Single-player against bots stays fully supported; it is one session mode rather
 than the default that networking is bolted onto afterwards. See #277 and #278.
 
-**The player builds a character; the game ships no premade heroes.** This is the
-project's distinguishing design claim and it is ruleset §2 and §54, not a new
-direction — roles emerge from the equipped kit, and `MobaAbility.Discipline`
-already enumerates all six §3 disciplines. Because §54 specifies no character
-levels, creation-time choice *is* the build system. Treat the four loadouts in
-#44 as developer presets and test fixtures, never as the shipped selection.
+**The player has a character that is theirs, not one they borrow.** This is the
+project's distinguishing design claim. In a roster game you pick a champion, every
+copy of them is identical, and you give them back at the end. Here the character is
+named, dressed, statted, and kept — the reason to stand in the lobby is that the
+character standing there is yours.
+
+Presets, templates, and starting builds are **explicitly allowed and encouraged** as
+the front door: picking "Warrior" and then naming, dressing, and tuning it is how
+D&D character creation works. #44's four loadouts are good starting builds, not a
+roster to compete with. Roles still emerge from the equipped kit —
+`MobaAbility.Discipline` enumerates all six §3 disciplines — and §54's "no character
+levels" is what makes creation-time and between-match choice the build system.
+
+Stat optimisation is a **feature**, not a complexity cost to mitigate. Working out
+the best combination is the retention loop.
+
+Three modes share one ruleset and one character: arena (base), PvE tower defense
+(expansion), MOBA (expansion). See `docs/GAME_MODES.md` for what is shared, what each
+mode adds, and the sequencing.
 
 > **Revised 2026-08-30.** This section previously read: "a Godot 4 project whose
 > exclusive purpose is developing a portable MOBA rules engine… **It is not a
