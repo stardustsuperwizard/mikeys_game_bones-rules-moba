@@ -1,11 +1,10 @@
-# A reference/default implementation of Bones' Controller contract -- a
-# dumb aggro-range-and-chase decision loop, kept only to prove the contract
-# works end to end (move/attack/interact via the same Action/Rules/Authority
-# pipeline as PlayerController). Treat this exactly like a default network
-# transport adapter: swap it for a real AI by writing a new Controller
-# subclass (behavior tree, utility AI, GOAP, whatever the game needs) and
-# pointing an actor's "Controller" node at that script instead -- nothing
-# else in Bones needs to change.
+# This game's default AI controller, and the reference implementation of the
+# Controller contract -- a dumb aggro-range-and-chase decision loop that
+# proves the contract works end to end (move/attack/interact via the same
+# Action/Rules/Authority pipeline as PlayerController3D). Swap it for a
+# richer AI by writing a new Controller subclass (behavior tree, utility AI,
+# GOAP, whatever the game needs) and pointing an actor's "Controller" node at
+# that script instead -- nothing outside that subclass has to change.
 class_name SimpleAIController
 extends Controller
 
@@ -18,9 +17,11 @@ var target: Actor
 var home_position: Vector3
 var _returning_home := false
 
+
 func _ready() -> void:
 	actor.add_to_group("nonplayers")
 	home_position = actor.global_position
+
 
 func get_move_direction() -> Vector3:
 	_update_target()
@@ -40,6 +41,7 @@ func get_move_direction() -> Vector3:
 
 	return Vector3.ZERO
 
+
 func get_attack_target() -> Actor:
 	if target == null:
 		return null
@@ -48,6 +50,7 @@ func get_attack_target() -> Actor:
 		return target
 
 	return null
+
 
 func _update_target() -> void:
 	if target:
@@ -60,6 +63,7 @@ func _update_target() -> void:
 	if found:
 		target = found
 		_returning_home = false
+
 
 func _find_target() -> Actor:
 	var nearest: Actor = null

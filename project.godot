@@ -20,7 +20,7 @@ TestBootstrap="*res://tests/test_bootstrap.gd"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/mikeys_basic_ai/plugin.cfg", "res://addons/mikeys_game_bones/plugin.cfg")
+enabled=PackedStringArray("res://addons/mikeys_game_bones/plugin.cfg")
 
 [input]
 
