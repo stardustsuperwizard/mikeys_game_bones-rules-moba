@@ -29,13 +29,41 @@ const _COLUMN_VOCABULARIES = {
 	"interruptible_by_hard_cc": ["yes", "no", "per_cc", "breaks_channel", "displacement_only"],
 }
 
-var current_state: int = MobaState.IDLE
+## Current state. Settable so a MultiplayerSynchronizer applying a
+## server-authoritative value on a remote peer drives the same
+## state_changed emission a local try_enter()/tick() would have -- anything
+## listening cannot tell a replicated transition from a local one.
+##
+## The internal transition paths (try_enter(), tick(), revive()) assign
+## _current_state directly and emit state_changed themselves, because they
+## must finish updating `remaining` and `_airborne_cause` before observers
+## run. Routing them through this setter instead would emit twice per
+## transition, and would emit before those fields were consistent.
+var current_state: int:
+	get:
+		return _current_state
+	set(new_state):
+		if new_state == _current_state:
+			return
+		var from_state := _current_state
+		_current_state = new_state
+		time_in_state = 0.0
+		# A replicated state carries no duration of its own; the authority
+		# keeps sending the current state, so a remote peer must not locally
+		# expire it back to IDLE through tick().
+		remaining = 0.0
+		state_changed.emit(from_state, new_state)
+
 var time_in_state: float = 0.0
 var remaining: float = 0.0
 
 ## Set when the state table failed to load or validate. Detectable by callers
 ## and tests rather than only observable through push_error side effects.
 var load_failed: bool = false
+
+## Backing field for current_state. The transition paths write it directly so
+## they control when state_changed fires; see current_state above.
+var _current_state: int = MobaState.IDLE
 
 var _airborne_cause: int = MobaState.AirborneCause.JUMP
 var _state_table: Dictionary = {}
@@ -273,7 +301,7 @@ func try_enter(
 
 	# Perform the transition
 	var from_state = current_state
-	current_state = state
+	_current_state = state
 	time_in_state = 0.0
 	# Durationless states never retain a `remaining` timer, regardless of
 	# what duration was passed in - this is what makes them durationless.
@@ -303,7 +331,7 @@ func tick(delta: float) -> void:
 		if remaining <= 0.0:
 			# Return to IDLE
 			var from_state = current_state
-			current_state = MobaState.IDLE
+			_current_state = MobaState.IDLE
 			time_in_state = 0.0
 			remaining = 0.0
 			# Only emit a real transition. Durationless states (including
@@ -322,7 +350,7 @@ func revive() -> bool:
 		return false
 
 	var from_state = current_state
-	current_state = MobaState.IDLE
+	_current_state = MobaState.IDLE
 	time_in_state = 0.0
 	remaining = 0.0
 	state_changed.emit(from_state, MobaState.IDLE)

@@ -90,7 +90,22 @@ func _spawn_actor(data: Dictionary) -> Actor:
 	actor.color = data["color"]
 	(actor.get_node("Body") as Node3D).transform = data["transform"]
 	actor.owner_id = data["authority_id"]
+
+	# Set multiplayer authority for the actor and its movement body
+	# (connecting peer stays authoritative for movement).
 	actor.set_multiplayer_authority(data["authority_id"])
+
+	# Combat state is always server-authoritative (peer 1), regardless of which
+	# peer owns the actor. This is required so clients can never broadcast their
+	# own claimed health to other peers.
+	var combatant := actor.get_node_or_null("MobaCombatant") as Node
+	if combatant != null:
+		combatant.set_multiplayer_authority(1)
+
+	var state_machine := actor.get_node_or_null("MobaStateMachine") as Node
+	if state_machine != null:
+		state_machine.set_multiplayer_authority(1)
+
 	return actor
 
 

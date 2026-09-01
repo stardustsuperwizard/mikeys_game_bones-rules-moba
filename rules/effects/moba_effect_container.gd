@@ -242,3 +242,63 @@ func _make_entry(
 
 func _key(source_ability_id: StringName, stat: StringName) -> Array:
 	return [source_ability_id, stat]
+
+
+## Serialize the active effects as an Array of plain Dictionaries, for
+## replication. Each entry carries source_ability_id, stat, magnitude,
+## is_percentage, remaining, stacks, max_stacks and is_debuff.
+##
+## Plain data only, so the value survives a MultiplayerSynchronizer round
+## trip without carrying a _Entry object reference across the wire.
+func get_snapshot() -> Array:
+	var result: Array = []
+	for key in _entries:
+		var entry: _Entry = _entries[key]
+		var serialized := {
+			"source_ability_id": entry.source_ability_id,
+			"stat": entry.stat,
+			"magnitude": entry.magnitude,
+			"is_percentage": entry.is_percentage,
+			"remaining": entry.remaining,
+			"stacks": entry.stacks,
+			"max_stacks": entry.max_stacks,
+			"is_debuff": entry.is_debuff,
+		}
+		result.append(serialized)
+	return result
+
+
+## Set active effects from a snapshot array.
+## Clears all existing effects and recreates them from the snapshot.
+## Emits effect_applied for each entry.
+func set_snapshot(snapshot: Array) -> void:
+	clear_all()
+	for entry_dict in snapshot:
+		if entry_dict is Dictionary:
+			var source_id = entry_dict.get("source_ability_id", &"")
+			var stat = entry_dict.get("stat", &"")
+			var magnitude = entry_dict.get("magnitude", 0.0)
+			var is_percentage = entry_dict.get("is_percentage", false)
+			var remaining = entry_dict.get("remaining", 0.0)
+			var stacks = entry_dict.get("stacks", 1)
+			var max_stacks = entry_dict.get("max_stacks", 1)
+			var is_debuff = entry_dict.get("is_debuff", false)
+			var duration = remaining
+
+			# Create a modifier to apply
+			var modifier := MobaStatModifier.new()
+			modifier.stat = stat
+			modifier.amount = magnitude
+			modifier.is_percentage = is_percentage
+			modifier.duration = duration
+			modifier.stacking = MobaStatModifier.Stacking.REFRESH
+			modifier.max_stacks = max_stacks
+
+			# Create the entry directly
+			var key := _key(source_id, stat)
+			var new_entry := _make_entry(modifier, source_id, stat, is_debuff)
+			new_entry.stacks = stacks
+			new_entry.remaining = remaining
+			new_entry.max_stacks = max_stacks
+			_entries[key] = new_entry
+			effect_applied.emit(source_id, stat)

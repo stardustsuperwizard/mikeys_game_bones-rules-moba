@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://scripts/actor.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/actor_body_3d.gd" id="2"]
@@ -23,6 +23,31 @@ size = Vector3(0.25, 0.25, 0.4)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1"]
 albedo_color = Color(1, 0.2, 0.2, 1)
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_body"]
+properties/0/path = NodePath("Body:transform")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_combat"]
+properties/0/path = NodePath("MobaCombatant:current_health")
+properties/0/spawn = true
+properties/0/replication_mode = 2
+properties/1/path = NodePath("MobaCombatant:current_resource")
+properties/1/spawn = true
+properties/1/replication_mode = 2
+properties/2/path = NodePath("MobaCombatant:active_shields_snapshot")
+properties/2/spawn = true
+properties/2/replication_mode = 2
+properties/3/path = NodePath("MobaCombatant:active_effects_snapshot")
+properties/3/spawn = true
+properties/3/replication_mode = 2
+properties/4/path = NodePath("MobaCombatant:active_cooldowns_snapshot")
+properties/4/spawn = true
+properties/4/replication_mode = 2
+properties/5/path = NodePath("MobaStateMachine:current_state")
+properties/5/spawn = true
+properties/5/replication_mode = 2
 
 [node name="Enemy" type="Node"]
 script = ExtResource("1")
@@ -54,8 +79,25 @@ script = ExtResource("5")
 loadout = ExtResource("6")
 respawn_policy = ExtResource("9")
 
+; Server-authoritative combat state. Deliberately a child of MobaCombatant:
+; WorldManager._spawn_actor() sets that node's authority to 1 recursively, so
+; this synchronizer inherits it. Parented to the Actor root instead, the
+; earlier recursive set_multiplayer_authority(authority_id) would leave it
+; owned by the connecting peer and a client could broadcast its own health.
+; root_path reaches back up to the Actor so one config covers MobaCombatant
+; and its sibling MobaStateMachine.
+[node name="CombatStateSynchronizer" type="MultiplayerSynchronizer" parent="MobaCombatant"]
+root_path = NodePath("../..")
+replication_config = SubResource("SceneReplicationConfig_combat")
+
 [node name="MobaStateMachine" type="Node" parent="."]
 script = ExtResource("7")
 
 [node name="MobaAbilityCaster" type="Node" parent="."]
 script = ExtResource("8")
+
+; Transform: continuous, owning-peer-authoritative. Under the Actor root, so
+; the recursive set_multiplayer_authority(authority_id) leaves it owned by
+; whichever peer owns this actor -- today's movement-authority model.
+[node name="BodyTransformSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_body")

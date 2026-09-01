@@ -219,3 +219,53 @@ func clear_all_cooldowns() -> void:
 		state.timer_remaining = 0.0
 		state.timer_duration = 0.0
 		state.timer_started_by_last_start = false
+
+
+## Serialize per-ability cooldown state as an Array of plain Dictionaries, for
+## replication. Each entry carries ability_id, timer_remaining and
+## available_charges.
+##
+## Plain data only, so the value survives a MultiplayerSynchronizer round trip
+## without carrying an _AbilityState object reference across the wire.
+func get_snapshot() -> Array:
+	var result: Array = []
+	for ability_id in _ability_states:
+		var state: _AbilityState = _ability_states[ability_id]
+		var serialized := {
+			"ability_id": ability_id,
+			"timer_remaining": state.timer_remaining,
+			"available_charges": state.available_charges,
+		}
+		result.append(serialized)
+	return result
+
+
+## Rebuild cooldown state from a snapshot produced by get_snapshot().
+##
+## `abilities` supplies max_charges, which the snapshot deliberately omits: it
+## comes from the identically-loaded ability definition on every peer, so
+## replicating it would create a second source of truth for a static value.
+## An entry naming an ability this peer does not know is skipped rather than
+## guessed at.
+func set_snapshot(snapshot: Array, abilities: Dictionary) -> void:
+	_ability_states.clear()
+	for entry in snapshot:
+		if not (entry is Dictionary):
+			continue
+
+		var ability_id = entry.get("ability_id", &"")
+		if not (ability_id in abilities):
+			continue
+
+		var ability = abilities[ability_id]
+		var timer_remaining := float(entry.get("timer_remaining", 0.0))
+		var state: _AbilityState = _AbilityState.new()
+		state.max_charges = ability.charges if ability else 1
+		state.available_charges = int(entry.get("available_charges", 0))
+		state.timer_remaining = timer_remaining
+		# The snapshot carries elapsed time, not the ability's full cooldown.
+		# timer_duration is only used for progress display, so seeding it from
+		# the remaining time keeps a restored cooldown self-consistent.
+		state.timer_duration = timer_remaining
+		state.timer_started_by_last_start = timer_remaining > 0.0
+		_ability_states[ability_id] = state

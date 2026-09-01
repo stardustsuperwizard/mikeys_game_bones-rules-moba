@@ -25,6 +25,7 @@ var _expected_suites: Array[String] = [
 	"Command Mutator Contract Test",
 	"Ability Data Test",
 	"Combatant Test",
+	"Replication Properties Test",
 	"Effect Container Test",
 	"Resource Test",
 	"Formulas Test",
@@ -87,6 +88,7 @@ func _ready() -> void:
 	_check("Command Mutator Contract Test", CommandMutatorContractTest.run())
 	_check("Ability Data Test", AbilityDataTest.run())
 	_check("Combatant Test", CombatantTest.run())
+	_check("Replication Properties Test", ReplicationPropertiesTest.run())
 	_check("Effect Container Test", EffectContainerTest.run())
 	_check("Resource Test", ResourceTest.run())
 	_check("Formulas Test", FormulasTest.run())

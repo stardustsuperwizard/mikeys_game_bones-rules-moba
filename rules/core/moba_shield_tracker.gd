@@ -87,6 +87,45 @@ func consume(incoming_damage: float) -> float:
 	return remaining_damage
 
 
+## Serialize the active shield pool as an Array of plain Dictionaries.
+##
+## Plain data only (floats and StringNames), so the value survives a
+## MultiplayerSynchronizer round trip without carrying a MobaShield object
+## reference across the wire.
+func get_snapshot() -> Array:
+	var result: Array = []
+	for shield in _active_shields:
+		var entry := {
+			"amount": shield.amount,
+			"source": shield.source,
+			"remaining": shield.remaining,
+		}
+		result.append(entry)
+	return result
+
+
+## Rebuild the active shield pool from a snapshot produced by get_snapshot().
+##
+## Notifies shield_changed exactly once, after the whole pool is in place --
+## a per-entry notification would let observers read a half-applied pool and
+## would emit a different number of times than the local path did.
+func set_snapshot(snapshot: Array) -> void:
+	_active_shields.clear()
+	for entry in snapshot:
+		if entry is Dictionary:
+			# MobaShield's third constructor argument becomes `remaining`
+			# directly, so passing the snapshot's already-elapsed remaining
+			# time restores the shield mid-life rather than at full duration.
+			_active_shields.append(
+				MobaShield.new(
+					float(entry.get("amount", 0.0)),
+					StringName(entry.get("source", &"")),
+					float(entry.get("remaining", 0.0))
+				)
+			)
+	_combatant.notify_shield_changed()
+
+
 ## Advance shield durations and remove expired shields.
 ## Notifies shield_changed when any shields expire during this tick.
 func tick(delta: float) -> void:
