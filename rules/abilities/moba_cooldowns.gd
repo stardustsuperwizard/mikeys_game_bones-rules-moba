@@ -222,8 +222,12 @@ func clear_all_cooldowns() -> void:
 
 
 ## Serialize per-ability cooldown state as an Array of plain Dictionaries, for
-## replication. Each entry carries ability_id, timer_remaining and
-## available_charges.
+## replication. Each entry carries ability_id, timer_remaining, timer_duration
+## and available_charges.
+##
+## timer_duration travels alongside timer_remaining because the two are only
+## meaningful together: an ability slot renders the sweep as remaining over
+## duration, so a peer given only the remaining time cannot draw it.
 ##
 ## Plain data only, so the value survives a MultiplayerSynchronizer round trip
 ## without carrying an _AbilityState object reference across the wire.
@@ -234,6 +238,7 @@ func get_snapshot() -> Array:
 		var serialized := {
 			"ability_id": ability_id,
 			"timer_remaining": state.timer_remaining,
+			"timer_duration": state.timer_duration,
 			"available_charges": state.available_charges,
 		}
 		result.append(serialized)
@@ -263,9 +268,9 @@ func set_snapshot(snapshot: Array, abilities: Dictionary) -> void:
 		state.max_charges = ability.charges if ability else 1
 		state.available_charges = int(entry.get("available_charges", 0))
 		state.timer_remaining = timer_remaining
-		# The snapshot carries elapsed time, not the ability's full cooldown.
-		# timer_duration is only used for progress display, so seeding it from
-		# the remaining time keeps a restored cooldown self-consistent.
-		state.timer_duration = timer_remaining
+		# A snapshot without timer_duration falls back to timer_remaining, which
+		# reads as a sweep frozen at full. Real snapshots carry it, so a remote
+		# slot shows the same progress fraction the authority does.
+		state.timer_duration = float(entry.get("timer_duration", timer_remaining))
 		state.timer_started_by_last_start = timer_remaining > 0.0
 		_ability_states[ability_id] = state

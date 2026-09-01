@@ -259,6 +259,7 @@ func get_snapshot() -> Array:
 			"stat": entry.stat,
 			"magnitude": entry.magnitude,
 			"is_percentage": entry.is_percentage,
+			"duration": entry.duration,
 			"remaining": entry.remaining,
 			"stacks": entry.stacks,
 			"max_stacks": entry.max_stacks,
@@ -268,37 +269,89 @@ func get_snapshot() -> Array:
 	return result
 
 
-## Set active effects from a snapshot array.
-## Clears all existing effects and recreates them from the snapshot.
-## Emits effect_applied for each entry.
+## Reconcile the active effects against a snapshot from get_snapshot().
+##
+## Reconciles rather than clearing and re-applying, because the snapshot
+## carries `remaining` -- which decreases every tick on the authority, so this
+## on-change property re-arrives every frame while anything is active. A
+## clear-and-rebuild would emit effect_expired + effect_applied for every entry
+## every frame, and MobaStatusTray frees and recreates an icon on that pair, so
+## a steady buff would be destroyed and rebuilt ~60x/second with its ordering
+## re-derived each time. Locally a steady buff emits nothing at all, and a
+## replicated set must reproduce the local emission.
+##
+## So: effect_applied only for genuinely new identities, effect_expired only
+## for genuinely removed ones, effect_stacks_changed on a stack delta, and
+## effect_refreshed when the authority actually refreshed or restated the
+## magnitude. Silent decay of `remaining` matches tick(), which does not signal
+## per frame either. Every signal carrying a stat-affecting change still fires,
+## so MobaCombatant's cached stat values are never left stale.
 func set_snapshot(snapshot: Array) -> void:
-	clear_all()
-	for entry_dict in snapshot:
-		if entry_dict is Dictionary:
-			var source_id = entry_dict.get("source_ability_id", &"")
-			var stat = entry_dict.get("stat", &"")
-			var magnitude = entry_dict.get("magnitude", 0.0)
-			var is_percentage = entry_dict.get("is_percentage", false)
-			var remaining = entry_dict.get("remaining", 0.0)
-			var stacks = entry_dict.get("stacks", 1)
-			var max_stacks = entry_dict.get("max_stacks", 1)
-			var is_debuff = entry_dict.get("is_debuff", false)
-			var duration = remaining
+	var incoming: Dictionary = {}
+	for raw in snapshot:
+		if raw is Dictionary:
+			var raw_source := StringName(raw.get("source_ability_id", &""))
+			var raw_stat := StringName(raw.get("stat", &""))
+			incoming[_key(raw_source, raw_stat)] = raw
 
-			# Create a modifier to apply
-			var modifier := MobaStatModifier.new()
-			modifier.stat = stat
-			modifier.amount = magnitude
-			modifier.is_percentage = is_percentage
-			modifier.duration = duration
-			modifier.stacking = MobaStatModifier.Stacking.REFRESH
-			modifier.max_stacks = max_stacks
+	# Removals first, so an identity that both left and returned within one
+	# snapshot is never reported as applied before it is reported as expired.
+	for key in _entries.keys():
+		if not incoming.has(key):
+			var gone: _Entry = _entries[key]
+			_entries.erase(key)
+			effect_expired.emit(gone.source_ability_id, gone.stat)
 
-			# Create the entry directly
-			var key := _key(source_id, stat)
-			var new_entry := _make_entry(modifier, source_id, stat, is_debuff)
-			new_entry.stacks = stacks
-			new_entry.remaining = remaining
-			new_entry.max_stacks = max_stacks
-			_entries[key] = new_entry
-			effect_applied.emit(source_id, stat)
+	for key in incoming:
+		var raw: Dictionary = incoming[key]
+		var source_id := StringName(raw.get("source_ability_id", &""))
+		var stat := StringName(raw.get("stat", &""))
+		var magnitude := float(raw.get("magnitude", 0.0))
+		var is_percentage := bool(raw.get("is_percentage", false))
+		var remaining := float(raw.get("remaining", 0.0))
+		var stacks := int(raw.get("stacks", 1))
+		var max_stacks := int(raw.get("max_stacks", 1))
+		var is_debuff := bool(raw.get("is_debuff", false))
+		# A snapshot without duration falls back to remaining, so the entry is
+		# self-consistent rather than reporting a zero duration.
+		var duration := float(raw.get("duration", remaining))
+
+		if _entries.has(key):
+			var entry: _Entry = _entries[key]
+			var stacks_changed := entry.stacks != stacks
+			# A refresh is the only way remaining goes up. The epsilon keeps
+			# float jitter in a decaying timer from reading as one.
+			var refreshed := (
+				remaining > entry.remaining + 0.0001
+				or not is_equal_approx(entry.magnitude, magnitude)
+				or entry.is_percentage != is_percentage
+			)
+
+			entry.magnitude = magnitude
+			entry.is_percentage = is_percentage
+			entry.duration = duration
+			entry.remaining = remaining
+			entry.stacks = stacks
+			entry.max_stacks = max_stacks
+			entry.is_debuff = is_debuff
+
+			if stacks_changed:
+				effect_stacks_changed.emit(source_id, stat, stacks)
+			elif refreshed:
+				effect_refreshed.emit(source_id, stat)
+			continue
+
+		var modifier := MobaStatModifier.new()
+		modifier.stat = stat
+		modifier.amount = magnitude
+		modifier.is_percentage = is_percentage
+		modifier.duration = duration
+		modifier.stacking = MobaStatModifier.Stacking.REFRESH
+		modifier.max_stacks = max_stacks
+
+		var new_entry := _make_entry(modifier, source_id, stat, is_debuff)
+		new_entry.stacks = stacks
+		new_entry.remaining = remaining
+		new_entry.max_stacks = max_stacks
+		_entries[key] = new_entry
+		effect_applied.emit(source_id, stat)

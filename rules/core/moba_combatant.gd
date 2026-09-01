@@ -65,10 +65,18 @@ const _MINIMUM_ATTACK_SPEED := 0.01
 @export var respawn_policy: MobaRespawnPolicy = null
 
 # Property accessors for current_resource, maximum_resource, current_health, and maximum_health
+#
+# Both setters are the replication seam, and a MultiplayerSynchronizer applies
+# spawn-state properties during add_child() -- inside ENTER_TREE, before this
+# node's _ready() has run. So each one seeds the runtime stat block on demand
+# rather than assuming _ready() got there first, and records that it supplied a
+# value so _ready() does not overwrite it with a full-health default.
 var current_resource: float:
 	get:
 		return _current_resource
 	set(value):
+		_ensure_runtime_stat_block()
+		_resource_externally_seeded = true
 		_current_resource = value
 		resource_changed.emit(_current_resource, get_stat(MobaStatBlock.RESOURCE))
 
@@ -80,6 +88,8 @@ var current_health: float:
 	get:
 		return _current_health
 	set(value):
+		_ensure_runtime_stat_block()
+		_health_externally_seeded = true
 		_current_health = value
 		_update_health()
 
@@ -117,6 +127,18 @@ var active_cooldowns_snapshot: Array:
 var _runtime_stat_block: MobaStatBlock
 var _current_health: float = 0.0
 var _current_resource: float = 0.0
+## Set when the public setter supplied a value, so _ready() leaves it alone
+## instead of resetting to the stat block's maximum. Without these, a peer
+## joining a session mid-fight would be handed the server's real health and
+## then immediately show full health instead.
+##
+## Any write through the setter trips these, not only a replicated one -- the
+## setter cannot tell the two apart, and does not need to. Gameplay writes go
+## to the backing fields and all happen after _ready(), so the only assignment
+## these actually change the outcome of is one that beat _ready() to it, which
+## in practice means replicated spawn state.
+var _health_externally_seeded: bool = false
+var _resource_externally_seeded: bool = false
 var _cooldowns: MobaCooldowns = MobaCooldowns.new()
 var _abilities: Dictionary = {}  # Maps ability_id (StringName) to MobaAbility
 var _effect_container: MobaEffectContainer = null
@@ -158,10 +180,16 @@ var _basic_attack_cycle: MobaBasicAttackCycle = null
 
 
 func _ready() -> void:
-	# Duplicate the stat block before any mutation
-	_runtime_stat_block = stat_block.duplicate()
-	_current_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
-	_current_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
+	# Duplicate the stat block before any mutation. Replicated spawn state may
+	# already have forced this on a remote peer, in which case keep that copy:
+	# re-duplicating would discard the modifiers it was seeded alongside.
+	_ensure_runtime_stat_block()
+
+	# Only default to full when nothing replicated a real value first.
+	if not _health_externally_seeded:
+		_current_health = _runtime_stat_block.get_stat_value(MobaStatBlock.HEALTH)
+	if not _resource_externally_seeded:
+		_current_resource = _runtime_stat_block.get_stat_value(MobaStatBlock.RESOURCE)
 
 	# Defer seeding the parent Actor's character_sheet because children ready before parents,
 	# and the Actor's _ready() hasn't yet duplicated its character_sheet.
@@ -207,12 +235,44 @@ func get_effect_container() -> MobaEffectContainer:
 		_effect_container.name = _EFFECT_CONTAINER_NAME
 		add_child(_effect_container)
 
+		# add_child() refuses while this node is itself still being set up --
+		# which is exactly when a MultiplayerSynchronizer applies spawn state,
+		# so on a remote peer the first call lands mid-ENTER_TREE. Left as-is
+		# the container would stay a cached, never-parented orphan for the
+		# actor's whole life: leaked, and outside the subtree whose authority
+		# it is supposed to inherit. Retry once the parent is settled.
+		if _effect_container.get_parent() == null:
+			_attach_effect_container.call_deferred()
+
 	# Any container mutation makes the cached per-stat values stale.
 	_effect_container.effect_applied.connect(_on_effect_container_changed)
 	_effect_container.effect_refreshed.connect(_on_effect_container_changed)
 	_effect_container.effect_stacks_changed.connect(_on_effect_stacks_changed)
 	_effect_container.effect_expired.connect(_on_effect_container_changed)
 	return _effect_container
+
+
+## Duplicate the stat block on first need rather than only in _ready().
+##
+## Replicated spawn state and standalone test fixtures both reach the stat
+## accessors before _ready() runs; without this they would fault on a null
+## _runtime_stat_block.
+func _ensure_runtime_stat_block() -> void:
+	if _runtime_stat_block == null and stat_block != null:
+		_runtime_stat_block = stat_block.duplicate()
+
+
+## Deferred retry for the effect container's add_child(). Re-checks rather
+## than assuming: an intervening call may already have parented it.
+func _attach_effect_container() -> void:
+	if _effect_container == null or _effect_container.get_parent() != null:
+		return
+	add_child(_effect_container)
+	# A node added after the spawn-time recursive set_multiplayer_authority()
+	# does not pick that authority up on its own, so mirror it explicitly --
+	# this container holds replicated combat state and must not end up owned
+	# by the connecting peer.
+	_effect_container.set_multiplayer_authority(get_multiplayer_authority())
 
 
 func _on_effect_container_changed(_source_ability_id: StringName, _stat: StringName) -> void:

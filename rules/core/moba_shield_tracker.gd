@@ -106,10 +106,17 @@ func get_snapshot() -> Array:
 
 ## Rebuild the active shield pool from a snapshot produced by get_snapshot().
 ##
-## Notifies shield_changed exactly once, after the whole pool is in place --
-## a per-entry notification would let observers read a half-applied pool and
-## would emit a different number of times than the local path did.
+## Notifies shield_changed at most once, and only when the pool's observable
+## state actually changed. The snapshot carries each shield's `remaining`,
+## which decreases every tick on the authority, so this on-change property
+## re-arrives every frame while any shield is up; notifying unconditionally
+## would fire shield_changed ~60x/second for a steady shield that locally
+## emits nothing at all. Absorption capacity is what observers read, so that
+## -- not the decaying timer -- decides whether to notify.
 func set_snapshot(snapshot: Array) -> void:
+	var previous_total := total()
+	var previous_count := _active_shields.size()
+
 	_active_shields.clear()
 	for entry in snapshot:
 		if entry is Dictionary:
@@ -123,7 +130,9 @@ func set_snapshot(snapshot: Array) -> void:
 					float(entry.get("remaining", 0.0))
 				)
 			)
-	_combatant.notify_shield_changed()
+
+	if _active_shields.size() != previous_count or not is_equal_approx(total(), previous_total):
+		_combatant.notify_shield_changed()
 
 
 ## Advance shield durations and remove expired shields.
