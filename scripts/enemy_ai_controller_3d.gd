@@ -42,6 +42,12 @@ func _physics_process(delta: float) -> void:
 		# chase has closed to attack_range. basic_attack() returns false while the
 		# cycle is still winding up or recovering, so the pending target is held
 		# across those frames and only dropped once the swing is accepted.
+		#
+		# An AI actor is owner_id 0 and only ever ticks on the server, so
+		# try_basic_attack() always takes its local branch here and the
+		# ActionResult is always real -- the null case cannot arise for a bot.
+		# It is still handled rather than assumed, so that the latch degrades to
+		# "drop the target" instead of latching forever if that ever changes.
 		if not _basic_attack_pending:
 			return
 
@@ -50,13 +56,16 @@ func _physics_process(delta: float) -> void:
 			_clear_pending_attack()
 			return
 
-		var action := MobaBasicAttackAction.new(actor, _pending_attack_target)
-		var result := ActionRunner.run(action)
+		var result := actor.try_basic_attack(_pending_attack_target)
 		# FAILURE_NO_TARGET_COMBATANT means the target runs on the framework attack
 		# path, not the ruleset -- nothing for basic_attack() to resolve against, so
 		# don't latch it. Every other failure is a swing that may still land next
 		# frame, so the pending target is held across those as before.
-		if result.success or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT:
+		if (
+			result == null
+			or result.success
+			or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT
+		):
 			_clear_pending_attack()
 
 

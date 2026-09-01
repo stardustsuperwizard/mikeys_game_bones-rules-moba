@@ -106,32 +106,64 @@ func _ready() -> void:
 # attack fires automatically once the player closes the distance, instead of
 # one press both ordering and immediately attacking.
 #
-# Only ticks for the actor this controller has multiplayer authority over. A
-# missing Body fails the gate closed, matching every other _body() caller here:
-# an authority gate that falls through when it cannot identify the owner is not
-# a gate.
+# Input and the basic-attack order only run for the actor this controller has
+# multiplayer authority over. A missing Body fails that gate closed, matching
+# every other _body() caller here: an authority gate that falls through when it
+# cannot identify the owner is not a gate.
+#
+# MobaCombatant.tick() sits deliberately outside that gate, on the server. Since
+# #320 the server is the sole executor of a client's activation and the sole
+# holder of the cooldown/resource ledger it is refused against -- and a ledger
+# that never advances is not enforcement, it is a permanent denial. Gated on
+# body authority alone, the server would never tick a connected client's actor
+# at all: that client's cooldowns, resource regeneration, cast and channel
+# timers and respawn countdown would all freeze at the first cast, and every
+# later request would be refused forever.
+#
+# So the server (and an offline session, which is the server) ticks every actor
+# it holds, exactly as docs/request_resolve_pattern.md describes for the
+# _attack_timer it recorded: "the server needs its copy of a peer-owned actor's
+# cooldown to keep decaying, since the server is what actually enforces it, even
+# though it never simulates that actor's movement." A client still ticks only
+# its own actor, which is the same local copy it ticked before #320 -- unchanged
+# here, and corrected by replication either way.
 func _physics_process(delta: float) -> void:
 	var body := _body()
-	if body == null or not body.is_multiplayer_authority():
-		return
+	var has_body_authority := body != null and body.is_multiplayer_authority()
+	var is_server := not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
 
 	var combatant := _combatant()
-	if combatant:
+	if combatant and (is_server or has_body_authority):
 		combatant.tick(delta)
 
+	if not has_body_authority:
+		return
+
+	if combatant:
 		# Fire the basic attack as soon as the player reaches the order target.
 		# _basic_attack_pending is set by get_attack_target() when the player
 		# enters range; _pending_attack_target survives the cancel_order() call
 		# that clears _attack_target, so the attack cycle has something to run
 		# against. Cleared here after the action succeeds.
+		#
+		# The swing now goes through Actor.try_basic_attack(), which resolves it
+		# here on the offline/server path and forwards it to the server otherwise.
+		# A null result means it was forwarded: a client cannot see the outcome,
+		# so the pending target is dropped rather than re-sent every frame, and
+		# the swing's real effect arrives through replication. On the local path
+		# the ActionResult is still in hand and the latch behaves exactly as it
+		# did before #320.
 		if _basic_attack_pending and is_instance_valid(_pending_attack_target):
-			var action := MobaBasicAttackAction.new(actor, _pending_attack_target)
-			var result := ActionRunner.run(action)
+			var result := actor.try_basic_attack(_pending_attack_target)
 			# FAILURE_NO_TARGET_COMBATANT is not a swing that might land next frame:
 			# the target has no MobaCombatant at all, so clear pending rather than
 			# leaving it set indefinitely. Every other failure (authority denial, the
 			# cycle still winding up) holds the target across frames as before.
-			if result.success or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT:
+			if (
+				result == null
+				or result.success
+				or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT
+			):
 				_basic_attack_pending = false
 				_pending_attack_target = null
 		elif _basic_attack_pending:
@@ -485,18 +517,22 @@ func _combatant() -> MobaCombatant:
 	return actor.get_node_or_null("MobaCombatant") as MobaCombatant
 
 
-# Activate ability slot `index` (1-4) through the actor's MobaAbilityCaster.
+# Activate ability slot `index` (1-4) through the actor's request/resolve routing.
 #
 # An empty slot stays silent -- pressing 3 with nothing bound to it is not an
 # error worth printing every keypress. Every other failure is reported, because
 # a targeted ability that silently declines to fire is indistinguishable in play
 # from an input that never arrived.
+#
+# try_activate_slot() returns null when the ask went to the server instead of
+# resolving here. There is no failure to report in that case -- the outcome is
+# the server's to decide, and it reaches this peer as replicated state -- so the
+# diagnostic below stays on the offline/server path where the result is real.
 func _activate_slot(index: int) -> void:
-	var caster := actor.get_node_or_null("MobaAbilityCaster") as MobaAbilityCaster
-	if not caster:
-		return
 	var context := MobaCastContext.new(actor, _ability_target())
-	var result := caster.activate_slot(index, context)
+	var result := actor.try_activate_slot(index, context)
+	if result == null:
+		return
 	if result.success or result.reason == MobaAbilityAction.FAILURE_EMPTY_SLOT:
 		return
 	# ActionRunner returns an empty reason when Authority refuses the action
