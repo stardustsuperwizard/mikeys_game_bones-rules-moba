@@ -17,7 +17,7 @@ func _ready() -> void:
 		return
 
 	for spawn_point in spawn_points:
-		spawn(spawn_point)
+		spawn(spawn_point, spawn_point.authority_id)
 
 
 # Assumes WorldManager stays attached to the room's own root node (identity
@@ -47,5 +47,6 @@ func _spawn_actor(data: Dictionary) -> Actor:
 	actor.character_sheet = load(data["character_sheet_path"]) as CharacterSheet
 	actor.color = data["color"]
 	(actor.get_node("Body") as Node3D).transform = data["transform"]
+	actor.owner_id = data["authority_id"]
 	actor.set_multiplayer_authority(data["authority_id"])
 	return actor
