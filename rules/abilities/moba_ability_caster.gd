@@ -59,7 +59,7 @@ func activate_slot(index: int, context: MobaCastContext) -> ActionResult:
 
 ## Cancel an in-progress cast or break an in-progress channel for the given caster.
 ## If the caster has no in-progress cast or channel, this is a harmless no-op
-## and returns without error.
+## and returns a successful ActionResult.
 ##
 ## The caster can be identified by:
 ## - An Actor, from which the MobaCombatant child is discovered
@@ -67,24 +67,25 @@ func activate_slot(index: int, context: MobaCastContext) -> ActionResult:
 ##
 ## Args:
 ##     caster: An Actor or MobaCastContext identifying the caster
-func cancel(caster: Variant) -> void:
-	var combatant: MobaCombatant = null
+##
+## Returns:
+##     ActionResult indicating success or failure with a specific reason.
+##     Success indicates the cancel/break was requested (or no-opped safely).
+##     Failure (invalid_context) indicates the caster could not be resolved.
+func cancel(caster: Variant) -> ActionResult:
+	var resolved_actor: Actor = null
 
-	# Handle both Actor and MobaCastContext inputs
+	# Resolve an Actor from the input, exactly as activate() does
 	if caster is Actor:
-		combatant = caster.get_node_or_null("MobaCombatant") as MobaCombatant
+		resolved_actor = caster as Actor
 	elif caster is MobaCastContext:
 		var context := caster as MobaCastContext
-		if context.caster != null:
-			combatant = context.caster.get_node_or_null("MobaCombatant") as MobaCombatant
+		resolved_actor = context.caster
 
-	if combatant == null:
-		return
+	# If no Actor could be resolved, return failure
+	if resolved_actor == null:
+		return ActionResult.new(false, MobaAbilityAction.FAILURE_INVALID_CONTEXT)
 
-	# Prioritize breaking a channel over cancelling a cast (though both should never
-	# be in progress simultaneously). If a channel is active, break it; otherwise
-	# cancel any in-progress cast.
-	if combatant.is_channeling():
-		combatant.break_channel()
-	else:
-		combatant.cancel_cast()
+	# Construct the action and route through ActionRunner
+	var action := MobaCastCancelAction.new(resolved_actor)
+	return ActionRunner.run(action)

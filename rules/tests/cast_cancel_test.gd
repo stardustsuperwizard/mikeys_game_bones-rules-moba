@@ -14,6 +14,7 @@ const MobaAbility = preload("res://rules/abilities/moba_ability.gd")
 const MobaAbilityCaster = preload("res://rules/abilities/moba_ability_caster.gd")
 const MobaCastContext = preload("res://rules/abilities/moba_cast_context.gd")
 const MobaAbilityAction = preload("res://rules/abilities/moba_ability_action.gd")
+const MobaCastCancelAction = preload("res://rules/abilities/moba_cast_cancel_action.gd")
 const MobaAbilityLibrary = preload("res://rules/abilities/moba_ability_library.gd")
 const MobaCombatant = preload("res://rules/core/moba_combatant.gd")
 const MobaStatBlock = preload("res://rules/core/moba_stat_block.gd")
@@ -50,6 +51,7 @@ static func run() -> bool:
 	all_violations.append_array(_test_resolution_wins_ties())
 	all_violations.append_array(_test_cast_target_freed_before_resolution())
 	all_violations.append_array(_test_cast_target_freed_during_commit())
+	all_violations.append_array(_test_authority_denies_unowned_actor())
 	all_violations.append_array(_test_cataclysm_ability_data())
 
 	# Several cases above inject synthetic abilities into the shared library
@@ -831,6 +833,71 @@ static func _test_cast_target_freed_during_commit() -> Array[String]:
 				"cast_target_freed_during_commit: control case with a surviving target should"
 				+ " take damage on resolution, not silently no-op"
 			)
+		)
+
+	return violations
+
+
+## Test: Authority refuses a cancel for an actor the requester does not own.
+## The refusal must happen before cancel_cast()/break_channel() runs -- a cancel
+## that was denied but still removed a cast/channel would defeat the gate.
+static func _test_authority_denies_unowned_actor() -> Array[String]:
+	var violations: Array[String] = []
+
+	_ensure_all_test_abilities_loaded()
+	var test_actor = _create_test_actor()
+	var actor = test_actor["actor"]
+	var combatant = test_actor["combatant"]
+
+	# Create a target for a cast
+	var target = _create_target_with_combatant()
+
+	# Start a cast with the actor (owner_id = 1)
+	var context = MobaCastContext.new(actor, target)
+	var result = MobaAbilityCaster.new().activate(&"cast_time_ability", context)
+	if not result.success:
+		violations.append(
+			"authority_denies_unowned: initial activation should succeed, got %s" % result.reason
+		)
+		return violations
+
+	# Verify cast is in progress
+	if not combatant.is_casting():
+		violations.append("authority_denies_unowned: cast should be in progress after activation")
+		return violations
+
+	var casting_ability_before = combatant.get_casting_ability()
+
+	# Now attempt to cancel with a different requester_id (not the owner)
+	var action := MobaCastCancelAction.new(actor)
+	var cancel_result := ActionRunner.run(action, 2)  # requester_id 2, but owner_id is 1
+
+	if cancel_result.success:
+		violations.append(
+			"authority_denies_unowned: requester_id 2 should be refused for owner_id 1"
+		)
+
+	# ActionRunner returns a bare failure on a denial; the reason should be empty
+	# since the failure happened at the Authority gate before execute() ran.
+	if cancel_result.reason != &"":
+		violations.append(
+			(
+				"authority_denies_unowned: denial should carry no reason, got '%s'"
+				% cancel_result.reason
+			)
+		)
+
+	# The cast must still be in progress -- denied cancel should not have executed
+	if not combatant.is_casting():
+		violations.append(
+			"authority_denies_unowned: denied cancel should not have stopped the cast"
+		)
+
+	# The casting ability must still be the same
+	var casting_ability_after = combatant.get_casting_ability()
+	if casting_ability_after == null or casting_ability_after.id != casting_ability_before.id:
+		violations.append(
+			"authority_denies_unowned: denied cancel should not have changed the casting ability"
 		)
 
 	return violations
