@@ -12,10 +12,15 @@ extends Node
 ## Returns an ActionResult indicating success or failure with a specific reason.
 ##
 ## requester_id is the peer whose identity Authority.can_perform() is checked
-## against: the local peer's own id on an offline/AI/server-owned activation,
-## or multiplayer.get_remote_sender_id() when Actor.request_activate_slot()
-## received the ask over RPC. It defaults to 1 so that offline callers and the
-## rules/ unit suites keep the pre-#320 behaviour of resolving as the server.
+## against, supplied by whatever called in: the local peer's own id on an
+## offline, AI, or server-owned activation, or the remote sender's id when the
+## caller took the ask from a client over RPC. It defaults to 1 so that offline
+## callers and the rules/ unit suites keep the pre-#320 behaviour of resolving
+## as the server.
+##
+## Named generically on purpose. This module does not depend on the game side
+## and must not name its symbols, not even in prose -- the caller is simply
+## whoever established the requester's identity.
 ##
 ## The context parameter provides all input data:
 ## - caster: the Actor performing the ability
