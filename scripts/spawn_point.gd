@@ -5,3 +5,4 @@ extends Resource
 @export var character_sheet: CharacterSheet
 @export var color: Color = Color.WHITE
 @export var transform: Transform3D = Transform3D.IDENTITY
+@export var authority_id: int = 0
