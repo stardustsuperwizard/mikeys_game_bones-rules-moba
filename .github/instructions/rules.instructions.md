@@ -35,6 +35,23 @@ Newerth kept `hon_shared` separate from `hon_client` and `hon_server`, and it is
   `addons/` — and which, read literally, would block #276 itself. **#276, #277, and #278 are
   explicitly authorized to change the files this rule otherwise protects.**
 
+## Command gate
+
+- **Every player-originated command must be gated.** A player-initiated action flows through
+  `Action` → `ActionRunner.run()` → `Authority.can_perform()` before execution. Once authorized,
+  the command's resolution code (inside `rules/`, within abilities, cast/channel trackers, or
+  death handling) calls `MobaCombatant` mutator methods directly. The invariant: direct calls
+  to `MobaCombatant` mutators never appear in `scripts/` or `rules/input/` (the game-side
+  input pathway). Enforced by `rules/tests/command_mutator_contract_test.gd`.
+- **Command taxonomy: one `Action` subclass, no `ActionRunner`/`Authority` edit.** Adding a
+  new player-originated command means adding one new `Action` subclass with its own
+  `FAILURE_*` constant block (matching `MobaAbilityAction`'s convention for failure reasons).
+  It requires no edit to `scripts/action_runner.gd` or `scripts/authority.gd`, and no command
+  registry, command-kind enum, or dispatch table. `ActionRunner.run()` routes every `Action`
+  through `Authority.can_perform()` uniformly; each command type is a new `Action` subclass,
+  not a new branch in an executor. Demonstrated by
+  `rules/tests/command_taxonomy_contract_test.gd`.
+
 ## Naming
 
 - **Every global `class_name` is prefixed `Moba`** — `MobaAbility`, `MobaCombatant`,

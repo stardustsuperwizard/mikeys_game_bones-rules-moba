@@ -22,6 +22,7 @@ var _passes: Array[String] = []
 ## Expected suite names in execution order. Used to detect truncated runs.
 var _expected_suites: Array[String] = [
 	"Extraction Contract Test",
+	"Command Mutator Contract Test",
 	"Ability Data Test",
 	"Combatant Test",
 	"Effect Container Test",
@@ -32,6 +33,7 @@ var _expected_suites: Array[String] = [
 	"Cooldown Test",
 	"Ability Library Test",
 	"Authority Test",
+	"Command Taxonomy Contract Test",
 	"Basic Attack Action Test",
 	"Ability Activation Test",
 	"Targeting Test",
@@ -82,6 +84,7 @@ func _ready() -> void:
 	call_deferred("_finalize")
 
 	_check("Extraction Contract Test", ExtractionContractTest.run())
+	_check("Command Mutator Contract Test", CommandMutatorContractTest.run())
 	_check("Ability Data Test", AbilityDataTest.run())
 	_check("Combatant Test", CombatantTest.run())
 	_check("Effect Container Test", EffectContainerTest.run())
@@ -92,6 +95,7 @@ func _ready() -> void:
 	_check("Cooldown Test", CooldownTest.run())
 	_check("Ability Library Test", AbilityLibraryTest.run())
 	_check("Authority Test", AuthorityTest.run())
+	_check("Command Taxonomy Contract Test", CommandTaxonomyContractTest.run())
 	_check("Basic Attack Action Test", BasicAttackActionTest.run())
 	_check("Ability Activation Test", AbilityActivationTest.run())
 	_check("Targeting Test", targeting_passed)
