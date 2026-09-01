@@ -1,10 +1,30 @@
 # gdlint:ignore = max-public-methods
+#
+# Still suppressed after the #325 split, deliberately. The split moved bodies
+# out -- MobaDamageResolver, MobaActivationGate, MobaStatCache, and
+# can_perform_action() into MobaCrowdControlTracker -- which is what the
+# line-count gate was measuring. It did not reduce the method count, because
+# what remains is the facade: of ~66 public methods here, most are one-line
+# forwards to collaborators that already exist (10 for crowd control, 13 for
+# cast/channel/toggle, the cooldown accessors).
+#
+# Retiring this suppression means deleting those forwarders and pointing
+# callers at the collaborators directly, the way #321 did with
+# get_prediction_ledger(). That is ~200 call sites and belongs in its own
+# change; it stays open on #325. Only one gdlint:ignore line is honored per
+# file, so this one is spent here rather than on max-file-lines.
 ## Health authority, stat access, and death handling for a MOBA actor.
 ##
 ## MobaCombatant is a child of an Actor and owns the actor's MOBA rules state:
 ## a duplicated runtime stat block, current health, the health mutation/read seam,
 ## and death signaling that fires exactly once. Signals health changes into the
 ## parent Actor's character_sheet.
+##
+## Several concerns have been split into collaborators it creates on first use
+## (see .gdlintrc for why): MobaDamageResolver, MobaActivationGate,
+## MobaStatCache, MobaDeathHandler, MobaShieldTracker, MobaCrowdControlTracker,
+## MobaCastTracker, MobaChannelTracker, MobaToggleTracker, MobaBasicAttackCycle,
+## MobaCooldowns, and MobaPredictionLedger.
 class_name MobaCombatant
 extends Node
 
@@ -37,8 +57,6 @@ enum ActivationFailure {
 
 ## Name of the lazily created child MobaEffectContainer node.
 const _EFFECT_CONTAINER_NAME := "MobaEffectContainer"
-## Positive floor applied to attack_speed after modifiers.
-const _MINIMUM_ATTACK_SPEED := 0.01
 
 @export var stat_block: MobaStatBlock = preload("res://rules/data/stat_blocks/baseline.tres")
 
@@ -153,15 +171,8 @@ var _effect_container: MobaEffectContainer = null
 ## Crowd control ledger: hard-CC entries and the active displacement.
 ## Created on first use, like the trackers below.
 var _crowd_control_tracker: MobaCrowdControlTracker = null
-## Per-stat cache of the modifier bonuses (flat, percent), NOT the final
-## value: the base is always re-read live from _runtime_stat_block so a
-## direct mutation of the runtime stat block (as several existing test
-## suites do) is never masked by a stale cached result. get_stat() is on the
-## damage path and the movement path, so it is the container's modifier
-## list -- not the stat block -- that is only scanned when it actually
-## changes; any container mutation clears the whole cache through
-## _invalidate_stat_cache().
-var _stat_cache: Dictionary = {}
+## Modifier cache backing get_stat(). Created on first use, like the trackers below.
+var _stat_cache_impl: MobaStatCache = null
 
 ## In-progress cast ledger. Created on first use so it is available whether or
 ## not _ready() has run. Advanced from tick(), like the MobaCooldowns ledger.
@@ -192,6 +203,12 @@ var _predictions: MobaPredictionLedger = MobaPredictionLedger.new()
 
 ## Rewind window this combatant's position is sampled into (#48).
 var _position_history := MobaPositionHistory.new()
+
+## Damage resolution pipeline. Created on first use, like the trackers above.
+var _damage_resolver: MobaDamageResolver = null
+
+## Ability activation readiness gate. Created on first use, like the trackers above.
+var _activation_gate: MobaActivationGate = null
 
 
 func _ready() -> void:
@@ -305,9 +322,16 @@ func _on_effect_stacks_changed(
 	_invalidate_stat_cache()
 
 
+## The modifier cache backing get_stat(), created on first use.
+func _get_stat_cache() -> MobaStatCache:
+	if _stat_cache_impl == null:
+		_stat_cache_impl = MobaStatCache.new(self)
+	return _stat_cache_impl
+
+
 ## Drop every cached modifier-applied stat value.
 func _invalidate_stat_cache() -> void:
-	_stat_cache.clear()
+	_get_stat_cache().invalidate()
 
 
 ## Get the unmodified base value of a stat.
@@ -315,147 +339,40 @@ func get_base_stat(stat: StringName) -> float:
 	return _runtime_stat_block.get_stat_value(stat)
 
 
-## Internal seam for stat modifications.
-##
-## Modifier order is pinned: (base + sum(flat)) * (1 + sum(percent)).
-## Percentages sum additively among themselves. The (flat, percent) bonus
-## pair is cached per stat and invalidated on any effect container mutation;
-## the base value itself is always re-read live so a direct mutation of
-## _runtime_stat_block is reflected immediately, never masked by a stale
-## cached result.
+## Internal seam for stat modifications. The pinned modifier order and the
+## bonus cache live in MobaStatCache.
 func _get_modified_stat(stat: StringName) -> float:
-	var bonus: Dictionary
-	if stat in _stat_cache:
-		bonus = _stat_cache[stat]
-	else:
-		var container := get_effect_container()
-		bonus = {
-			"flat": container.get_flat_bonus(stat), "percent": container.get_percent_bonus(stat)
-		}
-		_stat_cache[stat] = bonus
-
-	var base: float = _runtime_stat_block.get_stat_value(stat)
-	var value: float = (base + bonus["flat"]) * (1.0 + bonus["percent"])
-	if stat == MobaStatBlock.ATTACK_SPEED:
-		value = maxf(value, _MINIMUM_ATTACK_SPEED)
-
-	return value
+	return _get_stat_cache().modified(stat)
 
 
 ## Apply damage to the combatant via a MobaDamage packet.
 ##
-## Returns early and emits nothing if the combatant is not alive (DEAD state).
-## Otherwise, resolution order (pinned per Architecture Constraints):
-## 1. Raw amount
-## 2. Crit roll and multiplier (if can_crit)
-## 3. Damage-type routing (PHYSICAL/MAGICAL/TRUE)
-## 4. Penetration against target's defense
-## 5. Mitigation multiplier
-## 6. Final amount
-## 7. Shield consumption (shortest-remaining-duration first, before health)
-##
-## Emits damage_resolved once per packet (if not dead).
+## The pinned resolution order lives in MobaDamageResolver; this is the public
+## seam callers use. Emits damage_resolved once per packet (if not dead).
 func apply_damage(damage: MobaDamage) -> void:
-	# Refuse damage on dead combatants: this is what makes "two lethal hits in one
-	# physics frame" fire death exactly once (the first hit transitions to DEAD,
-	# the second is refused by the alive check here, not by comparing health magnitude).
-	if not is_alive():
-		return
+	_get_damage_resolver().resolve(damage)
 
-	var raw: float = damage.amount
-	var final: float = raw
-	var was_crit: bool = false
 
-	# Step 2: Crit roll and multiplier.
-	#
-	# Crit is the ATTACKER's statistic, so it is read off damage.source -- not
-	# off self, which is the combatant taking the hit. Unattributed damage
-	# (source is null, or is not a MobaCombatant) has no attacker to roll for
-	# and therefore never crits.
-	var attacker := damage.source as MobaCombatant
-	if damage.can_crit and attacker != null:
-		var crit_chance: float = attacker.get_stat(MobaStatBlock.CRIT_CHANCE)
-		var crit_damage: float = attacker.get_stat(MobaStatBlock.CRIT_DAMAGE)
-		var crit_roll: float = MobaRules.roll_crit()
+## The damage resolution pipeline for this combatant, created on first use.
+func _get_damage_resolver() -> MobaDamageResolver:
+	if _damage_resolver == null:
+		_damage_resolver = MobaDamageResolver.new(self)
+	return _damage_resolver
 
-		if MobaFormulas.is_critical(crit_roll, crit_chance):
-			was_crit = true
-			final = MobaFormulas.apply_crit(raw, crit_damage)
-		else:
-			final = raw
-	else:
-		final = raw
 
-	# Step 3-6: Damage-type routing and mitigation
-	match damage.damage_type:
-		MobaDamage.DamageType.PHYSICAL:
-			var armor: float = get_stat(MobaStatBlock.ARMOR)
-			final = MobaFormulas.physical_damage(final, armor, damage.flat_pen, damage.percent_pen)
-
-		MobaDamage.DamageType.MAGICAL:
-			var resistance: float = get_stat(MobaStatBlock.MAGIC_RESISTANCE)
-			final = MobaFormulas.magical_damage(
-				final, resistance, damage.flat_pen, damage.percent_pen
-			)
-
-		MobaDamage.DamageType.TRUE:
-			# TRUE damage ignores all defenses and penetration
-			final = MobaFormulas.true_damage(final)
-
-	# Step 7: Shield consumption (shortest-remaining-duration first)
-	var pre_shield_final := final
-	final = _get_shield_tracker().consume(final)
-	var post_shield_final := final
-
-	# Populate post-resolution fields on the damage packet for listeners
-	damage.final_amount = final
-	damage.was_crit = was_crit
-
-	# Compute shield_absorbed and health_applied for lifesteal/omnivamp calculation
-	var shield_absorbed := pre_shield_final - post_shield_final
-	var current_health_before_hit := _current_health
-	var health_applied := minf(post_shield_final, maxf(0.0, current_health_before_hit))
-	var damage_dealt := shield_absorbed + health_applied
-
-	# Reduce health
-	_current_health -= final
+## Set health directly and run the mirror/signal/death pass, without marking it
+## externally seeded the way the current_health setter does. Exists for
+## MobaDamageResolver and MobaCombatantTicker to call, the same way several
+## methods here exist solely for MobaDeathHandler.
+func write_health(value: float) -> void:
+	_current_health = value
 	_update_health()
 
-	# Apply lifesteal/omnivamp if attacker exists and damage was dealt
-	if attacker != null and damage_dealt > 0.0:
-		var lifesteal_pct := 0.0
-		if damage.is_basic_attack:
-			lifesteal_pct = attacker.get_stat(MobaStatBlock.LIFESTEAL)
 
-		var omnivamp_pct := attacker.get_stat(MobaStatBlock.OMNIVAMP)
-		var heal_pct := lifesteal_pct + omnivamp_pct
-
-		if heal_pct > 0.0:
-			var sustain_amount := MobaFormulas.sustain_healing(damage_dealt, heal_pct)
-			attacker.apply_healing(sustain_amount)
-
-	var attacker_name := "unattributed"
-	if attacker != null and attacker.get_parent() != null:
-		attacker_name = String(attacker.get_parent().name)
-	var target_name := String(name)
-	if get_parent() != null:
-		target_name = String(get_parent().name)
-	print(
-		(
-			"[MobaCombat] %s -> %s: %.1f raw / %.1f final (%s%s)"
-			% [
-				attacker_name,
-				target_name,
-				raw,
-				final,
-				MobaDamage.DamageType.keys()[damage.damage_type],
-				", CRIT" if was_crit else ""
-			]
-		)
-	)
-
-	# Emit damage_resolved
-	damage_resolved.emit(raw, final, damage.damage_type, was_crit, damage.source, shield_absorbed)
+## Draw `amount` down against the active shield pool, returning what is left to
+## apply to health. Exists for MobaDamageResolver to call.
+func consume_shields(amount: float) -> float:
+	return _get_shield_tracker().consume(amount)
 
 
 ## The death/respawn ledger for this combatant, created on first use.
@@ -683,32 +600,11 @@ func interrupt_for_hard_crowd_control() -> void:
 			break_channel()
 
 
-## Query whether the combatant can perform an action right now, accounting for active crowd control.
-##
-## While CROWD_CONTROLLED, a CC-gated action's answer REPLACES the state table's
-## conservative per_cc -> false with the precise union (OR) of active hard-CC entries'
-## per-effect flags, per MobaCrowdControl -- this is the whole reason MobaStateMachine.can()
-## deliberately stays generic there. Outside CROWD_CONTROLLED, a live entry can still exist
-## if some other try_enter() (e.g. completing a basic-attack cycle a non-blocking CC type
-## like BLIND permitted) moved the combatant out while it was ticking; there the CC union
-## is INTERSECTED with, not substituted for, the current real state's own legality, so e.g.
-## a new attack mid-windup is still forbidden regardless of what CC allows. Every other
-## action, and every case with no active entries, delegates straight to state_machine.can(action).
+## Query whether the combatant can perform an action right now, accounting for
+## active crowd control. The union/intersection rules live in
+## MobaCrowdControlTracker.can_perform_action().
 func can_perform_action(action: StringName) -> bool:
-	var state_machine := get_state_machine()
-	if state_machine == null:
-		return false
-
-	var crowd_control := _get_crowd_control_tracker()
-	var gated := crowd_control.gates_action(action)
-
-	if state_machine.current_state == MobaState.CROWD_CONTROLLED and gated:
-		return not crowd_control.blocks_action(action)
-
-	if gated and not crowd_control.is_empty():
-		return state_machine.can(action) and not crowd_control.blocks_action(action)
-
-	return state_machine.can(action)
+	return _get_crowd_control_tracker().can_perform_action(get_state_machine(), action)
 
 
 ## Check if this combatant currently has an active crowd control entry of a given type.
@@ -899,63 +795,27 @@ func _register_loadout_abilities() -> void:
 ## Check if an ability can be activated without side effects.
 ## Returns an ActivationFailure enum value indicating readiness or failure reason.
 ## This is a pure query: it mutates nothing, spends no resource, and starts no cooldown.
-##
-## Reads through the public accessors so an unconfirmed prediction (#321) counts
-## against it: that greys the slot and stops a second press stacking a duplicate
-## guess. On the server -- the only peer reaching commit_activate() -- there are
-## no predictions, so this is the query it was before #321.
 func can_activate(ability_id: StringName) -> int:
-	if ability_id not in _abilities:
-		return ActivationFailure.UNKNOWN_ABILITY
-
-	var ability: MobaAbility = _abilities[ability_id]
-
-	# Check resource
-	if ability.resource_cost > current_resource:
-		return ActivationFailure.INSUFFICIENT_RESOURCE
-
-	# Check cooldown and charges. A charge remaining while the recharge timer is
-	# still running does not block activation; only being out of charges does.
-	var available_charges: int = get_charges(ability_id)
-	var remaining: float = get_cooldown_remaining(ability_id)
-	if available_charges <= 0 and remaining > 0.0:
-		# A single-charge ability (max_charges <= 1) that is out of charges is
-		# simply on cooldown; NO_CHARGES is reserved for a multi-charge ability
-		# that has spent every charge while its recharge timer is still running.
-		if _cooldowns.maximum_charges(ability_id) <= 1:
-			return ActivationFailure.ON_COOLDOWN
-		return ActivationFailure.NO_CHARGES
-
-	return ActivationFailure.OK
+	return _get_activation_gate().can_activate(ability_id)
 
 
 ## Commit an ability activation: spend resource and start cooldown atomically.
 ## Returns the failure reason if activation cannot proceed; spends nothing and
 ## starts no cooldown if not OK.
-## If can_activate() returns OK, this call will succeed and spend resource + start cooldown.
 func commit_activate(ability_id: StringName) -> int:
-	var check: int = can_activate(ability_id)
-	if check != ActivationFailure.OK:
-		return check
+	return _get_activation_gate().commit_activate(ability_id)
 
-	var ability: MobaAbility = _abilities[ability_id]
 
-	# For a channeled ability, resource_cost is the per-tick cost: each tick
-	# (including the first, at t = 0) spends it independently, so commit must
-	# not also spend it here or the first tick would be charged twice.
-	# For a toggle ability, resource_cost is the per-second drain rate: drain is
-	# charged per second by the tracker's own tick, not at commit.
-	if (
-		ability.channel_duration <= 0.0
-		and ability.targeting_type != MobaAbility.TargetingType.TOGGLE
-	):
-		spend_resource(ability.resource_cost)
+## The activation readiness gate for this combatant, created on first use.
+func _get_activation_gate() -> MobaActivationGate:
+	if _activation_gate == null:
+		_activation_gate = MobaActivationGate.new(self)
+	return _activation_gate
 
-	# Start cooldown with current haste
-	var haste: float = get_stat(MobaStatBlock.ABILITY_HASTE)
-	_cooldowns.start(ability_id, ability.cooldown, haste, ability.charges)
 
-	return ActivationFailure.OK
+## Start the cooldown for one ability. Exists for MobaActivationGate to call.
+func start_cooldown(ability_id: StringName, duration: float, haste: float, charges: int) -> void:
+	_cooldowns.start(ability_id, duration, haste, charges)
 
 
 ## The in-progress cast ledger for this combatant, created on first use.

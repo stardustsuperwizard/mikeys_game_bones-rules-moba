@@ -28,4 +28,27 @@
 # When a file next approaches 1200, split it. Raising this number again
 # trades a bounded refactor for a few more tasks of runway and puts the
 # same failure back on someone else's pull request.
+#
+# It did approach 1200 -- it landed exactly on it. The combatant grew from
+# 958 back to 1200 in five days (#242, #263, #265, #313, #321), so #321 had
+# to extract MobaPredictionLedger and trim comment blocks purely to fit, and
+# the next task to touch the file (#327, position history) had nowhere to put
+# a three-line member. That is the failure this note predicted.
+#
+# #325 was filed for the split and taken in the #327 pull request, because
+# #327 could not land without it. Four collaborators came out, following the
+# established Moba* pattern: MobaDamageResolver (the apply_damage pipeline),
+# MobaActivationGate (can_activate/commit_activate), MobaStatCache (the
+# modifier bonus cache behind get_stat), and MobaCrowdControlTracker gained
+# can_perform_action(). The combatant is 1077, with 123 lines of headroom.
+#
+# That is real headroom but short of the ~240 this file asked for in #249.
+# The rest of the decomposition is the facade: ~66 public methods, most of
+# them one-line forwards to collaborators that already exist, with roughly
+# 200 call sites between the crowd-control and cast/channel/toggle groups.
+# Removing those forwarders is the change that would both drop the line
+# count properly and retire the max-public-methods suppression, and it is
+# too large to ride along with an unrelated feature. It stays open on #325.
+#
+# The threshold still does not move.
 max-file-lines: 1200
