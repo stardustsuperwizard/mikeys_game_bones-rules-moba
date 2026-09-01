@@ -68,8 +68,12 @@ func _refresh_visibility() -> void:
 		visible = false
 		return
 
-	# Visible when casting or channeling; hidden otherwise
-	visible = _combatant.is_casting() or _combatant.is_channeling()
+	# Visible when casting or channeling -- or while this peer is predicting a
+	# cast it has asked the server for and not yet heard back on (#321), so the
+	# bar appears on the press rather than a round trip later. Still a read of a
+	# public getter and nothing more: the prediction lives in MobaCombatant, and
+	# a refused request drops it there, which hides the bar again on its own.
+	visible = _combatant.is_casting() or _combatant.is_channeling() or _has_predicted_cast()
 
 
 func _refresh_progress() -> void:
@@ -89,6 +93,8 @@ func _refresh_progress() -> void:
 			_render_empty()
 			return
 		_render_channel(ability)
+	elif _has_predicted_cast():
+		_render_predicted_cast()
 	else:
 		_render_empty()
 
@@ -98,6 +104,28 @@ func _render_cast(ability: MobaAbility) -> void:
 	var cast_time: float = ability.cast_time
 	var time_remaining: float = _combatant.get_cast_time_remaining()
 	_set_progress(cast_time, time_remaining)
+
+
+## True while the bound combatant is predicting a cast this peer requested and
+## the server has not answered for yet (#321).
+func _has_predicted_cast() -> bool:
+	return _combatant.get_prediction_ledger().predicted_cast_time() > 0.0
+
+
+## Render the predicted cast at full remaining time. Held at full rather than
+## swept: the real cast has not started, and the server's own cast -- which
+## replaces this the moment it replicates back -- is what the sweep should
+## measure. Guessing a sweep here would produce the visible correction on
+## confirmation that predicting is meant to avoid.
+func _render_predicted_cast() -> void:
+	var ledger := _combatant.get_prediction_ledger()
+	var ability := ledger.predicted_cast_ability()
+	if ability == null:
+		_render_empty()
+		return
+	_set_name(ability)
+	var cast_time: float = ledger.predicted_cast_time()
+	_set_progress(cast_time, cast_time)
 
 
 func _render_channel(ability: MobaAbility) -> void:
