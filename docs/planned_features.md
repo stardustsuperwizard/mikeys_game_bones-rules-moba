@@ -84,17 +84,30 @@ at a `SpawnPoint`. This is closer to a latent bug than a missing feature.
 
 ### 0.4 Game state and entry points
 
-No main menu, no pause, no quit, no host/join UI.
+~~No main menu, no pause, no quit, no host/join UI.~~
 
-> **Corrected 2026-08-30.** This previously claimed multiplayer was "reachable
-> only through the `--server` and `--connect=<address>` command-line flags
-> handled by the networking addon." Those flags do nothing. `network_bootstrap.gd`
-> parses them in a `_ready()` on a node that is never autoloaded (only
-> `TestBootstrap` is) and never placed in a scene; its `plugin.gd` is a bare
-> `@tool extends EditorPlugin` that only registers the addon. **There is no
-> working multiplayer entry point today.** #276 deletes the addon, costing
-> nothing functional; #278 builds a transport that runs, plus real host/join
-> entry points.
+> **Resolved.** #314 shipped the entry points, on the transport from #312 and
+> the replication substrate from #313. `scenes/ui/main_menu.tscn` is the boot
+> scene (`run/main_scene`) and offers Play Offline, Host (port field) and Join
+> (address and port fields); none of the three needs a command-line flag. Host
+> starts a listen-server session in which the host plays, and a second instance
+> joining through Join sees the same world. Play Offline keeps today's
+> single-player-vs-bots boot with no network peer.
+>
+> `scenes/ui/pause_menu.tscn` rides inside `scenes/main.tscn`, so it is present
+> whenever the world scene runs — including when that scene is launched directly
+> from the editor. The `pause` action (Escape) opens it over the combat HUD with
+> Resume and Quit. **Quit returns to the main menu** rather than exiting the
+> application: it drops the session through `SessionManager.go_offline()` and
+> loads the menu, so a player can start or join another session without
+> relaunching.
+>
+> The note previously here recorded that the `--server` and `--connect=<address>`
+> flags handled by the networking addon did nothing, and that nothing in the
+> project could actually start a session. #276 deleted that addon.
+> `--dedicated-server` (#312) is the one command-line path that remains, and it
+> exists precisely because a dedicated server has no local operator to click a
+> menu.
 
 ---
 
