@@ -50,9 +50,19 @@ static func run() -> bool:
 
 	for scan_path in SCAN_PATHS:
 		var files = _get_files_recursive(scan_path)
+
+		# A scan root that cannot be opened yields an empty file list, and an
+		# empty file list yields no violations -- so a moved or renamed root
+		# would turn this suite into a vacuous pass while still reporting PASS.
+		# That is the exact failure mode the suite exists to prevent, so treat
+		# a root with no GDScript in it as a violation rather than as silence.
+		var scanned := 0
+
 		for file_path in files:
 			if not file_path.ends_with(".gd"):
 				continue
+
+			scanned += 1
 
 			var content = _read_file(file_path)
 			if content.is_empty():
@@ -83,6 +93,13 @@ static func run() -> bool:
 							% [file_path, line_num + 1, mutator]
 						)
 						violations.append(detail)
+
+		if scanned == 0:
+			var empty_root := (
+				"%s: scan root has no .gd files; it was moved, renamed, or is unreadable"
+				% scan_path
+			)
+			violations.append(empty_root)
 
 	if violations.is_empty():
 		return true
