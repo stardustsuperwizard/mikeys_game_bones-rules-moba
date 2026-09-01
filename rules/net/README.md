@@ -67,6 +67,8 @@ Skillshots work as follows:
 - `request_basic_attack()` carries: target node path and the client's send-time `Time.get_ticks_msec()`
 - `_resolve_basic_attack()` constructs a `MobaBasicAttackAction` and calls `ActionRunner.run()` with the real `requester_id`
 
+**A forwarded swing is re-requested until the client sees the server start it.** `MobaBasicAttackAction` refuses a swing while the attack cycle is winding up or recovering, and `PlayerController3D.get_attack_target()` arms its pending-target latch only once per order — it calls `cancel_order()` first, so `_attack_target` is already gone and nothing re-arms it. A client that dropped its latch on the forwarded path would therefore turn a single refused request into a click that silently produces no swing at all. Instead the controller holds the pending target and keeps re-requesting, releasing it when its own replicated `MobaStateMachine` transitions into `BASIC_ATTACK_WINDUP` — the server having actually started the swing. The release watches for that *transition*, not for "currently swinging": a snapshot would misread a cycle already in flight when the order armed, and "was neutral, now swinging" would never fire at all, because while the latch re-requests each frame the server starts each swing as the previous one ends and the actor never returns to a neutral state. One order still yields one swing, as it does offline.
+
 ### Cooldown and Resource Enforcement
 
 The server maintains authoritative copies of all cooldown and resource state. When `ActionRunner.run()` is called on the server with a networked client's `requester_id`, `Authority.can_perform()` checks that the requesting peer owns the actor. The server then enforces the action's preconditions:

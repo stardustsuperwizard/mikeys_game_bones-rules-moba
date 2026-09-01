@@ -46,8 +46,12 @@ func _physics_process(delta: float) -> void:
 		# An AI actor is owner_id 0 and only ever ticks on the server, so
 		# try_basic_attack() always takes its local branch here and the
 		# ActionResult is always real -- the null case cannot arise for a bot.
-		# It is still handled rather than assumed, so that the latch degrades to
-		# "drop the target" instead of latching forever if that ever changes.
+		# It is still handled rather than assumed, and handled the same way the
+		# player controller now handles it: a forwarded request whose outcome
+		# cannot be read holds the pending target so the swing is re-requested,
+		# rather than dropping an order the server may simply have refused
+		# mid-cycle. Behaviour here is unchanged either way; the point is that
+		# the two controllers do not disagree about what a null result means.
 		if not _basic_attack_pending:
 			return
 
@@ -62,9 +66,10 @@ func _physics_process(delta: float) -> void:
 		# don't latch it. Every other failure is a swing that may still land next
 		# frame, so the pending target is held across those as before.
 		if (
-			result == null
-			or result.success
-			or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT
+			result != null
+			and (
+				result.success or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT
+			)
 		):
 			_clear_pending_attack()
 

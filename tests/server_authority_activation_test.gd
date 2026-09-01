@@ -70,6 +70,9 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"refused request leaves server resource unspent",
 	"client basic attack request is forwarded, not resolved locally",
 	"client basic attack request lands on the server",
+	"client observes the server starting the swing it requested",
+	"latch holds a forwarded swing the server refused mid-cycle",
+	"latch releases once the server confirms the swing started",
 ]
 
 var _failures: Array[String] = []
@@ -104,6 +107,7 @@ func _run() -> void:
 		await _test_successful_activation()
 		await _test_server_side_refusal()
 		await _test_basic_attack_request()
+		await _test_forwarded_latch_survives_refusal()
 
 	_finish()
 
@@ -361,15 +365,52 @@ func _test_basic_attack_request() -> void:
 	else:
 		_fail("client resolved the basic attack locally instead of forwarding it")
 
-	# The swing has a wind-up: MobaBasicAttackAction returns attack_not_started
-	# while the cycle is still recovering, so the request is re-sent across a
-	# few frames the way a controller holding a pending target would.
-	for _i in range(90):
+	# Re-send exactly as PlayerController3D does on the forwarded path, rather
+	# than on a more forgiving loop of its own: the controller holds the pending
+	# target while the swing is unconfirmed and stops the moment its replicated
+	# MobaStateMachine shows the server started one. Mirroring that policy here
+	# is what keeps this check honest about the path that actually ships -- a
+	# looser retry would pass even if the shipped latch dropped every order.
+	var client_state := _client_actor.get_node("MobaStateMachine") as MobaStateMachine
+	var previous_state := -1
+	var swing_confirmed := false
+
+	# Evaluate the latch in the SAME order the controller does: request, then
+	# read the replicated state immediately, then wait a frame. The ordering is
+	# load-bearing. The request has only just been sent when the state is read,
+	# so that read still shows the pre-swing state -- which is exactly how the
+	# neutral state gets observed before the server's BASIC_ATTACK_WINDUP
+	# replicates back a frame or two later. Reading after the await instead
+	# would miss the neutral frame entirely and never confirm anything, which is
+	# a property of the observation order, not of the code under test.
+	for _i in range(120):
+		var current_state: int = client_state.current_state
+		var swing_started: bool = (
+			current_state == MobaState.BASIC_ATTACK_WINDUP
+			and previous_state != MobaState.BASIC_ATTACK_WINDUP
+		)
+		if previous_state != -1 and swing_started:
+			# The controller clears its latch here and stops re-requesting.
+			swing_confirmed = true
+			break
+		previous_state = current_state
+
+		_hold_target_in_reach()
+		await physics_frame
+		_client_actor.try_basic_attack(_enemy)
+
+	if swing_confirmed:
+		_pass("client observes the server starting the swing it requested")
+	else:
+		_fail("client never saw the server start a swing it requested")
+
+	# Let the confirmed swing finish its wind-up and land its damage, without
+	# re-requesting -- exactly as the controller behaves once its latch clears.
+	for _i in range(60):
 		_hold_target_in_reach()
 		await physics_frame
 		if enemy_combatant.current_health < health_before:
 			break
-		_client_actor.try_basic_attack(_enemy)
 
 	if enemy_combatant.current_health < health_before:
 		_pass("client basic attack request lands on the server")
@@ -377,6 +418,74 @@ func _test_basic_attack_request() -> void:
 		_fail(
 			"basic attack never reached the server: target health unchanged at %.1f" % health_before
 		)
+
+
+## The refused-first-request case, checked against the shipped decision itself.
+##
+## This is the regression the latch exists to prevent and the one the retry loop
+## above cannot show: when the server refuses a client's swing because the actor
+## is still recovering from the previous one, PlayerController3D must HOLD the
+## pending target and re-request, not drop the order. get_attack_target() arms
+## the latch exactly once per order -- it cancel_order()s first, so _attack_target
+## is already gone and nothing can re-arm it -- so a dropped latch means the
+## player's click silently produces no swing at all.
+##
+## Calls PlayerController3D._hold_forwarded_attack() directly rather than
+## re-deriving its policy a third time: a copy of the rule here could stay green
+## while the shipped rule regressed, which is the whole failure mode being
+## guarded against.
+func _test_forwarded_latch_survives_refusal() -> void:
+	var controller := _client_actor.get_node_or_null("Controller") as PlayerController3D
+	if controller == null:
+		_fail("setup: client actor has no PlayerController3D")
+		return
+	var client_state := _client_actor.get_node("MobaStateMachine") as MobaStateMachine
+
+	# Drive the actor into a basic-attack cycle, then arm a fresh order while it
+	# is still mid-swing -- the exact moment the server refuses.
+	_hold_target_in_reach()
+	_client_actor.try_basic_attack(_enemy)
+	var swinging := false
+	for _i in range(60):
+		_hold_target_in_reach()
+		await physics_frame
+		if (
+			client_state.current_state == MobaState.BASIC_ATTACK_WINDUP
+			or client_state.current_state == MobaState.BASIC_ATTACK_RECOVERY
+		):
+			swinging = true
+			break
+	if not swinging:
+		_fail("setup: could not get the client actor into a basic-attack cycle")
+		return
+
+	# Arm as get_attack_target() does for a new order.
+	controller._pending_attack_target = _enemy
+	controller._basic_attack_pending = true
+	controller._last_observed_attack_state = -1
+
+	_hold_target_in_reach()
+	if controller._hold_forwarded_attack():
+		_pass("latch holds a forwarded swing the server refused mid-cycle")
+	else:
+		_fail("latch dropped a forwarded swing while the actor was still mid-cycle")
+		return
+
+	# Once the cycle ends and the server starts THIS order's swing, the latch
+	# must release rather than re-request forever.
+	var released := false
+	for _i in range(120):
+		_hold_target_in_reach()
+		await physics_frame
+		if not controller._hold_forwarded_attack():
+			released = true
+			break
+		_client_actor.try_basic_attack(_enemy)
+
+	if released:
+		_pass("latch releases once the server confirms the swing started")
+	else:
+		_fail("latch never released: a single order would re-request indefinitely")
 
 
 func _combatant(actor: Actor) -> MobaCombatant:
