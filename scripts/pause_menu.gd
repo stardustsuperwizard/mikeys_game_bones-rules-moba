@@ -25,8 +25,10 @@
 ##   nodes still receive `_input()`, so without it Escape could open the overlay
 ##   but never close it again.
 ##
-## `tests/menu_pause_test.gd` asserts both, so a resave that drops them fails
-## there rather than silently shipping an unclosable overlay behind the HUD.
+## `tests/menu_pause_test.gd` asserts both. Like `tests/session_manager_test.gd`
+## it is a `--script` check and is not registered in `tests/test_bootstrap.gd`,
+## so `validate-godot.sh` does not run it -- catching a resave that drops these
+## means running that test, not trusting CI to.
 extends CanvasLayer
 
 const _MAIN_MENU_SCENE := "res://scenes/ui/main_menu.tscn"
