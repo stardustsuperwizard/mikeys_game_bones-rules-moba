@@ -277,23 +277,19 @@ plain data dictionary, which is most of what runtime GM spawning needs.
 
 ### 3.2 Multiplayer session layer
 
-**Tracked by #278.** There is no working transport: the networking addon's
-bootstrap is never autoloaded and never scened, so it never runs, and #276
-deletes it. Its own comments state that the consuming game must own per-peer
-spawning and despawning in `runtime/session_spawner.gd`; this repository has no
-`runtime/` directory and that file was never written.
+**Tracked by #278.** SessionManager autoload (#312) provides per-peer player
+spawn and despawn on connect and disconnect, and transport via ENetMultiplayerPeer
+in three modes: offline, listen-server, and dedicated-server.
 
 Missing:
 
-- Per-peer player spawn and despawn on connect and disconnect.
 - State replication for actors — health in particular is not replicated.
-- Disconnect and reconnect handling.
 - A lobby or session browser.
 
 Combat is server-authoritative in *shape* — one gated command out of three
 (see §1.2's correction) — which is a partial foundation. #277 completes it.
-There is also no `MultiplayerSynchronizer` anywhere in the project and nothing
-connects `multiplayer.peer_connected`, so no state replicates at all today.
+There is also no `MultiplayerSynchronizer` anywhere in the project, so no state
+replicates at all today. #313 will add state replication.
 
 ### 3.3 Dialogue and narrative tools
 

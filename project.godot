@@ -16,6 +16,7 @@ config/features=PackedStringArray("4.7")
 
 [autoload]
 
+SessionManager="*res://scripts/session_manager.gd"
 TestBootstrap="*res://tests/test_bootstrap.gd"
 
 [editor_plugins]

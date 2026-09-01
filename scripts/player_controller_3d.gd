@@ -105,7 +105,13 @@ func _ready() -> void:
 # rather than on button press means a single left click issues an order and the
 # attack fires automatically once the player closes the distance, instead of
 # one press both ordering and immediately attacking.
+#
+# Only ticks for the actor this controller has multiplayer authority over.
 func _physics_process(delta: float) -> void:
+	var body := _body()
+	if body and not body.is_multiplayer_authority():
+		return
+
 	var combatant := _combatant()
 	if combatant:
 		combatant.tick(delta)
@@ -131,6 +137,10 @@ func _physics_process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	var body := _body()
+	if body and not body.is_multiplayer_authority():
+		return
+
 	if event.is_action_pressed("action_primary"):
 		# The camera captures the mouse while right-drag look is active, which
 		# parks the cursor at screen center -- a click then would pick whatever
