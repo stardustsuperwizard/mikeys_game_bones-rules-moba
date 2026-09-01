@@ -11,6 +11,17 @@ extends Node
 ## Activate an ability for the given caster.
 ## Returns an ActionResult indicating success or failure with a specific reason.
 ##
+## requester_id is the peer whose identity Authority.can_perform() is checked
+## against, supplied by whatever called in: the local peer's own id on an
+## offline, AI, or server-owned activation, or the remote sender's id when the
+## caller took the ask from a client over RPC. It defaults to 1 so that offline
+## callers and the rules/ unit suites keep the pre-#320 behaviour of resolving
+## as the server.
+##
+## Named generically on purpose. This module does not depend on the game side
+## and must not name its symbols, not even in prose -- the caller is simply
+## whoever established the requester's identity.
+##
 ## The context parameter provides all input data:
 ## - caster: the Actor performing the ability
 ## - explicit_target: target for targeted abilities (or null for self)
@@ -21,7 +32,9 @@ extends Node
 ## registration (#28): if the ability id resolves in MobaAbilityLibrary, it is
 ## registered with the caster's MobaCombatant via register_ability() (idempotent),
 ## so a caller that hasn't separately registered the ability still activates it.
-func activate(ability_id: StringName, context: MobaCastContext) -> ActionResult:
+func activate(
+	ability_id: StringName, context: MobaCastContext, requester_id: int = 1
+) -> ActionResult:
 	if context.caster == null:
 		return ActionResult.new(false, MobaAbilityAction.FAILURE_INVALID_CONTEXT)
 
@@ -32,14 +45,17 @@ func activate(ability_id: StringName, context: MobaCastContext) -> ActionResult:
 			combatant.register_ability(ability)
 
 	var action := MobaAbilityAction.new(context.caster, ability_id, context)
-	return ActionRunner.run(action)
+	return ActionRunner.run(action, requester_id)
 
 
 ## Activate an ability from a positional action slot (1-based).
 ## Returns an ActionResult indicating success or failure with a specific reason.
 ## Returns a failed ActionResult with reason empty_slot if the slot is empty.
 ## Returns a failed ActionResult if the index is out of range [1..4].
-func activate_slot(index: int, context: MobaCastContext) -> ActionResult:
+##
+## requester_id carries the same meaning as in activate(), and is forwarded
+## unchanged: the slot lookup decides *which* ability, never *who* may cast it.
+func activate_slot(index: int, context: MobaCastContext, requester_id: int = 1) -> ActionResult:
 	if context.caster == null:
 		return ActionResult.new(false, MobaAbilityAction.FAILURE_INVALID_CONTEXT)
 
@@ -54,7 +70,7 @@ func activate_slot(index: int, context: MobaCastContext) -> ActionResult:
 	if ability_id == &"":
 		return ActionResult.new(false, MobaAbilityAction.FAILURE_EMPTY_SLOT)
 
-	return activate(ability_id, context)
+	return activate(ability_id, context, requester_id)
 
 
 ## Cancel an in-progress cast or break an in-progress channel for the given caster.

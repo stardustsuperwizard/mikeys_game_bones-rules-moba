@@ -69,6 +69,22 @@ var _basic_attack_pending := false
 # to actually run against.
 var _pending_attack_target: Actor = null
 
+# The last MobaStateMachine state this controller observed while holding a
+# forwarded (networked-client) basic attack, or -1 before the first sample.
+#
+# Only meaningful on that path, where the request goes to the server and no
+# ActionResult comes back: the client decides the server accepted the swing by
+# watching its own replicated state machine transition INTO BASIC_ATTACK_WINDUP.
+# A transition, not a snapshot -- "currently swinging" would misread a cycle
+# already in flight when the order armed as this order's confirmation, and drop
+# the order, which is the silent no-swing the latch exists to prevent.
+#
+# It also cannot be "has been neutral, and is now swinging": while the latch
+# re-requests every frame the server starts each new swing as the previous one
+# ends, so the actor never returns to a neutral state at all and that condition
+# would never fire -- leaving one click re-requesting forever.
+var _last_observed_attack_state := -1
+
 # The current click order -- at most one of these three is ever live.
 var _destination := Vector3.ZERO
 var _has_destination := false
@@ -106,37 +122,75 @@ func _ready() -> void:
 # attack fires automatically once the player closes the distance, instead of
 # one press both ordering and immediately attacking.
 #
-# Only ticks for the actor this controller has multiplayer authority over. A
-# missing Body fails the gate closed, matching every other _body() caller here:
-# an authority gate that falls through when it cannot identify the owner is not
-# a gate.
+# Input and the basic-attack order only run for the actor this controller has
+# multiplayer authority over. A missing Body fails that gate closed, matching
+# every other _body() caller here: an authority gate that falls through when it
+# cannot identify the owner is not a gate.
+#
+# MobaCombatant.tick() sits deliberately outside that gate, on the server. Since
+# #320 the server is the sole executor of a client's activation and the sole
+# holder of the cooldown/resource ledger it is refused against -- and a ledger
+# that never advances is not enforcement, it is a permanent denial. Gated on
+# body authority alone, the server would never tick a connected client's actor
+# at all: that client's cooldowns, resource regeneration, cast and channel
+# timers and respawn countdown would all freeze at the first cast, and every
+# later request would be refused forever.
+#
+# So the server (and an offline session, which is the server) ticks every actor
+# it holds, exactly as docs/request_resolve_pattern.md describes for the
+# _attack_timer it recorded: "the server needs its copy of a peer-owned actor's
+# cooldown to keep decaying, since the server is what actually enforces it, even
+# though it never simulates that actor's movement." A client still ticks only
+# its own actor, which is the same local copy it ticked before #320 -- unchanged
+# here, and corrected by replication either way.
 func _physics_process(delta: float) -> void:
 	var body := _body()
-	if body == null or not body.is_multiplayer_authority():
-		return
+	var has_body_authority := body != null and body.is_multiplayer_authority()
+	var is_server := not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
 
 	var combatant := _combatant()
-	if combatant:
+	if combatant and (is_server or has_body_authority):
 		combatant.tick(delta)
 
+	if not has_body_authority:
+		return
+
+	if combatant:
 		# Fire the basic attack as soon as the player reaches the order target.
 		# _basic_attack_pending is set by get_attack_target() when the player
 		# enters range; _pending_attack_target survives the cancel_order() call
 		# that clears _attack_target, so the attack cycle has something to run
 		# against. Cleared here after the action succeeds.
+		#
+		# The swing now goes through Actor.try_basic_attack(), which resolves it
+		# here on the offline/server path and forwards it to the server otherwise.
+		#
+		# On the local path the ActionResult is still in hand and the latch
+		# behaves exactly as it did before #320. On the forwarded path there is
+		# no result to read, and dropping the latch there would break the order:
+		# MobaBasicAttackAction refuses a swing while the cycle is winding up or
+		# recovering, which is the very reason this latch exists, and
+		# get_attack_target() arms it only once per order (it cancel_order()s
+		# first, so _attack_target is already gone and cannot re-arm it). A
+		# single forwarded request that the server happens to refuse would leave
+		# the player's click producing no swing at all, silently, and no retry.
+		# _hold_forwarded_attack() keeps re-requesting instead, until the client
+		# sees the server actually start the swing.
 		if _basic_attack_pending and is_instance_valid(_pending_attack_target):
-			var action := MobaBasicAttackAction.new(actor, _pending_attack_target)
-			var result := ActionRunner.run(action)
+			var result := actor.try_basic_attack(_pending_attack_target)
 			# FAILURE_NO_TARGET_COMBATANT is not a swing that might land next frame:
 			# the target has no MobaCombatant at all, so clear pending rather than
 			# leaving it set indefinitely. Every other failure (authority denial, the
 			# cycle still winding up) holds the target across frames as before.
-			if result.success or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT:
-				_basic_attack_pending = false
-				_pending_attack_target = null
+			if result == null:
+				if not _hold_forwarded_attack():
+					_clear_pending_basic_attack()
+			elif (
+				result.success or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT
+			):
+				_clear_pending_basic_attack()
 		elif _basic_attack_pending:
-			_basic_attack_pending = false
-			_pending_attack_target = null
+			_clear_pending_basic_attack()
 
 
 # Click-to-order is read only by the peer that owns this actor; see
@@ -258,8 +312,7 @@ func get_attack_target() -> Actor:
 	var taunt_source_actor := _taunt_target(combatant)
 	if taunt_source_actor:
 		if not _in_range_of(taunt_source_actor, attack_range):
-			_basic_attack_pending = false
-			_pending_attack_target = null
+			_clear_pending_basic_attack()
 			return null
 		# Re-point rather than gate on the flag alone: a taunt landing mid-cycle
 		# must steal a cycle already pending against the player's own target.
@@ -267,6 +320,7 @@ func get_attack_target() -> Actor:
 			cancel_order()
 			_pending_attack_target = taunt_source_actor
 			_basic_attack_pending = true
+			_last_observed_attack_state = -1
 		return null
 
 	if _attack_target == null or not _in_range_of(_attack_target, attack_range):
@@ -285,6 +339,7 @@ func get_attack_target() -> Actor:
 			cancel_order()
 			_pending_attack_target = pending_target
 			_basic_attack_pending = true
+			_last_observed_attack_state = -1
 		return null
 	var target := _attack_target
 	cancel_order()
@@ -312,8 +367,7 @@ func cancel_order() -> void:
 	_interact_target = null
 	_closest_distance = INF
 	_stall_timer = 0.0
-	_basic_attack_pending = false
-	_pending_attack_target = null
+	_clear_pending_basic_attack()
 
 
 # Raycasts from the camera through the clicked pixel and turns whatever it
@@ -457,6 +511,62 @@ func _order_stop_distance() -> float:
 # _order_move_direction decides it has arrived. Measuring in 3D instead would
 # deadlock on a target whose origin sits above the floor -- a door's does --
 # by stopping the walk at a distance the range check still calls too far.
+# Whether a forwarded (networked-client) basic-attack request should stay
+# pending for another frame.
+#
+# A client never learns its request's ActionResult -- the server is the sole
+# executor -- so "the swing was accepted" has to be observed instead of
+# returned. MobaStateMachine.current_state is already replicated to this peer by
+# the CombatStateSynchronizer configured in scenes/player/player.tscn, so the
+# client watches its own copy of that: once the server accepts the swing the
+# actor enters BASIC_ATTACK_WINDUP, and that transition is the confirmation.
+#
+# Only a transition counts, never a snapshot -- see _last_observed_attack_state.
+#
+# Holding until that confirmation, rather than until some frame budget expires,
+# is what keeps one order to one swing on both paths: the offline latch clears on
+# success, and this clears on the replicated evidence of the same success. Simply
+# holding while the target stays in range would instead re-request every frame
+# forever and turn a single click into continuous auto-attack, which offline play
+# does not do.
+#
+# Returns false when the latch should be dropped: the target has left range or
+# gone invalid, this actor has no state machine to read, or the swing is
+# confirmed started.
+func _hold_forwarded_attack() -> bool:
+	if not _in_range_of(_pending_attack_target, attack_range):
+		return false
+
+	var state_machine := actor.get_node_or_null("MobaStateMachine") as MobaStateMachine
+	if state_machine == null:
+		return false
+
+	var previous := _last_observed_attack_state
+	var current := state_machine.current_state
+	_last_observed_attack_state = current
+
+	# The first sample only establishes a baseline: with nothing to compare
+	# against there is no transition to read yet, so keep holding.
+	if previous == -1:
+		return true
+
+	# A fresh entry into wind-up is the server having started a swing for this
+	# order. Entering from recovery counts: that is precisely the refused-then-
+	# accepted case, where the previous cycle had to finish first.
+	var swing_started: bool = (
+		current == MobaState.BASIC_ATTACK_WINDUP and previous != MobaState.BASIC_ATTACK_WINDUP
+	)
+	return not swing_started
+
+
+# Drop the pending basic attack and reset the confirmation tracking with it, so
+# the next order starts from a clean slate rather than inheriting this one's.
+func _clear_pending_basic_attack() -> void:
+	_basic_attack_pending = false
+	_pending_attack_target = null
+	_last_observed_attack_state = -1
+
+
 func _in_range_of(target: Node, range_limit: float) -> bool:
 	if not is_instance_valid(target):
 		return false
@@ -485,18 +595,22 @@ func _combatant() -> MobaCombatant:
 	return actor.get_node_or_null("MobaCombatant") as MobaCombatant
 
 
-# Activate ability slot `index` (1-4) through the actor's MobaAbilityCaster.
+# Activate ability slot `index` (1-4) through the actor's request/resolve routing.
 #
 # An empty slot stays silent -- pressing 3 with nothing bound to it is not an
 # error worth printing every keypress. Every other failure is reported, because
 # a targeted ability that silently declines to fire is indistinguishable in play
 # from an input that never arrived.
+#
+# try_activate_slot() returns null when the ask went to the server instead of
+# resolving here. There is no failure to report in that case -- the outcome is
+# the server's to decide, and it reaches this peer as replicated state -- so the
+# diagnostic below stays on the offline/server path where the result is real.
 func _activate_slot(index: int) -> void:
-	var caster := actor.get_node_or_null("MobaAbilityCaster") as MobaAbilityCaster
-	if not caster:
-		return
 	var context := MobaCastContext.new(actor, _ability_target())
-	var result := caster.activate_slot(index, context)
+	var result := actor.try_activate_slot(index, context)
+	if result == null:
+		return
 	if result.success or result.reason == MobaAbilityAction.FAILURE_EMPTY_SLOT:
 		return
 	# ActionRunner returns an empty reason when Authority refuses the action
