@@ -59,8 +59,8 @@ var _jump_requested := false
 
 # Whether a basic-attack cycle is pending toward the current attack target.
 # Set to true when the click-order system has delivered the player into range;
-# cleared when the combatant accepts the basic_attack() call or the target
-# leaves range / is freed.
+# cleared when the basic attack action succeeds, the target leaves range or
+# is freed, or the target carries no MobaCombatant to attack.
 var _basic_attack_pending := false
 
 # The target of the pending basic attack. get_attack_target() cancels the
@@ -114,18 +114,15 @@ func _physics_process(delta: float) -> void:
 		# _basic_attack_pending is set by get_attack_target() when the player
 		# enters range; _pending_attack_target survives the cancel_order() call
 		# that clears _attack_target, so the attack cycle has something to run
-		# against. Cleared here after the combatant accepts the call.
+		# against. Cleared here after the action succeeds.
 		if _basic_attack_pending and is_instance_valid(_pending_attack_target):
-			var target_combatant := (
-				_pending_attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
-			)
-			if target_combatant:
-				if combatant.basic_attack(target_combatant):
-					_basic_attack_pending = false
-					_pending_attack_target = null
-			else:
-				# Target has no MobaCombatant; clear pending so it doesn't
-				# remain set indefinitely.
+			var action := MobaBasicAttackAction.new(actor, _pending_attack_target)
+			var result := ActionRunner.run(action)
+			# FAILURE_NO_TARGET_COMBATANT is not a swing that might land next frame:
+			# the target has no MobaCombatant at all, so clear pending rather than
+			# leaving it set indefinitely. Every other failure (authority denial, the
+			# cycle still winding up) holds the target across frames as before.
+			if result.success or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT:
 				_basic_attack_pending = false
 				_pending_attack_target = null
 		elif _basic_attack_pending:

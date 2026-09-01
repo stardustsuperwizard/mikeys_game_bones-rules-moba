@@ -3,9 +3,10 @@
 # Extends SimpleAIController to add MOBA ruleset integration:
 # - Ticks the enemy's MobaCombatant once per physics frame so cooldowns,
 #   resource regeneration, and the state machine advance on schedule.
-# - Routes basic attacks through MobaCombatant.basic_attack() instead of
-#   the framework's flat Actor.attack_cooldown, observing wind_up, recovery,
-#   and attack_speed from the equipped weapon.
+# - Routes basic attacks through MobaBasicAttackAction/ActionRunner instead of
+#   the framework's flat Actor.attack_cooldown, so the swing passes the
+#   Authority ownership gate and still observes wind_up, recovery, and
+#   attack_speed from the equipped weapon.
 #
 # Falls back to inherited SimpleAIController behavior for actors without a
 # MobaCombatant child.
@@ -14,8 +15,8 @@ extends SimpleAIController
 
 # Whether a basic-attack cycle is pending toward the current attack target.
 # Set to true when get_attack_target() delivers the enemy within range;
-# cleared when the combatant accepts the basic_attack() call or the target
-# becomes invalid or leaves range.
+# cleared when the basic attack action succeeds or the target becomes
+# invalid, leaves range, or carries no MobaCombatant to attack.
 var _basic_attack_pending := false
 
 # The target of the pending basic attack. Held separately from SimpleAIController's
@@ -49,16 +50,13 @@ func _physics_process(delta: float) -> void:
 			_clear_pending_attack()
 			return
 
-		var target_combatant := (
-			_pending_attack_target.get_node_or_null("MobaCombatant") as MobaCombatant
-		)
-		if target_combatant == null:
-			# Target runs on the framework attack path, not the ruleset; nothing
-			# for basic_attack() to resolve against, so don't latch it.
-			_clear_pending_attack()
-			return
-
-		if combatant.basic_attack(target_combatant):
+		var action := MobaBasicAttackAction.new(actor, _pending_attack_target)
+		var result := ActionRunner.run(action)
+		# FAILURE_NO_TARGET_COMBATANT means the target runs on the framework attack
+		# path, not the ruleset -- nothing for basic_attack() to resolve against, so
+		# don't latch it. Every other failure is a swing that may still land next
+		# frame, so the pending target is held across those as before.
+		if result.success or result.reason == MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT:
 			_clear_pending_attack()
 
 
