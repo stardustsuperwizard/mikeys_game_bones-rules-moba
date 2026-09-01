@@ -8,6 +8,7 @@
 [ext_resource type="Script" path="res://scripts/combat_hud_binder.gd" id="7"]
 [ext_resource type="Script" path="res://scripts/floating_text_binder.gd" id="9"]
 [ext_resource type="Script" path="res://scripts/target_frame_binder.gd" id="11"]
+[ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="12"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(20, 0.2, 20)
@@ -132,3 +133,5 @@ hud_path = NodePath("../MobaCombatHUD")
 script = ExtResource("11")
 hud_path = NodePath("../MobaCombatHUD")
 controller_path = NodePath("../WorldManager/Player/Controller")
+
+[node name="PauseMenu" parent="." instance=ExtResource("12")]
