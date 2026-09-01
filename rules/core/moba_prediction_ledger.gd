@@ -29,6 +29,13 @@
 class_name MobaPredictionLedger
 extends RefCounted
 
+## Emitted whenever the overlay changes: a prediction made, rolled back, or
+## retired. MobaCombatant re-emits it as resource_changed, which is the only
+## input the HUD's resource bar has (moba_combat_hud.gd binds the signal and
+## does not poll). Without it a predicted spend would never reach the bar, and
+## the next regeneration frame would re-assert the unpredicted value.
+signal changed
+
 ## Prediction key for the basic attack, which has no ability id of its own.
 ## Deliberately not a valid ability id: MobaAbilityLibrary ids are authored
 ## names, so this can never collide with one.
@@ -99,6 +106,7 @@ func predict_ability(
 		"baseline_remaining": replicated_remaining(ability_id, fallback_remaining),
 		"age": 0.0,
 	}
+	changed.emit()
 	return true
 
 
@@ -122,6 +130,7 @@ func predict_basic_attack() -> bool:
 		"baseline_remaining": 0.0,
 		"age": 0.0,
 	}
+	changed.emit()
 	return true
 
 
@@ -136,9 +145,11 @@ func rollback(key: StringName = &"") -> bool:
 
 	if key == &"":
 		_entries.clear()
+		changed.emit()
 		return true
 	if key in _entries:
 		_entries.erase(key)
+		changed.emit()
 		return true
 	return false
 
@@ -284,9 +295,13 @@ func _retire_confirmed(is_swinging: bool) -> bool:
 		if spent_a_charge or restarted_timer:
 			settled.append(key)
 
+	if settled.is_empty():
+		return false
+
 	for key in settled:
 		_entries.erase(key)
-	return not settled.is_empty()
+	changed.emit()
+	return true
 
 
 ## Record a predicted activation of `ability_id` on `combatant`, deriving the

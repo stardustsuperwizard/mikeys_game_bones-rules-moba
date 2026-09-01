@@ -71,10 +71,9 @@ const _MINIMUM_ATTACK_SPEED := 0.01
 # node's _ready() has run. So each one seeds the runtime stat block on demand
 # rather than assuming _ready() got there first, and records that it supplied a
 # value so _ready() does not overwrite it with a full-health default.
-## Reads subtract any unconfirmed predicted spend (#321) as an OFFSET, not as a
-## replacement: the server's own replicated number keeps flowing in underneath,
-## so regen arriving mid-request is still reflected. Never a prediction on the
-## server, where this is _current_resource exactly.
+## Reads subtract any unconfirmed predicted spend (#321) as an OFFSET, not a
+## replacement: the server's replicated number keeps flowing in underneath, so
+## regen mid-request is still reflected. No predictions exist on the server.
 var current_resource: float:
 	get:
 		return maxf(0.0, _current_resource - _predictions.resource_debit())
@@ -124,9 +123,8 @@ var active_effects_snapshot: Array:
 ## replication. Assigning restores the ledger the ability slots read.
 ##
 ## Records what arrived for MobaPredictionLedger's baseline but deliberately
-## retires nothing (#321): mode 2 re-sends this on any change to the server's
-## ledger, so clearing here would drop a prediction on unrelated cooldown decay
-## rather than on confirmation of the request that made it.
+## retires nothing (#321): mode 2 re-sends this on any server-side change, so
+## clearing here would drop a prediction on unrelated cooldown decay.
 var active_cooldowns_snapshot: Array:
 	get:
 		return _cooldowns.get_snapshot()
@@ -189,8 +187,7 @@ var _shield_tracker: MobaShieldTracker = null
 var _basic_attack_cycle: MobaBasicAttackCycle = null
 
 ## Unconfirmed client-side predictions (#321); see MobaPredictionLedger. Only
-## ever non-empty on a requesting client -- the server resolves, it never
-## predicts -- so every accessor reading through it is unchanged there.
+## non-empty on a requesting client -- the server resolves, never predicts.
 var _predictions: MobaPredictionLedger = MobaPredictionLedger.new()
 
 
@@ -533,7 +530,7 @@ func notify_shield_changed() -> void:
 ## Used by MobaDeathHandler.respawn() after restoring health/resource to maximum.
 func notify_health_and_resource_changed() -> void:
 	health_changed.emit(_current_health, maximum_health)
-	resource_changed.emit(_current_resource, maximum_resource)
+	resource_changed.emit(current_resource, maximum_resource)
 
 
 ## Mirror current_health into the parent Actor's character_sheet, if a parent
@@ -796,7 +793,7 @@ func spend_resource(amount: float) -> bool:
 		return false
 
 	_current_resource -= amount
-	resource_changed.emit(_current_resource, get_stat(MobaStatBlock.RESOURCE))
+	resource_changed.emit(current_resource, get_stat(MobaStatBlock.RESOURCE))
 	return true
 
 
@@ -805,7 +802,7 @@ func spend_resource(amount: float) -> bool:
 func restore_resource(amount: float) -> void:
 	var max_resource = get_stat(MobaStatBlock.RESOURCE)
 	_current_resource = minf(_current_resource + amount, max_resource)
-	resource_changed.emit(_current_resource, max_resource)
+	resource_changed.emit(current_resource, max_resource)
 
 
 ## Register an ability for cooldown and activation tracking.
@@ -1096,13 +1093,11 @@ func tick(delta: float) -> void:
 	# Advance cooldowns
 	_cooldowns.tick(delta)
 
-	# Advance and settle any unconfirmed client-side predictions (#321). Done on
-	# the combatant's own clock, not in a replication setter, so confirmation is
-	# judged against the baseline each prediction recorded rather than against
-	# whichever replicated value happened to arrive first.
-	var swinging := MobaPredictionLedger.is_swinging(get_state_machine())
-	if _predictions.has_any() and _predictions.tick(delta, swinging):
-		resource_changed.emit(current_resource, get_stat(MobaStatBlock.RESOURCE))
+	# Advance and settle unconfirmed predictions (#321) on the combatant's own
+	# clock, not in a replication setter, so confirmation is judged against each
+	# prediction's recorded baseline rather than whichever value arrived first.
+	if _predictions.has_any():
+		_predictions.tick(delta, MobaPredictionLedger.is_swinging(get_state_machine()))
 
 	# Advance active stat modifiers so timed effects expire on the caller's clock.
 	get_effect_container().tick(delta)
@@ -1132,7 +1127,7 @@ func tick(delta: float) -> void:
 	var new_resource = minf(_current_resource + resource_regen * delta, max_resource)
 	if new_resource != _current_resource:
 		_current_resource = new_resource
-		resource_changed.emit(_current_resource, max_resource)
+		resource_changed.emit(current_resource, max_resource)
 
 	# Accumulate health regeneration (only if alive).
 	#
@@ -1187,12 +1182,19 @@ func get_state_machine() -> MobaStateMachine:
 # --- Client-side prediction (#321) ---
 
 
-## The unconfirmed-prediction overlay for this combatant. See
-## MobaPredictionLedger, which owns the state, the confirm/rollback rules, and
-## the reasoning behind them.
+## The unconfirmed-prediction overlay; MobaPredictionLedger owns the state, the
+## confirm/rollback rules and the reasoning. Exposed as the ledger itself rather
+## than mirrored through forwarding methods: this file is at its gdlint line
+## budget, and the accessors above already read through the overlay anyway.
 ##
-## Exposed as the ledger itself rather than mirrored through a row of forwarding
-## methods: this file is at its gdlint line budget, and the accessors above
-## already read through the overlay anyway.
+## Wires the ledger's `changed` signal on first use -- lazily rather than in
+## _ready(), so a combatant that never enters the tree still reports.
 func get_prediction_ledger() -> MobaPredictionLedger:
+	if not _predictions.changed.is_connected(_on_prediction_changed):
+		_predictions.changed.connect(_on_prediction_changed)
 	return _predictions
+
+
+## Re-emit a prediction change as resource_changed, the resource bar's only input.
+func _on_prediction_changed() -> void:
+	resource_changed.emit(current_resource, get_stat(MobaStatBlock.RESOURCE))

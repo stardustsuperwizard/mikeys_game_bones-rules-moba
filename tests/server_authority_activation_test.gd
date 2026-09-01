@@ -114,6 +114,33 @@ var _enemy: Actor
 
 var _client_id := 0
 
+# Last resource_changed payload seen from the client's combatant.
+#
+# The HUD's resource bar is driven ONLY by this signal -- moba_combat_hud.gd
+# connects it and never polls -- so a check that reads current_resource proves
+# the model is right and says nothing about whether the bar ever moved. These
+# checks observe what the bar is told.
+var _client_resource_emitted := -1.0
+
+# Violation watch: every resource_changed payload must equal what current_resource
+# would report at that moment.
+#
+# That is the exact invariant a prediction needs. An emit site that sends the raw
+# _current_resource backing field instead of the prediction-aware getter puts the
+# unpredicted number on the bar, and the regen block emits one every frame the
+# pool moves -- so the predicted spend is wiped a frame after it appears.
+#
+# Checked inside the handler rather than by sampling once per frame: the
+# replication setter emits the correct value on the same frame the regen block
+# emits, and whichever lands second wins the sample, so a wrong emit hides. It is
+# still a wrong frame on the bar.
+#
+# A fixed ceiling would not work here. The prediction is an OFFSET, so the value
+# it reports legitimately drifts upward with regeneration while the request is in
+# flight; only the gap between payload and getter is invariant.
+var _resource_watch_armed := false
+var _resource_watch_violation := ""
+
 
 func _initialize() -> void:
 	_run()
@@ -190,6 +217,10 @@ func _connect_peers() -> bool:
 
 	_rebind_slot(_server_actor)
 	_rebind_slot(_client_actor)
+
+	var client_combatant := _combatant(_client_actor)
+	if client_combatant != null:
+		client_combatant.resource_changed.connect(_on_client_resource_changed)
 
 	_enemy = _spawn_enemy_into(server_branch.get_node("Arena"))
 	if _enemy == null:
@@ -510,6 +541,23 @@ func _test_forwarded_latch_survives_refusal() -> void:
 		_fail("latch never released: a single order would re-request indefinitely")
 
 
+## Record what the client's combatant last told its resource_changed listeners,
+## and flag any emit that breaks the predicted ceiling while a prediction stands.
+func _on_client_resource_changed(current: float, _maximum: float) -> void:
+	_client_resource_emitted = current
+
+	if not _resource_watch_armed or _resource_watch_violation != "":
+		return
+	var client_combatant := _combatant(_client_actor)
+	if client_combatant == null:
+		return
+	var reported: float = client_combatant.current_resource
+	if not is_equal_approx(current, reported):
+		_resource_watch_violation = (
+			"emitted %.2f while current_resource reports %.2f" % [current, reported]
+		)
+
+
 func _combatant(actor: Actor) -> MobaCombatant:
 	if actor == null:
 		return null
@@ -557,13 +605,26 @@ func _finish() -> void:
 ## refusal changes nothing on the server for it to re-send.
 ##
 ## The settle window is a fraction of a second, well inside
-## MobaCombatant._PREDICTION_TIMEOUT_SECONDS, so a pass here is the denial
+## MobaPredictionLedger.TIMEOUT_SECONDS, so a pass here is the denial
 ## arriving and not the backstop expiring.
 func _test_refused_prediction_rolls_back() -> void:
 	var server_combatant := _combatant(_server_actor)
 	var client_combatant := _combatant(_client_actor)
 	if server_combatant == null or client_combatant == null:
 		return
+
+	# Quiet the forwarded-attack latch the basic-attack checks above left running.
+	# While it holds, PlayerController3D re-requests a swing EVERY frame, and each
+	# re-request makes a fresh basic-attack prediction whose notification carries
+	# the (correct) resource value -- which would mask a rollback that corrected
+	# the model and told the HUD nothing. Cleared through the controller's own
+	# fields rather than by faking a drop, so the latch is genuinely idle.
+	var controller := _client_actor.get_node_or_null("Controller") as PlayerController3D
+	if controller != null:
+		controller.set("_basic_attack_pending", false)
+		controller.set("_pending_attack_target", null)
+	client_combatant.get_prediction_ledger().rollback()
+	await _settle()
 
 	# Re-arm the server's cooldown so the next request is refused on it.
 	var context := MobaCastContext.new(_client_actor, null, Vector3.FORWARD, Vector3.ZERO)
@@ -573,9 +634,25 @@ func _test_refused_prediction_rolls_back() -> void:
 		_fail("setup: server cooldown did not arm before the refusal check")
 		return
 
-	# Make the client's own copy believe the ability is ready, so it predicts.
+	# Put BOTH peers at full resource before predicting. At maximum the regen
+	# block emits nothing, and a replicated value that did not move emits nothing
+	# either -- so after the refusal the rollback's own notification is the only
+	# thing that can still update the bar. Without this, regen would keep
+	# emitting the correct post-rollback number every frame and would mask a
+	# rollback that corrected the model silently.
+	server_combatant.restore_to_full()
+	await _settle()
+
+	# The client's ledger is wiped AFTER that settle, not before: the server's
+	# cooldown snapshot replicates during it and would re-arm the ledger, leaving
+	# the client correctly believing the ability is on cooldown -- at which point
+	# it declines to predict and there is nothing to roll back.
 	client_combatant.clear_all_cooldowns()
 	client_combatant.restore_to_full()
+
+	# Cleared last, so the assertions below can only pass on an emit the REFUSAL
+	# caused -- restore_to_full() above emits one of its own.
+	_client_resource_emitted = -1.0
 
 	_client_actor.try_activate_slot(_SLOT, context)
 
@@ -619,13 +696,30 @@ func _test_refused_prediction_rolls_back() -> void:
 	# was never true, and the server's real value replicating over it is the
 	# rollback working, not a spend. The predicted debit is what must be gone,
 	# and an exact match is what proves it is.
-	if is_equal_approx(client_combatant.current_resource, server_combatant.current_resource):
+	#
+	# Checked on the emitted payload as well as the getter: the bar has no other
+	# input, so a rollback that corrected the model without telling its listeners
+	# would leave the wrong number on screen indefinitely.
+	var matches_model := is_equal_approx(
+		client_combatant.current_resource, server_combatant.current_resource
+	)
+	var matches_emit := is_equal_approx(_client_resource_emitted, server_combatant.current_resource)
+	if _client_resource_emitted < 0.0:
+		_fail("the rollback told the HUD nothing, so the predicted spend stays on the bar")
+	elif matches_model and matches_emit:
 		_pass("a refused prediction leaves nothing spent")
-	else:
+	elif not matches_model:
 		_fail(
 			(
 				"client resource %.1f does not match the server's %.1f after rollback"
 				% [client_combatant.current_resource, server_combatant.current_resource]
+			)
+		)
+	else:
+		_fail(
+			(
+				"rollback corrected the model but told the HUD %.1f, not %.1f"
+				% [_client_resource_emitted, server_combatant.current_resource]
 			)
 		)
 
@@ -642,6 +736,10 @@ func _test_prediction_is_immediate() -> void:
 	if server_combatant == null or client_combatant == null:
 		return
 
+	# Drop anything the refusal check left outstanding, so this check measures its
+	# own prediction rather than inheriting a stale overlay through the accessors.
+	client_combatant.get_prediction_ledger().rollback()
+
 	# Both ledgers clear, so the request is one the server will confirm.
 	server_combatant.clear_all_cooldowns()
 	server_combatant.restore_to_full()
@@ -649,10 +747,26 @@ func _test_prediction_is_immediate() -> void:
 	client_combatant.restore_to_full()
 	await _settle()
 
+	# Drop the SERVER off full so resource regeneration is actually running. At
+	# maximum the regen block emits nothing (it only emits when the value moves),
+	# which would make the survival check below vacuous -- it would pass whether
+	# or not the regen emit carries the predicted value, because it never fires.
+	server_combatant.spend_resource(server_combatant.maximum_resource * 0.25)
+	await _settle()
+	if server_combatant.current_resource >= server_combatant.maximum_resource:
+		_fail("setup: server is still at full resource, so regeneration cannot fire")
+		return
+
 	var client_resource_before := client_combatant.current_resource
 	if client_combatant.get_cooldown_remaining(_ABILITY) > 0.0:
 		_fail("setup: client cooldown was not clear before the prediction check")
 		return
+
+	# Cleared so the assertion below can only pass on an emit the REQUEST caused,
+	# and the watch armed so every later emit is checked against the getter.
+	_client_resource_emitted = -1.0
+	_resource_watch_violation = ""
+	_resource_watch_armed = true
 
 	var context := MobaCastContext.new(_client_actor, null, Vector3.FORWARD, Vector3.ZERO)
 	_client_actor.try_activate_slot(_SLOT, context)
@@ -663,12 +777,34 @@ func _test_prediction_is_immediate() -> void:
 	else:
 		_fail("client shows no cooldown on the frame it sent the request")
 
+	# Read from the signal payload, not from current_resource. The bar has no
+	# other input, so asserting the getter would pass even if the prediction
+	# never reached the HUD at all -- and a later regen emit carrying the raw
+	# unpredicted value would silently undo it on the next frame.
 	var cost := MobaAbilityLibrary.get_ability(_ABILITY).resource_cost
-	var spent := client_resource_before - client_combatant.current_resource
-	if is_equal_approx(spent, cost):
+	if _client_resource_emitted < 0.0:
+		_fail("predicting emitted no resource_changed, so the HUD bar never moved")
+	elif is_equal_approx(client_resource_before - _client_resource_emitted, cost):
 		_pass("a prediction shows the resource spend before the server replies")
 	else:
-		_fail("client predicted a spend of %.1f, not the ability's cost of %.1f" % [spent, cost])
+		_fail(
+			(
+				"resource_changed reported %.1f, not the predicted %.1f"
+				% [_client_resource_emitted, client_resource_before - cost]
+			)
+		)
+
+	# The prediction must SURVIVE the regeneration frames that follow. The regen
+	# block emits every frame the pool moves, and emitting the raw backing field
+	# there re-asserts the unpredicted value and wipes the predicted spend off
+	# the bar within a frame of it appearing.
+	for _i in range(_SETTLE_FRAMES):
+		await physics_frame
+		if not client_combatant.get_prediction_ledger().has(_ABILITY):
+			break
+	if _resource_watch_violation != "":
+		_fail("an emit contradicted the predicted state: %s" % _resource_watch_violation)
+	_resource_watch_armed = false
 
 
 ## Confirmation: the server's replicated value takes the prediction's place
