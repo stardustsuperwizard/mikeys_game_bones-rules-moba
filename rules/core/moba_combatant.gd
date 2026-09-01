@@ -362,8 +362,12 @@ func _get_damage_resolver() -> MobaDamageResolver:
 
 ## Set health directly and run the mirror/signal/death pass, without marking it
 ## externally seeded the way the current_health setter does. Exists for
-## MobaDamageResolver and MobaCombatantTicker to call, the same way several
-## methods here exist solely for MobaDeathHandler.
+## MobaDamageResolver to call, the same way several methods here exist solely
+## for MobaDeathHandler.
+##
+## Public only because that collaborator needs it, so it is registered in
+## CommandMutatorContractTest.MUTATOR_METHODS: game-side code reaching for this
+## instead of apply_damage() would skip the whole resolution pipeline.
 func write_health(value: float) -> void:
 	_current_health = value
 	_update_health()

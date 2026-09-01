@@ -24,6 +24,15 @@ const MUTATOR_METHODS := [
 	"apply_shield",
 	"apply_crowd_control",
 	"apply_stat_modifier",
+	# Collaborator seams (#325). These exist for MobaDamageResolver and
+	# MobaActivationGate to call, and are the most dangerous methods on the
+	# class -- write_health() in particular bypasses the current_health setter's
+	# _ensure_runtime_stat_block() and externally-seeded bookkeeping. Being
+	# internal-by-intention is exactly why they belong here: nothing but this
+	# list stops game-side code picking them up as a shortcut past the gate.
+	"write_health",
+	"consume_shields",
+	"start_cooldown",
 	"spend_resource",
 	"restore_resource",
 	"commit_activate",

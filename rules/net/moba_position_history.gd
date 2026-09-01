@@ -20,8 +20,14 @@
 ## by default, so real samples land ~16.7 ms apart and 16 slots retain ~267 ms
 ## -- comfortably past the 120 ms window. Assuming a faster tick than the real
 ## one is the safe direction: it over-allocates rather than letting the buffer
-## wrap before the window is covered, and it leaves headroom if the physics
-## rate is raised later.
+## wrap before the window is covered.
+##
+## That headroom is bounded, though, and the bound is the margin rather than the
+## assumed interval: 16 slots cover 120 ms only down to a 7.5 ms spacing, i.e. a
+## physics rate up to ~133 Hz. Past that the buffer wraps inside the rewind
+## window and position_at() starts clamping where it should interpolate. A
+## project that raises physics_ticks_per_second beyond ~133 must lower
+## _ASSUMED_MIN_SAMPLE_INTERVAL_MS to match.
 ##
 ## ## Interpolation
 ##
