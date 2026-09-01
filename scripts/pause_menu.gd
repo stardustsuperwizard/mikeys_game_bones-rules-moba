@@ -12,9 +12,21 @@
 ## have been equally acceptable per the Issue; returning to the menu is the
 ## choice that keeps the menu's own three entry points reachable.
 ##
-## The root is a CanvasLayer on layer 10 and `process_mode` is
-## PROCESS_MODE_ALWAYS; both are set in `scenes/ui/pause_menu.tscn` and the
-## reasons are recorded there.
+## Two properties are set on the root in `scenes/ui/pause_menu.tscn`, and their
+## reasons are recorded here rather than beside them: a `.tscn` can carry `;`
+## comments, but the Godot editor drops them on the next resave, so a rationale
+## written there does not survive anyone opening the scene.
+##
+## - `layer = 10`. The combat HUD (`rules/ui/moba_combat_hud.tscn`) is itself a
+##   CanvasLayer and leaves `layer` at its default 1. A plain Control would draw
+##   on layer 0, underneath it; the overlay has to cover the HUD, so it takes a
+##   higher layer of its own. This is also why the root is a CanvasLayer at all.
+## - `process_mode = 3` (PROCESS_MODE_ALWAYS). With the tree paused only ALWAYS
+##   nodes still receive `_input()`, so without it Escape could open the overlay
+##   but never close it again.
+##
+## `tests/menu_pause_test.gd` asserts both, so a resave that drops them fails
+## there rather than silently shipping an unclosable overlay behind the HUD.
 extends CanvasLayer
 
 const _MAIN_MENU_SCENE := "res://scenes/ui/main_menu.tscn"

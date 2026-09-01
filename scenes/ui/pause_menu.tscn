@@ -2,14 +2,6 @@
 
 [ext_resource type="Script" path="res://scripts/pause_menu.gd" id="1"]
 
-; A CanvasLayer, not a bare Control: the combat HUD
-; (rules/ui/moba_combat_hud.tscn) is itself a CanvasLayer on the default
-; layer 1, and a plain Control draws on layer 0 -- underneath it. The pause
-; overlay has to cover the HUD, so it takes a higher layer of its own.
-;
-; process_mode = 3 is PROCESS_MODE_ALWAYS, set here rather than in code so the
-; scene declares it: with the tree paused, only ALWAYS nodes still receive
-; _input(), and without it Escape could open the overlay but never close it.
 [node name="PauseMenu" type="CanvasLayer"]
 layer = 10
 process_mode = 3
