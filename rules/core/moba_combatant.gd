@@ -190,6 +190,9 @@ var _basic_attack_cycle: MobaBasicAttackCycle = null
 ## non-empty on a requesting client -- the server resolves, never predicts.
 var _predictions: MobaPredictionLedger = MobaPredictionLedger.new()
 
+## Rewind window this combatant's position is sampled into (#48).
+var _position_history := MobaPositionHistory.new()
+
 
 func _ready() -> void:
 	# Duplicate the stat block before any mutation. Replicated spawn state may
@@ -262,6 +265,11 @@ func get_effect_container() -> MobaEffectContainer:
 	_effect_container.effect_stacks_changed.connect(_on_effect_stacks_changed)
 	_effect_container.effect_expired.connect(_on_effect_container_changed)
 	return _effect_container
+
+
+## The rewind-window position samples this combatant records into (#48).
+func get_position_history() -> MobaPositionHistory:
+	return _position_history
 
 
 ## Duplicate the stat block on first need rather than only in _ready().
@@ -1072,6 +1080,15 @@ func deactivate_toggle() -> void:
 ## While DEAD, advances the auto-respawn countdown if the policy allows it.
 func tick(delta: float) -> void:
 	var state_machine := get_state_machine()
+
+	# Sample position for lag compensation (#48). Server or offline only: a
+	# client's predicted copy would record history nothing ever reads.
+	# `multiplayer` is null outside the tree, where every headless fixture
+	# ticks, so read that as offline instead of dereferencing it.
+	var host := get_parent() as Actor
+	var offline := multiplayer == null or not multiplayer.has_multiplayer_peer()
+	if host != null and (offline or multiplayer.is_server()):
+		_position_history.record(Time.get_ticks_msec(), host.global_position)
 
 	# Advance auto-respawn countdown if DEAD and policy allows auto-respawn
 	if state_machine != null and state_machine.current_state == MobaState.DEAD:
