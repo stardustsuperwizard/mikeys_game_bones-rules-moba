@@ -127,10 +127,16 @@ var active_cooldowns_snapshot: Array:
 var _runtime_stat_block: MobaStatBlock
 var _current_health: float = 0.0
 var _current_resource: float = 0.0
-## Set when replicated spawn state supplied a value before _ready() ran, so
-## _ready() leaves it alone instead of resetting to the stat block's maximum.
-## Without these, a peer joining a session mid-fight would be handed the
-## server's real health and then immediately show full health instead.
+## Set when the public setter supplied a value, so _ready() leaves it alone
+## instead of resetting to the stat block's maximum. Without these, a peer
+## joining a session mid-fight would be handed the server's real health and
+## then immediately show full health instead.
+##
+## Any write through the setter trips these, not only a replicated one -- the
+## setter cannot tell the two apart, and does not need to. Gameplay writes go
+## to the backing fields and all happen after _ready(), so the only assignment
+## these actually change the outcome of is one that beat _ready() to it, which
+## in practice means replicated spawn state.
 var _health_externally_seeded: bool = false
 var _resource_externally_seeded: bool = false
 var _cooldowns: MobaCooldowns = MobaCooldowns.new()
@@ -236,7 +242,7 @@ func get_effect_container() -> MobaEffectContainer:
 		# actor's whole life: leaked, and outside the subtree whose authority
 		# it is supposed to inherit. Retry once the parent is settled.
 		if _effect_container.get_parent() == null:
-			call_deferred("_attach_effect_container")
+			_attach_effect_container.call_deferred()
 
 	# Any container mutation makes the cached per-stat values stale.
 	_effect_container.effect_applied.connect(_on_effect_container_changed)
