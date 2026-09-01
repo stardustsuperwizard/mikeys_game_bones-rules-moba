@@ -207,6 +207,18 @@ func predicted_cast_time() -> float:
 	return 0.0
 
 
+## The ability this peer is predicting a cast for, or null when none is.
+##
+## Resolving the id here rather than at the call site keeps the library lookup in
+## rules/core/, and lets MobaCastBar read an ability object exactly as it already
+## does from get_casting_ability() and get_channeling_ability().
+func predicted_cast_ability() -> MobaAbility:
+	var ability_id := predicted_cast_ability_id()
+	if ability_id == &"":
+		return null
+	return MobaAbilityLibrary.get_ability(ability_id)
+
+
 ## Ability id this peer is predicting a cast for, or an empty StringName.
 func predicted_cast_ability_id() -> StringName:
 	for key in _entries:

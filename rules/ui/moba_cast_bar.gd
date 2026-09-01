@@ -119,8 +119,7 @@ func _has_predicted_cast() -> bool:
 ## confirmation that predicting is meant to avoid.
 func _render_predicted_cast() -> void:
 	var ledger := _combatant.get_prediction_ledger()
-	var ability_id: StringName = ledger.predicted_cast_ability_id()
-	var ability := MobaAbilityLibrary.get_ability(ability_id)
+	var ability := ledger.predicted_cast_ability()
 	if ability == null:
 		_render_empty()
 		return
