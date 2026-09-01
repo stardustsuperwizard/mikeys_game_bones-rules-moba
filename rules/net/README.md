@@ -97,8 +97,97 @@ A client's ability request succeeds or fails server-side, then its result propag
 
 When a connected peer disconnects, `WorldManager._on_peer_disconnected()` immediately frees that peer's actor. Any in-progress cast (in `MobaCombatant`'s cast/channel/toggle tracker) is destroyed with it — no separate cleanup is needed. This is the documented rule for handling casts interrupted by disconnection.
 
-### No Client-Side Prediction (This Task)
+### Client-Side Prediction and Rollback (#321)
 
-This task does not include client-side prediction of HUD state (cooldowns, resources, cast bar). That is scope for a sibling task. A client simply waits for the server's replication to learn the action's result.
+Since #320 the server is the sole executor of a client's ability activation and
+basic attack, which leaves the requesting client a full round trip with no
+feedback. So on sending the request, the client also records a **prediction**:
+a client-local overlay on its own rendered state, held in `MobaPredictionLedger`
+and read through `MobaCombatant`'s existing public accessors.
+
+#### What is predicted, and what is not
+
+| Predicted client-side, immediately | Always requires the server round trip |
+| --- | --- |
+| The ability's cooldown sweep starting | Whether the activation actually happens |
+| The ability's resource cost being spent | The real cooldown, resource and charge ledger |
+| The cast bar appearing for a cast-time ability | Damage, crowd control, shields, death |
+| That a requested swing is outstanding | The swing itself, and what it hits |
+| | The authoritative projectile a skillshot spawns |
+
+The prediction is an **offset**, never a write: `MobaCombatant`'s ledger is
+untouched, so a rollback is just dropping the entry — there is no spent resource
+to refund and no started cooldown to cancel. It is applied only on the requesting
+client, never broadcast, and never treated as final. The server remains the only
+peer that reaches `ActionRunner.run()` for these commands.
+
+Movement prediction is unrelated and unchanged: it runs off the per-peer
+movement authority on `ActorBody3D` (`is_multiplayer_authority()`), which #321
+does not touch.
+
+#### How a prediction ends
+
+Every prediction ends in exactly one of two ways:
+
+- **Superseded** — the server's replicated ledger shows the request committed,
+  the overlay is dropped, and the real value takes over. Because
+  `get_cooldown_remaining()` returns the larger of the two, the replicated value
+  is the same sweep a round trip further along and takes over without the sweep
+  visibly restarting from full.
+- **Rolled back** — the server refused, and said so with `Actor.deny_activation()`.
+
+A third exit exists only as a backstop: `MobaPredictionLedger.TIMEOUT_SECONDS`.
+Neither answer arrives if the request died with the connection, and a prediction
+that outlived both would be a HUD lying indefinitely.
+
+#### Why a denial RPC is required
+
+The combat state replicates at `replication_mode = 2` (on-change), which re-sends
+a value only when the **server's own** copy of it changes. A refusal changes
+nothing on the server by definition, so nothing is re-sent, and "wait for the
+next sync" would structurally never fire. The denial has to be explicit.
+
+For the same reason, confirmation is measured against `_last_replicated` — what
+the server last said — and not against the local ledger. Anything local may write
+that ledger, including a stale or tampered client's own guess, and a cooldown the
+server was *already* running would otherwise read as proof that it accepted a
+request it in fact refused.
+
+`Actor._deny_if_predicted()` sends the denial only for refusals the client would
+have predicted through: an `Authority.can_perform()` refusal (an `ActionResult`
+carrying no reason) and the `MobaCombatant.can_activate()` refusals. A swing
+refused mid-cycle is deliberately excluded — `PlayerController3D`'s
+forwarded-attack latch re-requests against exactly that case, so denying it would
+put a reliable RPC on the wire every frame the latch holds.
+
+#### The denial's RPC mode
+
+`deny_activation()` is annotated `@rpc("any_peer", "call_remote", "reliable")`
+and guards on `multiplayer.get_remote_sender_id() != 1`, rather than using the
+`"authority"` mode the request path uses. That is the same rule read in the right
+direction, not a weaker one: `world_manager.gd` sets an actor's multiplayer
+authority to its **owning peer**, which is what makes `"authority"` correct for a
+client-to-server request on its own actor — and wrong travelling back, where the
+sender is the server and the node's authority is the client being addressed.
+Godot drops every such call:
+
+```
+RPC 'deny_activation' is not allowed on node /root/ClientPeer/Arena/Player
+from: 1. Mode is "authority", authority is 259047170.
+```
+
+The explicit sender check restores exactly the guarantee the annotation would
+have given: only the server can deny.
+
+#### Where it lives
+
+- `rules/core/moba_prediction_ledger.gd` — the overlay, and the confirm/rollback rules
+- `MobaCombatant.get_prediction_ledger()` — the seam; the accessors above it
+  (`current_resource`, `get_cooldown_remaining()`, `get_cooldown_duration()`,
+  `get_charges()`, `can_activate()`) already read through the overlay
+- `Actor.try_activate_slot()` / `Actor.try_basic_attack()` — predict, then request
+- `Actor.deny_activation()` — the server-to-requester denial RPC
+- `rules/ui/moba_cast_bar.gd` — shows the predicted cast, still reading a public
+  getter only, keeping `rules/ui/`'s "signals in, nothing out" rule intact
 
 The client's soft-lock/magnetism computation (#38) stays client-side for feel — only the final confirmation (whether the projectile actually spawns) is server-side.

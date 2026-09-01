@@ -1,5 +1,6 @@
 # Two-peer headless integration test for #320's server-authoritative
-# request/resolve routing of ability activation.
+# request/resolve routing of ability activation, and for #321's client-side
+# prediction and rollback layered on top of it.
 #
 # Run with:
 #   godot --headless --path . --script tests/server_authority_activation_test.gd
@@ -16,7 +17,18 @@
 #   - the client's own copy of the actor never resolves anything locally: only
 #     the server's ActionRunner.run() ever runs;
 #   - a client's BASIC ATTACK request takes the same route and lands on the
-#     server, damaging the target the server re-resolved from the sent path.
+#     server, damaging the target the server re-resolved from the sent path;
+#   - #321: a refused prediction is rolled back by the server's explicit denial
+#     RPC, leaving no cooldown and nothing spent; a prediction is visible on the
+#     frame the request is sent, before any reply could have arrived; and a
+#     confirmed prediction hands over to the server's own value without the
+#     cooldown sweep restarting or dipping to zero on any frame in between.
+#
+# The refusal case is checked FIRST, and deliberately: a prediction system with
+# no rollback is not prediction, it is a client that lies. Suppressing the denial
+# RPC in Actor._deny_if_predicted() must fail these checks -- if it does not,
+# they are passing on replication that would have arrived anyway and are testing
+# nothing.
 #
 # Both peers live in one headless process, as two MultiplayerAPI contexts bound
 # to two subtrees via SceneTree.set_multiplayer(), talking over loopback ENet.
@@ -73,6 +85,13 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"client observes the server starting the swing it requested",
 	"latch holds a forwarded swing the server refused mid-cycle",
 	"latch releases once the server confirms the swing started",
+	"a refused prediction is rolled back by the server's denial",
+	"a refused prediction leaves no cooldown behind",
+	"a refused prediction leaves nothing spent",
+	"a prediction starts the cooldown sweep before the server replies",
+	"a prediction shows the resource spend before the server replies",
+	"a confirmed prediction ends on the server's own cooldown",
+	"a confirmed prediction never restarts the sweep from full",
 ]
 
 var _failures: Array[String] = []
@@ -108,6 +127,9 @@ func _run() -> void:
 		await _test_server_side_refusal()
 		await _test_basic_attack_request()
 		await _test_forwarded_latch_survives_refusal()
+		await _test_refused_prediction_rolls_back()
+		await _test_prediction_is_immediate()
+		await _test_confirmed_prediction_does_not_snap()
 
 	_finish()
 
@@ -522,3 +544,191 @@ func _finish() -> void:
 	for failure in _failures:
 		printerr("FAIL %s" % failure)
 	quit(1)
+
+
+## The refusal path, first, because a prediction with no rollback is worse than
+## no prediction at all (#321).
+##
+## Wipes the CLIENT's ledger so its copy believes the ability is ready -- the
+## same stale client _test_server_side_refusal() uses -- while the SERVER's
+## cooldown is still running. The client therefore predicts, the server refuses,
+## and the only thing that can correct the client is the explicit
+## Actor.deny_activation() RPC: the combat state replicates on-change, and a
+## refusal changes nothing on the server for it to re-send.
+##
+## The settle window is a fraction of a second, well inside
+## MobaCombatant._PREDICTION_TIMEOUT_SECONDS, so a pass here is the denial
+## arriving and not the backstop expiring.
+func _test_refused_prediction_rolls_back() -> void:
+	var server_combatant := _combatant(_server_actor)
+	var client_combatant := _combatant(_client_actor)
+	if server_combatant == null or client_combatant == null:
+		return
+
+	# Re-arm the server's cooldown so the next request is refused on it.
+	var context := MobaCastContext.new(_client_actor, null, Vector3.FORWARD, Vector3.ZERO)
+	_client_actor.try_activate_slot(_SLOT, context)
+	await _settle()
+	if server_combatant.get_cooldown_remaining(_ABILITY) <= 0.0:
+		_fail("setup: server cooldown did not arm before the refusal check")
+		return
+
+	# Make the client's own copy believe the ability is ready, so it predicts.
+	client_combatant.clear_all_cooldowns()
+	client_combatant.restore_to_full()
+
+	_client_actor.try_activate_slot(_SLOT, context)
+
+	# Asked per ability rather than "any prediction at all": an unconfirmed swing
+	# left over from the basic-attack checks above is a different question, and
+	# either could otherwise mask the other.
+	if not client_combatant.get_prediction_ledger().has(_ABILITY):
+		_fail("client did not predict the activation it was about to be refused")
+		return
+
+	await _settle()
+
+	if not client_combatant.get_prediction_ledger().has(_ABILITY):
+		_pass("a refused prediction is rolled back by the server's denial")
+	else:
+		_fail("client still holds a prediction the server refused")
+
+	# What the client shows must be the server's truth, not the guess. The
+	# server's own cooldown is still running and replicates, so the client is
+	# expected to show THAT -- what must not survive is the predicted sweep the
+	# client started from its own wiped ledger.
+	var predicted_sweep := MobaAbilityLibrary.get_ability(_ABILITY).cooldown
+	var client_cooldown := client_combatant.get_cooldown_remaining(_ABILITY)
+	if is_equal_approx(client_cooldown, server_combatant.get_cooldown_remaining(_ABILITY)):
+		_pass("a refused prediction leaves no cooldown behind")
+	else:
+		_fail(
+			(
+				"client cooldown %.2f is neither the server's %.2f nor rolled back"
+				% [client_cooldown, server_combatant.get_cooldown_remaining(_ABILITY)]
+			)
+		)
+	if client_cooldown >= predicted_sweep:
+		_fail("the refused prediction's own sweep survived the rollback")
+
+	# Nothing spent: the client is back on the server's own resource exactly,
+	# carrying no predicted debit for a cast that never happened.
+	#
+	# Compared against the SERVER's value, not against what the client showed
+	# before the request: restore_to_full() above put a number on the client that
+	# was never true, and the server's real value replicating over it is the
+	# rollback working, not a spend. The predicted debit is what must be gone,
+	# and an exact match is what proves it is.
+	if is_equal_approx(client_combatant.current_resource, server_combatant.current_resource):
+		_pass("a refused prediction leaves nothing spent")
+	else:
+		_fail(
+			(
+				"client resource %.1f does not match the server's %.1f after rollback"
+				% [client_combatant.current_resource, server_combatant.current_resource]
+			)
+		)
+
+
+## The prediction itself: the sweep and the spend must be visible on the frame
+## the request goes out, not a round trip later.
+##
+## Read with no await at all between the request and the assertions -- an await
+## would let the server's reply arrive and make a passing check unable to tell
+## prediction from replication, which is the whole point of this one.
+func _test_prediction_is_immediate() -> void:
+	var server_combatant := _combatant(_server_actor)
+	var client_combatant := _combatant(_client_actor)
+	if server_combatant == null or client_combatant == null:
+		return
+
+	# Both ledgers clear, so the request is one the server will confirm.
+	server_combatant.clear_all_cooldowns()
+	server_combatant.restore_to_full()
+	client_combatant.clear_all_cooldowns()
+	client_combatant.restore_to_full()
+	await _settle()
+
+	var client_resource_before := client_combatant.current_resource
+	if client_combatant.get_cooldown_remaining(_ABILITY) > 0.0:
+		_fail("setup: client cooldown was not clear before the prediction check")
+		return
+
+	var context := MobaCastContext.new(_client_actor, null, Vector3.FORWARD, Vector3.ZERO)
+	_client_actor.try_activate_slot(_SLOT, context)
+
+	# Same frame. The server has not even received the packet yet.
+	if client_combatant.get_cooldown_remaining(_ABILITY) > 0.0:
+		_pass("a prediction starts the cooldown sweep before the server replies")
+	else:
+		_fail("client shows no cooldown on the frame it sent the request")
+
+	var cost := MobaAbilityLibrary.get_ability(_ABILITY).resource_cost
+	var spent := client_resource_before - client_combatant.current_resource
+	if is_equal_approx(spent, cost):
+		_pass("a prediction shows the resource spend before the server replies")
+	else:
+		_fail("client predicted a spend of %.1f, not the ability's cost of %.1f" % [spent, cost])
+
+
+## Confirmation: the server's replicated value takes the prediction's place
+## without the sweep visibly restarting.
+##
+## Samples every frame across the whole window rather than checking the endpoints.
+## A snap is by definition something that happens on ONE frame -- endpoints that
+## match prove nothing about the frames between them, which is exactly where a
+## prediction handed over badly would show.
+func _test_confirmed_prediction_does_not_snap() -> void:
+	var server_combatant := _combatant(_server_actor)
+	var client_combatant := _combatant(_client_actor)
+	if server_combatant == null or client_combatant == null:
+		return
+
+	server_combatant.clear_all_cooldowns()
+	server_combatant.restore_to_full()
+	client_combatant.clear_all_cooldowns()
+	client_combatant.restore_to_full()
+	await _settle()
+
+	var context := MobaCastContext.new(_client_actor, null, Vector3.FORWARD, Vector3.ZERO)
+	_client_actor.try_activate_slot(_SLOT, context)
+
+	var previous := client_combatant.get_cooldown_remaining(_ABILITY)
+	var snapped_upward := false
+	var dropped_to_zero := false
+	for _i in range(_SETTLE_FRAMES * 2):
+		await physics_frame
+		var current := client_combatant.get_cooldown_remaining(_ABILITY)
+		# The sweep may only ever run down. Going back UP is the visible restart
+		# the criterion forbids; reaching zero mid-flight and climbing again is
+		# the same fault seen from the other side.
+		if current > previous + 0.001:
+			snapped_upward = true
+		if current <= 0.0:
+			dropped_to_zero = true
+		previous = current
+
+	if client_combatant.get_prediction_ledger().has(_ABILITY):
+		_fail("the server confirmed the activation but the client kept predicting")
+	elif is_equal_approx(
+		client_combatant.get_cooldown_remaining(_ABILITY),
+		server_combatant.get_cooldown_remaining(_ABILITY)
+	):
+		_pass("a confirmed prediction ends on the server's own cooldown")
+	else:
+		_fail(
+			(
+				"client settled on cooldown %.2f, server holds %.2f"
+				% [
+					client_combatant.get_cooldown_remaining(_ABILITY),
+					server_combatant.get_cooldown_remaining(_ABILITY)
+				]
+			)
+		)
+
+	if not snapped_upward and not dropped_to_zero:
+		_pass("a confirmed prediction never restarts the sweep from full")
+	elif snapped_upward:
+		_fail("the cooldown sweep jumped backwards when the server's value arrived")
+	else:
+		_fail("the cooldown sweep fell to zero before the server's value arrived")

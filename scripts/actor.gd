@@ -1,6 +1,23 @@
 class_name Actor
 extends Node
 
+## Failure reasons that mean the request was refused by the two seams #321 names:
+## Authority.can_perform(), which returns an ActionResult carrying no reason at
+## all, and MobaCombatant.can_activate(), whose refusals surface as these.
+##
+## Deliberately not "every failure". A swing refused mid-cycle, a target that
+## walked out of range, an ability whose targeting found nothing -- those are the
+## request arriving at a moment that did not suit it, and the client's own
+## prediction expires on its own. Only a refusal the client predicted THROUGH is
+## worth a packet.
+const _DENIABLE_FAILURES: Array[StringName] = [
+	&"",  # Authority.can_perform() refused: ActionResult.new(false), no reason.
+	MobaAbilityAction.FAILURE_ON_COOLDOWN,
+	MobaAbilityAction.FAILURE_NO_CHARGES,
+	MobaAbilityAction.FAILURE_INSUFFICIENT_RESOURCE,
+	MobaAbilityAction.FAILURE_UNKNOWN_ABILITY,
+]
+
 @export var character_sheet: CharacterSheet
 @export var color: Color = Color.WHITE
 
@@ -73,6 +90,17 @@ func _ready() -> void:
 ## state (CombatStateSynchronizer), never through a return value here.
 func try_activate_slot(slot_index: int, context: MobaCastContext) -> ActionResult:
 	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+		# Predict locally before the ask goes out (#321), so the cooldown sweep,
+		# the resource spend and the cast bar start on the press instead of a
+		# round trip later. The prediction is an overlay on this peer's own
+		# rendered state only: it is never sent anywhere, and the server's own
+		# resolution below is still the only thing that mutates the real ledger.
+		var combatant := get_node_or_null("MobaCombatant") as MobaCombatant
+		if combatant != null:
+			var predicted_id := combatant.get_action_slot_ability_id(slot_index)
+			if predicted_id != &"":
+				combatant.get_prediction_ledger().predict_ability_for(combatant, predicted_id)
+
 		var target_path := NodePath()
 		if context.explicit_target != null and context.explicit_target.is_inside_tree():
 			target_path = context.explicit_target.get_path()
@@ -125,6 +153,9 @@ func request_activate_slot(
 ## owns that logic, and a second copy here would be free to drift from it. It is
 ## also what keeps this file clear of the direct MobaCombatant mutator calls the
 ## command-gate contract test forbids in scripts/.
+##
+## A refusal is reported back to the requester with deny_activation() (#321), so
+## the client can roll the prediction it made in try_activate_slot() back.
 func _resolve_activate_slot(
 	slot_index: int, context: MobaCastContext, requester_id: int
 ) -> ActionResult:
@@ -132,7 +163,11 @@ func _resolve_activate_slot(
 	if caster == null:
 		return ActionResult.new(false, MobaAbilityAction.FAILURE_INVALID_CONTEXT)
 
-	return caster.activate_slot(slot_index, context, requester_id)
+	var result := caster.activate_slot(slot_index, context, requester_id)
+	if not result.success:
+		_deny_if_predicted(_predicted_key_for_slot(slot_index), result.reason, requester_id)
+
+	return result
 
 
 ## Route a basic attack, resolving locally or asking the server.
@@ -143,6 +178,12 @@ func try_basic_attack(target: Actor) -> ActionResult:
 	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
 		if target == null or not target.is_inside_tree():
 			return null
+
+		# Predict the swing (#321), on the same terms as the activation above.
+		var combatant := get_node_or_null("MobaCombatant") as MobaCombatant
+		if combatant != null:
+			combatant.get_prediction_ledger().predict_basic_attack()
+
 		request_basic_attack.rpc_id(1, target.get_path(), Time.get_ticks_msec())
 		return null
 
@@ -168,8 +209,71 @@ func request_basic_attack(target_path: NodePath, _client_ticks_msec: int) -> voi
 ##
 ## The swing's own preconditions -- the attack cycle's wind-up and recovery, the
 ## target having a MobaCombatant at all -- stay inside MobaBasicAttackAction.
+##
+## A refusal is reported back to the requester with deny_activation() (#321), on
+## the same terms as _resolve_activate_slot() -- which, for the swing, means
+## almost never: _deny_if_predicted() answers an Authority refusal and a
+## can_activate() refusal only, and the mid-cycle wind-up/recovery refusal that
+## PlayerController3D's forwarded-attack latch re-requests against is neither.
+## Denying that one would put a reliable RPC on the wire every frame the latch
+## holds, to roll back a prediction whose own confirmation is the replicated
+## swing the latch is already waiting for.
 func _resolve_basic_attack(target: Actor, requester_id: int) -> ActionResult:
 	if target == null:
 		return ActionResult.new(false, MobaBasicAttackAction.FAILURE_NO_TARGET_COMBATANT)
 
-	return ActionRunner.run(MobaBasicAttackAction.new(self, target), requester_id)
+	var result := ActionRunner.run(MobaBasicAttackAction.new(self, target), requester_id)
+	if not result.success:
+		_deny_if_predicted(MobaPredictionLedger.BASIC_ATTACK, result.reason, requester_id)
+
+	return result
+
+
+# --- Client-side prediction denial (#321) ---
+#
+# The combat state replicates at replication_mode = 2 (on-change), which re-sends
+# a value only when the SERVER's own copy of it changes. A refusal changes
+# nothing on the server by definition, so it is never re-sent, and a client that
+# guessed wrong would wait for a correction that structurally cannot arrive.
+# Hence an explicit denial, addressed to the one peer that guessed.
+
+
+## Tell the requesting peer its request was refused, when the refusal is one the
+## peer would have predicted through and the requester is not this peer itself.
+func _deny_if_predicted(key: StringName, reason: StringName, requester_id: int) -> void:
+	if requester_id == multiplayer.get_unique_id():
+		return
+	if reason not in _DENIABLE_FAILURES:
+		return
+	deny_activation.rpc_id(requester_id, key)
+
+
+## The prediction key try_activate_slot() would have used for this slot, so a
+## denial rolls back that ability's prediction and leaves any other alone.
+func _predicted_key_for_slot(slot_index: int) -> StringName:
+	var combatant := get_node_or_null("MobaCombatant") as MobaCombatant
+	if combatant == null:
+		return &""
+	return combatant.get_action_slot_ability_id(slot_index)
+
+
+## Notify a requesting client that the server refused its request, so it can roll
+## the matching prediction back to the last server-replicated values.
+##
+## Sent with "any_peer" rather than the "authority" the request path uses, and
+## guarded here on the sender being peer 1. That is not a weaker rule, it is the
+## same rule read in the right direction: world_manager.gd sets an actor's
+## multiplayer authority to its OWNING PEER, which is what makes "authority" the
+## correct mode for a client-to-server request on its own actor -- and what makes
+## it the wrong mode travelling back, where the sender is the server and the
+## node's authority is the client this is addressed to. Godot would drop every
+## such call. The explicit sender check restores exactly the guarantee the
+## annotation would have given: only the server can deny.
+@rpc("any_peer", "call_remote", "reliable")
+func deny_activation(key: StringName) -> void:
+	if multiplayer.get_remote_sender_id() != 1:
+		return
+
+	var combatant := get_node_or_null("MobaCombatant") as MobaCombatant
+	if combatant != null:
+		combatant.get_prediction_ledger().rollback(key)
