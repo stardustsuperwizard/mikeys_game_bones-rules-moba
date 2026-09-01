@@ -317,6 +317,18 @@ Combat is server-authoritative in *shape* — one gated command out of three
 Replication is the substrate only: it carries steady state, not one-shot
 events like damage numbers, and it does not validate what a client submits.
 
+One gap is worth naming, because the replication authority and the tick gate
+currently disagree. `PlayerController3D._physics_process()` gates on the
+**Body's** authority, and the Body belongs to the connecting peer — so for a
+client-owned actor it is the *client*, not the server, that calls
+`MobaCombatant.tick()`, advancing regen, cooldowns and effect expiry on a
+node the server is authoritative for. The server's values overwrite the
+client's whenever the server changes them, so the two drift between server-side
+changes rather than diverging permanently. Closing it means either ticking
+combat on the authority or reconciling the two, which is #47's
+(prediction/reconciliation) and #277's (command routing) territory, not the
+substrate's.
+
 ### 3.3 Dialogue and narrative tools
 
 A stated project goal is fostering creative storytelling, but there is no

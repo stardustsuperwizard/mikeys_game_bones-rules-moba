@@ -24,12 +24,16 @@
 # Authority is asserted against a non-1 peer id, so a node that merely defaulted
 # to the server is distinguishable from one deliberately set to it.
 #
-# This test is NOT wired into tests/test_bootstrap.gd: it loads game scenes,
-# matching the precedent set by tests/session_manager_test.gd.
+# Spawning goes through WorldManager.spawn(), not a local copy of its authority
+# sequence, so deleting the set_multiplayer_authority(1) calls from
+# scripts/world_manager.gd fails this test rather than sliding past it.
+#
+# This test is NOT wired into tests/test_bootstrap.gd: it loads game scenes and
+# a WorldManager, matching the precedent set by tests/session_manager_test.gd.
 extends SceneTree
 
-const _PLAYER_SCENE := preload("res://scenes/player/player.tscn")
-const _ENEMY_SCENE := preload("res://scenes/enemy/enemy.tscn")
+const _PLAYER_SPAWN_POINT := preload("res://resources/player_spawn_point.tres")
+const _ENEMY_SPAWN_POINT := preload("res://resources/enemy_spawn_point.tres")
 
 # A peer id that is neither the server (1) nor "unowned" (0).
 const _OWNING_PEER := 7
@@ -69,23 +73,34 @@ func _run() -> void:
 	_finish()
 
 
-## Mirror WorldManager._spawn_actor()'s authority sequence: one recursive call
-## for the whole actor, then the two explicit server-side re-sets.
-func _spawn(scene: PackedScene, authority_id: int) -> Node:
-	var actor: Node = scene.instantiate()
-	root.add_child(actor)
+## Spawn through the real WorldManager.
+##
+## Deliberately calls WorldManager.spawn() rather than re-applying the
+## authority sequence here: a copy of that sequence would stay green if
+## someone deleted the set_multiplayer_authority(1) calls from
+## scripts/world_manager.gd, which is the regression most worth catching.
+## A bare WorldManager has no MultiplayerSpawner child, so spawn() falls
+## through to _spawn_actor() directly -- the same function the spawner
+## calls as its spawn_function in the real scene.
+func _spawn(spawn_point: SpawnPoint, authority_id: int) -> Node:
+	var world_manager := WorldManager.new()
+	root.add_child(world_manager)
 
-	actor.set_multiplayer_authority(authority_id)
-	actor.get_node("MobaCombatant").set_multiplayer_authority(1)
-	actor.get_node("MobaStateMachine").set_multiplayer_authority(1)
+	var actor: Node = world_manager.spawn(spawn_point, authority_id)
+	if actor == null:
+		return null
 
+	# _spawn_actor() returns an unparented actor; the MultiplayerSpawner is
+	# what parents it in the real scene. Add it so _ready() runs, matching
+	# what a spawned actor actually experiences.
+	world_manager.add_child(actor)
 	return actor
 
 
 ## The player's movement subtree stays with the connecting peer while its
 ## combat subtree is the server's.
 func _test_player_authority_split() -> void:
-	var actor := _spawn(_PLAYER_SCENE, _OWNING_PEER)
+	var actor := _spawn(_PLAYER_SPAWN_POINT, _OWNING_PEER)
 
 	if actor.get_multiplayer_authority() != _OWNING_PEER:
 		_fail(
@@ -104,13 +119,17 @@ func _test_player_authority_split() -> void:
 		_pass("player combat subtree is server-authoritative")
 
 	# The effect container is added as a runtime child of MobaCombatant on first
-	# use, so it inherits that node's authority instead of needing its own call.
-	# If MobaCombatant were ever set before the container existed AND Godot
-	# stopped propagating to later children, this is where it would show up.
+	# use, so it takes that node's server authority. It must be a real child:
+	# add_child() is refused while MobaCombatant is itself still being set up,
+	# which is exactly when replicated spawn state first touches it, and a
+	# cached-but-unparented container would be leaked and outside the subtree
+	# whose authority it is supposed to carry.
 	var combatant := actor.get_node("MobaCombatant")
 	var container: Node = combatant.get_effect_container()
 	if container == null:
 		_fail("setup: player MobaCombatant returned no effect container")
+	elif container.get_parent() != combatant:
+		_fail("MobaEffectContainer is not parented to MobaCombatant (orphaned)")
 	elif container.get_multiplayer_authority() != 1:
 		_fail(
 			(
@@ -126,7 +145,7 @@ func _test_player_authority_split() -> void:
 
 ## The same split holds for world/bot content, which spawns with authority 0.
 func _test_enemy_authority_split() -> void:
-	var actor := _spawn(_ENEMY_SCENE, 0)
+	var actor := _spawn(_ENEMY_SPAWN_POINT, 0)
 
 	if _check_authority(actor, _SERVER_OWNED, 1, "enemy"):
 		_pass("enemy combat subtree is server-authoritative")

@@ -28,6 +28,9 @@ static func run() -> bool:
 	all_violations.append_array(_test_settable_cooldowns_snapshot())
 	all_violations.append_array(_test_settable_state_machine_state())
 	all_violations.append_array(_test_state_machine_no_double_emit())
+	all_violations.append_array(_test_unchanged_snapshot_is_silent())
+	all_violations.append_array(_test_snapshot_reconciles_changes())
+	all_violations.append_array(_test_spawn_state_before_ready())
 
 	if all_violations.is_empty():
 		return true
@@ -389,5 +392,279 @@ static func _test_state_machine_no_double_emit() -> Array[String]:
 		)
 	if state_machine.current_state != MobaState.IDLE:
 		violations.append("state_machine_no_double_emit: tick expiry did not return to IDLE")
+
+	return violations
+
+
+## Re-applying an identical snapshot must emit nothing at all.
+##
+## Regression guard for the clear-and-rebuild the snapshot setters used to do.
+## The snapshots carry `remaining`, which decays every tick on the authority,
+## so these properties re-arrive every frame while anything is active. A
+## teardown-and-recreate emitted effect_expired + effect_applied per entry per
+## frame, which frees and rebuilds every status tray icon ~60x/second, while
+## the local path for a steady effect emits nothing.
+static func _test_unchanged_snapshot_is_silent() -> Array[String]:
+	var violations: Array[String] = []
+
+	var combatant := _make_combatant()
+	var container := combatant.get_effect_container()
+
+	var effects_snapshot: Array = [
+		{
+			"source_ability_id": &"steady_buff",
+			"stat": MobaStatBlock.ARMOR,
+			"magnitude": 10.0,
+			"is_percentage": false,
+			"duration": 8.0,
+			"remaining": 5.0,
+			"stacks": 1,
+			"max_stacks": 3,
+			"is_debuff": false,
+		}
+	]
+	var shields_snapshot: Array = [
+		{"amount": 100.0, "source": &"steady_shield", "remaining": 5.0},
+	]
+
+	combatant.active_effects_snapshot = effects_snapshot
+	combatant.active_shields_snapshot = shields_snapshot
+
+	# Count only what happens after the initial apply.
+	var seen := {"applied": 0, "expired": 0, "refreshed": 0, "stacks": 0, "shield": 0}
+	container.effect_applied.connect(
+		func(_source: StringName, _stat: StringName): seen["applied"] += 1
+	)
+	container.effect_expired.connect(
+		func(_source: StringName, _stat: StringName): seen["expired"] += 1
+	)
+	container.effect_refreshed.connect(
+		func(_source: StringName, _stat: StringName): seen["refreshed"] += 1
+	)
+	container.effect_stacks_changed.connect(
+		func(_source: StringName, _stat: StringName, _stacks: int): seen["stacks"] += 1
+	)
+	combatant.shield_changed.connect(func(_total: float): seen["shield"] += 1)
+
+	# Re-send the identical snapshot the way an on-change property would.
+	for _i in range(5):
+		combatant.active_effects_snapshot = effects_snapshot
+		combatant.active_shields_snapshot = shields_snapshot
+
+	for key in ["applied", "expired", "refreshed", "stacks", "shield"]:
+		if seen[key] != 0:
+			(
+				violations
+				. append(
+					(
+						"unchanged_snapshot_is_silent: %s emitted %d times over 5 identical re-applies, expected 0"
+						% [key, seen[key]]
+					)
+				)
+			)
+
+	# Silence must not mean "did nothing": the state is still there.
+	if not container.has_modifier(&"steady_buff", MobaStatBlock.ARMOR):
+		violations.append("unchanged_snapshot_is_silent: the effect was lost")
+	if not is_equal_approx(combatant.total_shield(), 100.0):
+		violations.append(
+			(
+				"unchanged_snapshot_is_silent: total_shield is %f, expected 100.0"
+				% combatant.total_shield()
+			)
+		)
+
+	# A decaying `remaining` is the common case and must also stay silent.
+	var decayed: Array = [effects_snapshot[0].duplicate()]
+	decayed[0]["remaining"] = 4.0
+	combatant.active_effects_snapshot = decayed
+	if seen["applied"] != 0 or seen["expired"] != 0 or seen["refreshed"] != 0:
+		violations.append("unchanged_snapshot_is_silent: a decaying remaining should emit nothing")
+
+	return violations
+
+
+## A snapshot that genuinely changes must still emit the right signal.
+##
+## The counterpart to the silence check above: reconciling must not go so far
+## that a real change stops reaching the HUD.
+static func _test_snapshot_reconciles_changes() -> Array[String]:
+	var violations: Array[String] = []
+
+	var combatant := _make_combatant()
+	var container := combatant.get_effect_container()
+
+	var base_entry := {
+		"source_ability_id": &"buff",
+		"stat": MobaStatBlock.ARMOR,
+		"magnitude": 10.0,
+		"is_percentage": false,
+		"duration": 8.0,
+		"remaining": 5.0,
+		"stacks": 1,
+		"max_stacks": 3,
+		"is_debuff": false,
+	}
+	combatant.active_effects_snapshot = [base_entry]
+
+	var seen := {"applied": 0, "expired": 0, "refreshed": 0, "stacks": 0}
+	container.effect_applied.connect(
+		func(_source: StringName, _stat: StringName): seen["applied"] += 1
+	)
+	container.effect_expired.connect(
+		func(_source: StringName, _stat: StringName): seen["expired"] += 1
+	)
+	container.effect_refreshed.connect(
+		func(_source: StringName, _stat: StringName): seen["refreshed"] += 1
+	)
+	container.effect_stacks_changed.connect(
+		func(_source: StringName, _stat: StringName, _stacks: int): seen["stacks"] += 1
+	)
+
+	# A stack gain reports as a stack change, once.
+	var stacked := base_entry.duplicate()
+	stacked["stacks"] = 2
+	combatant.active_effects_snapshot = [stacked]
+	if seen["stacks"] != 1:
+		violations.append(
+			(
+				"snapshot_reconciles_changes: stack gain emitted %d stacks_changed, expected 1"
+				% seen["stacks"]
+			)
+		)
+
+	# remaining going back up is a refresh on the authority.
+	var refreshed := stacked.duplicate()
+	refreshed["remaining"] = 8.0
+	combatant.active_effects_snapshot = [refreshed]
+	if seen["refreshed"] != 1:
+		violations.append(
+			(
+				"snapshot_reconciles_changes: refresh emitted %d effect_refreshed, expected 1"
+				% seen["refreshed"]
+			)
+		)
+
+	# A new identity is an apply, and the old one going away is an expiry.
+	var replacement := base_entry.duplicate()
+	replacement["source_ability_id"] = &"other_buff"
+	combatant.active_effects_snapshot = [replacement]
+	if seen["applied"] != 1:
+		violations.append(
+			(
+				"snapshot_reconciles_changes: new identity emitted %d effect_applied, expected 1"
+				% seen["applied"]
+			)
+		)
+	if seen["expired"] != 1:
+		(
+			violations
+			. append(
+				(
+					"snapshot_reconciles_changes: removed identity emitted %d effect_expired, expected 1"
+					% seen["expired"]
+				)
+			)
+		)
+
+	# An empty snapshot clears the container.
+	combatant.active_effects_snapshot = []
+	if container.has_modifier(&"other_buff", MobaStatBlock.ARMOR):
+		violations.append("snapshot_reconciles_changes: empty snapshot left an effect behind")
+
+	# Cooldown snapshots must round-trip the duration, not fabricate it from
+	# the remaining time -- an ability slot draws remaining over duration.
+	var ability := MobaAbility.new()
+	ability.id = "cd_ability"
+	ability.cooldown = 10.0
+	ability.charges = 1
+	combatant.register_ability(ability)
+	combatant.active_cooldowns_snapshot = [
+		{
+			"ability_id": &"cd_ability",
+			"timer_remaining": 2.5,
+			"timer_duration": 10.0,
+			"available_charges": 0,
+		}
+	]
+	var round_tripped: Array = combatant.active_cooldowns_snapshot
+	if round_tripped.size() != 1:
+		violations.append("snapshot_reconciles_changes: cooldown snapshot did not round-trip")
+	elif not is_equal_approx(float(round_tripped[0].get("timer_duration", 0.0)), 10.0):
+		violations.append(
+			(
+				"snapshot_reconciles_changes: cooldown timer_duration is %f, expected 10.0"
+				% float(round_tripped[0].get("timer_duration", 0.0))
+			)
+		)
+
+	return violations
+
+
+## Replicated spawn state arrives before _ready(); the combatant must cope.
+##
+## A MultiplayerSynchronizer applies spawn-state properties during add_child(),
+## inside ENTER_TREE. Before this was handled, the setters faulted on a null
+## _runtime_stat_block and _ready() then overwrote the replicated health with a
+## full-health default, so a peer joining mid-fight saw full health.
+static func _test_spawn_state_before_ready() -> Array[String]:
+	var violations: Array[String] = []
+
+	# Deliberately NOT _make_combatant(): that seeds _runtime_stat_block, which
+	# is the very thing absent before _ready() runs.
+	var combatant := MobaCombatant.new()
+	combatant.stat_block = _BASELINE_STAT_BLOCK
+
+	var seen := {"health": 0}
+	combatant.health_changed.connect(func(_c: float, _m: float): seen["health"] += 1)
+
+	combatant.current_health = 120.0
+
+	if seen["health"] == 0:
+		violations.append(
+			"spawn_state_before_ready: health_changed did not fire for a pre-_ready assignment"
+		)
+	if not is_equal_approx(combatant.current_health, 120.0):
+		violations.append(
+			(
+				"spawn_state_before_ready: current_health is %f, expected 120.0"
+				% combatant.current_health
+			)
+		)
+	if combatant.maximum_health <= 0.0:
+		violations.append(
+			(
+				"spawn_state_before_ready: maximum_health unavailable before _ready() (%f)"
+				% combatant.maximum_health
+			)
+		)
+
+	# _ready() must leave a replicated value alone rather than resetting to full.
+	combatant._ready()
+	if not is_equal_approx(combatant.current_health, 120.0):
+		(
+			violations
+			. append(
+				(
+					"spawn_state_before_ready: _ready() overwrote replicated health with %f, expected 120.0"
+					% combatant.current_health
+				)
+			)
+		)
+
+	# A combatant that was never seeded still defaults to full health.
+	var fresh := MobaCombatant.new()
+	fresh.stat_block = _BASELINE_STAT_BLOCK
+	fresh._ready()
+	if not is_equal_approx(fresh.current_health, fresh.maximum_health):
+		(
+			violations
+			. append(
+				(
+					"spawn_state_before_ready: unseeded combatant should start at full health, got %f of %f"
+					% [fresh.current_health, fresh.maximum_health]
+				)
+			)
+		)
 
 	return violations
