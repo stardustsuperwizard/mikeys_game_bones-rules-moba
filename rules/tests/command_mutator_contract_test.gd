@@ -78,19 +78,18 @@ static func run() -> bool:
 					# Look for patterns like .mutator_name( to catch actual calls
 					var pattern = "." + mutator + "("
 					if pattern in code_part:
-						violations.append(
+						var detail := (
 							"%s:%d: direct call to MobaCombatant.%s() violates command gate"
 							% [file_path, line_num + 1, mutator]
 						)
+						violations.append(detail)
 
 	if violations.is_empty():
 		return true
 
 	# Print violations
 	printerr("\n=== Command Mutator Contract Violations ===")
-	printerr(
-		"Direct calls to MobaCombatant mutators must not appear in scripts/ or rules/input/."
-	)
+	printerr("Direct calls to MobaCombatant mutators must not appear in scripts/ or rules/input/.")
 	printerr("Every player-originated command must gate through Action → ActionRunner → Authority.")
 	printerr("")
 	for violation in violations:

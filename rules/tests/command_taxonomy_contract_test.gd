@@ -1,4 +1,4 @@
-## Contract test verifying the command taxonomy: adding a new command requires only an Action subclass.
+## Contract test for the command taxonomy: a new command is one Action subclass.
 ##
 ## Demonstrates the invariant: a new player-originated command is implemented as a new
 ## Action subclass, with its own FAILURE_* constant block matching MobaAbilityAction's
@@ -11,9 +11,11 @@
 ## without any change to scripts/action_runner.gd or scripts/authority.gd.
 class_name CommandTaxonomyContractTest
 
+
 ## Test-local Action subclass demonstrating the command taxonomy.
 ## This Action is defined here for this test only and is never exported or reused.
-class TestCommandAction extends Action:
+class TestCommandAction:
+	extends Action
 	## Failure reasons for this test command type, following MobaAbilityAction's convention.
 	const FAILURE_UNKNOWN = &"test_command_unknown"
 	const FAILURE_NOT_READY = &"test_command_not_ready"
@@ -60,7 +62,7 @@ static func _test_matching_requester_succeeds() -> Array[String]:
 
 	if not result.success:
 		violations.append(
-			"matching_requester_succeeds: ActionRunner.run(action, 1) should succeed when owner_id=1"
+			"matching_requester_succeeds: run(action, 1) should succeed for owner_id 1"
 		)
 
 	return violations
@@ -78,7 +80,7 @@ static func _test_mismatched_requester_denied() -> Array[String]:
 
 	if result.success:
 		violations.append(
-			"mismatched_requester_denied: ActionRunner.run(action, 2) should fail when owner_id=1"
+			"mismatched_requester_denied: run(action, 2) should be refused for owner_id 1"
 		)
 
 	return violations

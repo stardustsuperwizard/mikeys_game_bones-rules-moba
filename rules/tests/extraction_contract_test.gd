@@ -11,6 +11,15 @@ class_name ExtractionContractTest
 const RULES_DIR := "res://rules/"
 const FORBIDDEN_PREFIXES := ["res://scripts/", "res://scenes/", "res://resources/"]
 
+## Contract tests that name a forbidden prefix as scan-target data rather than
+## depending on it. The rule this file enforces is about the rules module
+## *reaching into* the game's implementation -- a `res://scripts/` in a static
+## source scanner's path list is a string it opens with DirAccess, not a type it
+## calls or a scene it loads, so the extracted module still runs standalone.
+## Every entry here must be a contract test whose only forbidden-prefix
+## occurrences are in that path-list role; do not add ordinary rules code.
+const EXEMPT_FILES := ["extraction_contract_test.gd", "command_mutator_contract_test.gd"]
+
 
 ## Run the extraction contract test.
 ## Returns true if all checks pass, false if any violations found.
@@ -19,8 +28,15 @@ static func run() -> bool:
 	var files = _get_files_recursive(RULES_DIR)
 
 	for file_path in files:
-		# Skip the test file itself and UID files
-		if file_path.ends_with("extraction_contract_test.gd") or file_path.ends_with(".uid"):
+		# Skip the exempt contract tests and UID files
+		if file_path.ends_with(".uid"):
+			continue
+		var is_exempt := false
+		for exempt_name in EXEMPT_FILES:
+			if file_path.ends_with(exempt_name):
+				is_exempt = true
+				break
+		if is_exempt:
 			continue
 
 		# Only check GDScript files and data files
