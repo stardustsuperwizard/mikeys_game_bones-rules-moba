@@ -277,9 +277,10 @@ plain data dictionary, which is most of what runtime GM spawning needs.
 
 ### 3.2 Multiplayer session layer
 
-**Tracked by #278.** SessionManager autoload (#312) provides per-peer player
-spawn and despawn on connect and disconnect, and transport via ENetMultiplayerPeer
-in three modes: offline, listen-server, and dedicated-server.
+**Tracked by #278.** The `SessionManager` autoload (#312) provides ENet
+transport in three session modes -- offline, listen-server and
+dedicated-server -- and `WorldManager` spawns and despawns a player actor per
+peer on connect and disconnect.
 
 Missing:
 

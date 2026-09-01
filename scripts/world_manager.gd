@@ -4,10 +4,11 @@ extends Node3D
 @export var spawn_points: Array[SpawnPoint] = []
 @export var player_spawn_point: SpawnPoint
 
-@onready var _spawner: MultiplayerSpawner = get_node_or_null("MultiplayerSpawner")
-
-# Map of peer_id -> spawned actor for peer-specific player actors
+# Map of peer_id -> the player actor spawned for it, so a disconnect can find
+# and free the right one.
 var _peer_actors: Dictionary[int, Actor] = {}
+
+@onready var _spawner: MultiplayerSpawner = get_node_or_null("MultiplayerSpawner")
 
 
 func _ready() -> void:
@@ -20,24 +21,45 @@ func _ready() -> void:
 	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
 		return
 
-	# Spawn world/bot content from spawn_points (non-player spawns)
+	# World/bot content: always-present, authority-0 entries, spawned
+	# unconditionally on server/offline exactly as before.
 	for spawn_point in spawn_points:
 		spawn(spawn_point, spawn_point.authority_id)
 
-	# Connect peer lifecycle signals for per-peer player spawn/despawn
-	if multiplayer.has_multiplayer_peer():
-		multiplayer.peer_connected.connect(_on_peer_connected)
-		multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	# Connected unconditionally, not just when a peer already exists. A session
+	# hosted after boot (the offline -> host transition) leaves _ready() long
+	# past, and a signal only wired when has_multiplayer_peer() was already true
+	# would never fire for the peers that later join.
+	multiplayer.peer_connected.connect(_on_peer_connected)
+	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+
+	# The local machine's own player, through the same function peer_connected
+	# uses and with this peer's real id -- 1 both offline and as the server.
+	# Dedicated-server is the only mode that never gets a local player, and this
+	# is the only place session mode decides anything.
+	if not _is_dedicated_server():
+		spawn_player_for_peer(multiplayer.get_unique_id())
 
 
-# Spawn a player actor for a connecting peer.
-# Uses the same spawn code path as offline/listen-server bootstrap.
+# The one spawn path for "this peer has a player", shared by the local-start
+# case and by every remote peer that connects. Idempotent per peer id, so the
+# offline-then-host transition re-requesting peer 1 keeps the existing actor
+# rather than spawning a second one.
 func spawn_player_for_peer(peer_id: int) -> void:
-	if not player_spawn_point:
+	if player_spawn_point == null:
+		return
+	if _peer_actors.has(peer_id) and is_instance_valid(_peer_actors[peer_id]):
 		return
 
-	var actor := spawn(player_spawn_point, peer_id)
-	_peer_actors[peer_id] = actor
+	_peer_actors[peer_id] = spawn(player_spawn_point, peer_id)
+
+
+# Read off the SessionManager autoload, which has already run its own _ready()
+# by the time any scene node does. Absent in tests that build a WorldManager
+# without the autoload, where offline (a local player) is the right default.
+func _is_dedicated_server() -> bool:
+	var session := get_node_or_null(^"/root/SessionManager")
+	return session != null and session.mode == session.Mode.DEDICATED_SERVER
 
 
 # Assumes WorldManager stays attached to the room's own root node (identity
@@ -85,7 +107,7 @@ func _on_peer_disconnected(peer_id: int) -> void:
 	if not multiplayer.is_server():
 		return
 
-	var actor := _peer_actors.get(peer_id)
-	if actor:
+	var actor: Actor = _peer_actors.get(peer_id)
+	if is_instance_valid(actor):
 		actor.queue_free()
-		_peer_actors.erase(peer_id)
+	_peer_actors.erase(peer_id)
