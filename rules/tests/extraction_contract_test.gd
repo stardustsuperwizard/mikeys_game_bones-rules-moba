@@ -16,9 +16,17 @@ const FORBIDDEN_PREFIXES := ["res://scripts/", "res://scenes/", "res://resources
 ## *reaching into* the game's implementation -- a `res://scripts/` in a static
 ## source scanner's path list is a string it opens with DirAccess, not a type it
 ## calls or a scene it loads, so the extracted module still runs standalone.
-## Every entry here must be a contract test whose only forbidden-prefix
-## occurrences are in that path-list role; do not add ordinary rules code.
-const EXEMPT_FILES := ["extraction_contract_test.gd", "command_mutator_contract_test.gd"]
+##
+## Full paths, not filenames: a suffix match would exempt any future file
+## anywhere under rules/ that happened to carry one of these names, which is a
+## standing invitation to park a real violation in a file named after a
+## contract test. Every entry must be a contract test whose only
+## forbidden-prefix occurrences are in that path-list role; do not add
+## ordinary rules code.
+const EXEMPT_FILES := [
+	"res://rules/tests/extraction_contract_test.gd",
+	"res://rules/tests/command_mutator_contract_test.gd",
+]
 
 
 ## Run the extraction contract test.
@@ -31,12 +39,7 @@ static func run() -> bool:
 		# Skip the exempt contract tests and UID files
 		if file_path.ends_with(".uid"):
 			continue
-		var is_exempt := false
-		for exempt_name in EXEMPT_FILES:
-			if file_path.ends_with(exempt_name):
-				is_exempt = true
-				break
-		if is_exempt:
+		if file_path in EXEMPT_FILES:
 			continue
 
 		# Only check GDScript files and data files

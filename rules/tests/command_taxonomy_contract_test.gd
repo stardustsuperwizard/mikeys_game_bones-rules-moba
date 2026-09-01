@@ -16,21 +16,18 @@ class_name CommandTaxonomyContractTest
 ## This Action is defined here for this test only and is never exported or reused.
 class TestCommandAction:
 	extends Action
-	## Failure reasons for this test command type, following MobaAbilityAction's convention.
+	## Failure reasons for this command type, following MobaAbilityAction's
+	## convention. Declared even though this action's own execute() has no
+	## failure path -- MobaCastCancelAction does the same, and the block is part
+	## of what "adding one Action subclass" means. Denial of an unowned request
+	## is Authority's answer, not one of these.
 	const FAILURE_UNKNOWN = &"test_command_unknown"
 	const FAILURE_NOT_READY = &"test_command_not_ready"
-
-	var _is_ready: bool = true
 
 	func _init(p_actor: Actor) -> void:
 		super(p_actor)
 
-	func set_ready(ready: bool) -> void:
-		_is_ready = ready
-
 	func execute() -> ActionResult:
-		if not _is_ready:
-			return ActionResult.new(false, FAILURE_NOT_READY)
 		return ActionResult.new(true)
 
 
