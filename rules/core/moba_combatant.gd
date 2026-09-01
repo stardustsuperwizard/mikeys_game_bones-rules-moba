@@ -68,6 +68,9 @@ const _MINIMUM_ATTACK_SPEED := 0.01
 var current_resource: float:
 	get:
 		return _current_resource
+	set(value):
+		_current_resource = value
+		resource_changed.emit(_current_resource, get_stat(MobaStatBlock.RESOURCE))
 
 var maximum_resource: float:
 	get:
@@ -76,10 +79,40 @@ var maximum_resource: float:
 var current_health: float:
 	get:
 		return _current_health
+	set(value):
+		_current_health = value
+		_update_health()
 
 var maximum_health: float:
 	get:
 		return get_stat(MobaStatBlock.HEALTH)
+
+## Serializable snapshot of the active shield pool, for replication. Each
+## entry is {amount, source, remaining}. Assigning rebuilds the pool and
+## notifies shield_changed, so a remote-applied value reaches the HUD through
+## the same signal a local apply_shield() would have.
+var active_shields_snapshot: Array:
+	get:
+		return _get_shield_tracker().get_snapshot()
+	set(snapshot):
+		_get_shield_tracker().set_snapshot(snapshot)
+
+## Serializable snapshot of the active effects/modifiers, for replication.
+## Assigning rebuilds the container and emits effect_applied per entry, so the
+## status tray updates on a remote peer without changing the binder.
+var active_effects_snapshot: Array:
+	get:
+		return get_effect_container().get_snapshot()
+	set(snapshot):
+		get_effect_container().set_snapshot(snapshot)
+
+## Serializable snapshot of per-ability cooldown remaining/charges, for
+## replication. Assigning restores the ledger the ability slots read.
+var active_cooldowns_snapshot: Array:
+	get:
+		return _cooldowns.get_snapshot()
+	set(snapshot):
+		_cooldowns.set_snapshot(snapshot, _abilities)
 
 var _runtime_stat_block: MobaStatBlock
 var _current_health: float = 0.0

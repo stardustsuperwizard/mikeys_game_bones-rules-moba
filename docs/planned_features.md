@@ -282,15 +282,27 @@ transport in three session modes -- offline, listen-server and
 dedicated-server -- and `WorldManager` spawns and despawns a player actor per
 peer on connect and disconnect.
 
+Actor state replicates (#313), and authority is split per subtree rather
+than per actor. The Actor and its `Body` stay owned by the connecting peer,
+so movement keeps today's client-authoritative model; `MobaCombatant` and
+its sibling `MobaStateMachine` are re-set to the server (peer `1`) on every
+spawn, so a client can never broadcast its own claimed combat state. Two
+`MultiplayerSynchronizer` nodes carry it: the Body's transform continuously
+from the owning peer, and current health/resource, active shields, active
+effects, cooldown state and the current state on-change from the server.
+
+Each replicated property is genuinely settable and emits the same signal a
+local mutation would, so the HUD binders -- which observe signals, never
+polled properties -- needed no changes to see remote state.
+
 Missing:
 
-- State replication for actors — health in particular is not replicated.
 - A lobby or session browser.
 
 Combat is server-authoritative in *shape* — one gated command out of three
 (see §1.2's correction) — which is a partial foundation. #277 completes it.
-There is also no `MultiplayerSynchronizer` anywhere in the project, so no state
-replicates at all today. #313 will add state replication.
+Replication is the substrate only: it carries steady state, not one-shot
+events like damage numbers, and it does not validate what a client submits.
 
 ### 3.3 Dialogue and narrative tools
 
