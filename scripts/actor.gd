@@ -124,10 +124,10 @@ func try_activate_slot(slot_index: int, context: MobaCastContext) -> ActionResul
 ## reference the client could have chosen freely.
 ##
 ## _client_ticks_msec is the requesting client's Time.get_ticks_msec() at send.
-## It is carried because the recorded request payload includes a timestamp, and
-## it is deliberately not used to resolve anything: the rewind window that would
-## consume it is #48, and until that exists the server dates every request by
-## its own arrival. Nothing here trusts the client's clock.
+## It is carried and used by the rewind window (#48) to compute lag-compensated
+## skillshot hit detection. The server records the sample to build a per-peer
+## offset estimate (MobaRewindClock) and threads it into the cast context so
+## skillshot resolution can compute the rewind timestamp.
 @rpc("authority", "call_remote", "reliable")
 func request_activate_slot(
 	slot_index: int,
@@ -138,11 +138,19 @@ func request_activate_slot(
 ) -> void:
 	var requester_id := multiplayer.get_remote_sender_id()
 
+	# Fold this request's timing into the peer's offset estimate before resolving
+	# anything with it. Every activation feeds the estimate, not just skillshots:
+	# the estimate is per peer, so an ordinary targeted cast still sharpens the
+	# answer the next skillshot from that peer gets.
+	MobaRewindClock.shared().record_sample(requester_id, _client_ticks_msec, Time.get_ticks_msec())
+
 	var explicit_target: Node = null
 	if not target_path.is_empty():
 		explicit_target = get_node_or_null(target_path)
 
-	var context := MobaCastContext.new(self, explicit_target, aim_direction, ground_point)
+	var context := MobaCastContext.new(
+		self, explicit_target, aim_direction, ground_point, requester_id, _client_ticks_msec
+	)
 	_resolve_activate_slot(slot_index, context, requester_id)
 
 
