@@ -32,15 +32,16 @@ var _allocation_policy: MobaStatAllocationPolicy
 # Currently edited build (the form's working copy)
 var _current_build: MobaCharacterBuild
 
-# Name of the file being edited (if loaded from saved character, for re-save)
-var _edit_file_name: String = ""
-
 # Resolved control node references
 var _primary_discipline_option: OptionButton
 var _secondary_discipline_option: OptionButton
 var _stat_points_label: Label
 var _stat_controls: Dictionary  # StringName -> the row Control holding that stat's Spinbox
 var _stat_controls_container: VBoxContainer
+
+# Guards _update_stat_display() against re-entering itself when writing a
+# spinbox's max_value clamps its value and emits value_changed.
+var _refreshing_stats: bool = false
 var _weapon_option: OptionButton
 var _action_ability_options: Array[OptionButton]  # action_slot_options[0..3]
 var _passive_ability_option: OptionButton
@@ -535,6 +536,16 @@ func _update_stat_display() -> void:
 	if _stat_controls.is_empty() or _stat_points_label == null:
 		return
 
+	# Writing spinbox.max_value below can clamp that spinbox's value, which
+	# emits value_changed, which re-enters here through
+	# _on_stat_value_changed(). It converges today because every pass writes
+	# the spinboxes straight from _current_build rather than from what it
+	# reads back off them -- but that is a property of the current handler,
+	# not of the design, and the guard costs one bool.
+	if _refreshing_stats:
+		return
+	_refreshing_stats = true
+
 	# Calculate total spent
 	var total_spent := 0
 	for stat_name in _current_build.stat_allocation:
@@ -544,12 +555,6 @@ func _update_stat_display() -> void:
 
 	# Calculate remaining points
 	var points_remaining = _allocation_policy.total_points - total_spent
-
-	# Update display label to show remaining
-	_stat_points_label.text = (
-		"Stat Points: %d / %d (remaining: %d)"
-		% [total_spent, _allocation_policy.total_points, points_remaining]
-	)
 
 	# Update each spinbox's range and current value
 	for stat_name in _stat_controls:
@@ -572,6 +577,28 @@ func _update_stat_display() -> void:
 
 		# Set the current value (or 0 if not allocated)
 		spinbox.value = current_value
+
+	# Label written from the allocation as it stands AFTER the loop, not the
+	# total read before it. A clamp inside the loop reaches _current_build
+	# through _on_stat_value_changed() while the guard above suppresses the
+	# nested refresh, so a label written up front could describe an allocation
+	# that no longer exists by the time the loop ends.
+	var spent_after := 0
+	for stat_name in _current_build.stat_allocation:
+		var points: int = _current_build.stat_allocation[stat_name]
+		if points > 0:
+			spent_after += points
+
+	_stat_points_label.text = (
+		"Stat Points: %d / %d (remaining: %d)"
+		% [
+			spent_after,
+			_allocation_policy.total_points,
+			_allocation_policy.total_points - spent_after
+		]
+	)
+
+	_refreshing_stats = false
 
 
 ## Rebuild the ability options for both action and passive slots.
@@ -780,9 +807,12 @@ func _on_load_character() -> void:
 		_error_label.text = "Failed to load character."
 		return
 
-	# Load the build and set edit file name so re-saving updates it
+	# Re-saving updates this same character because _on_save() derives the
+	# filename from character_name, which _load_template() has just restored.
+	# There is deliberately no separate "file being edited" handle: a second
+	# identity for the same character is how a rename silently forks one saved
+	# character into two.
 	_load_template(build)
-	_edit_file_name = char_name
 
 
 ## Load a template build into the form, pre-filling all fields.
@@ -801,9 +831,6 @@ func _load_template(template: MobaCharacterBuild) -> void:
 		template.loadout.duplicate() if template.loadout != null else MobaLoadout.new()
 	)
 
-	# Clear edit file name since this is a new character (not loaded from saved)
-	_edit_file_name = ""
-
 	# Update all UI elements to reflect the template
 	_character_name_input.text = _current_build.character_name
 
@@ -821,12 +848,31 @@ func _load_template(template: MobaCharacterBuild) -> void:
 	# Update stats
 	_update_stat_display()
 
-	# Update weapon
-	if _current_build.loadout.weapon != null:
-		for cached_idx in _weapon_cache:
-			if _weapon_cache[cached_idx] == _current_build.loadout.weapon:
-				_weapon_option.select(_weapon_option.get_item_index(cached_idx))
+	# Update weapon. Matched on resource_path rather than by comparing Resource
+	# instances: a build loaded from user:// resolves its weapon through
+	# ResourceLoader, which usually hands back the very object already in
+	# _weapon_cache but is not contractually required to. On a cache miss an
+	# identity test finds nothing, leaves the picker showing item 0, and puts
+	# the screen back in the displayed-vs-saved split that the select()/
+	# item_selected fix removed.
+	var equipped_weapon: MobaWeapon = _current_build.loadout.weapon
+	if equipped_weapon != null:
+		var matched := false
+		for cached_id in _weapon_cache:
+			var cached: MobaWeapon = _weapon_cache[cached_id]
+			if cached != null and cached.resource_path == equipped_weapon.resource_path:
+				_weapon_option.select(_weapon_option.get_item_index(cached_id))
+				matched = true
 				break
+
+		if not matched:
+			# The build carries a weapon this screen cannot offer. Keep the
+			# build's weapon -- it is the saved truth -- and say so rather than
+			# letting the picker imply a weapon that is not equipped.
+			_error_label.text = (
+				"This character's weapon is not in %sweapons/ and cannot be shown."
+				% MobaRules.DATA_ROOT
+			)
 
 	# Update abilities
 	_update_ability_options()
@@ -867,7 +913,6 @@ func _on_save() -> void:
 		return
 
 	if CharacterStorage.save_character(_current_build, file_name):
-		_edit_file_name = file_name
 		# Refresh the picker so the character just saved is immediately
 		# loadable. Without this the list only ever reflects what was on disk
 		# when the screen opened, and a player who saves and then tries to
