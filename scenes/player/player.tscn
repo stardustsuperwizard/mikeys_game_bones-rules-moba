@@ -76,6 +76,20 @@ position = Vector3(0, 1, -0.55)
 [node name="Controller" type="Node" parent="."]
 script = ExtResource("3")
 
+; The baked loadout is a design-time default only, and is no longer what a
+; player plays. WorldManager._spawn_actor() overwrites it on every spawn with
+; the build the server accepted for that peer -- or, for a peer that has not
+; had one accepted, with rules/data/builds/melee_bruiser_build.tres. It is kept
+; rather than cleared so this scene stays openable and previewable in the
+; editor, and so anything instantiating player.tscn directly still gets a legal
+; kit instead of a null loadout.
+;
+; The build reaches remote peers through the MultiplayerSpawner payload, not
+; through the synchronizer below: spawn data is replayed by _spawn_actor() on
+; every peer, so all of them construct the combatant from the same bytes. That
+; is also why no loadout property is listed in the replication config -- a
+; MobaLoadout is a Resource, and object decoding is off, so syncing it as a
+; property would drop it on the wire.
 [node name="MobaCombatant" type="Node" parent="."]
 script = ExtResource("5")
 loadout = ExtResource("6")
