@@ -89,15 +89,7 @@ func respawn() -> bool:
 	# have already done this, but be thorough here in case of edge cases)
 	_combatant.clear_all_active_effects()
 
-	# Move the body to the spawn point, if a policy with one is assigned.
-	# With no policy or no spawn_point, the body stays at its current transform.
-	var policy := _combatant.respawn_policy
-	if policy != null and policy.spawn_point != null:
-		var parent := _combatant.get_parent()
-		if parent != null:
-			var body := parent.get_node_or_null("Body") as Node3D
-			if body != null:
-				body.transform = policy.spawn_point.transform
+	_move_to_spawn_point()
 
 	# Reset death flag to allow death to fire again in the next life
 	_has_died = false
@@ -116,6 +108,74 @@ func respawn() -> bool:
 
 	# Transition to IDLE
 	return _combatant.revive_state()
+
+
+## Reset the combatant to a clean, fully alive, IDLE state from ANY current
+## state -- the round-boundary counterpart to respawn().
+##
+## respawn() refuses unless the combatant is DEAD, so it cannot be the
+## round-reset path on its own: a round boundary must also reset combatants
+## who are still alive, and may be mid-cast, mid-channel, toggled on, crowd
+## controlled, or in any other non-IDLE state. This never refuses.
+##
+## Composed from the same MobaCombatant primitives clear_on_death() and
+## respawn() already use, so there is no second implementation of what they
+## do, and emits exactly the notifications respawn() emits -- nothing
+## downstream needs a new signal to observe a round reset.
+func reset_for_round() -> void:
+	if _combatant.is_casting():
+		_combatant.cancel_cast()
+
+	if _combatant.is_channeling():
+		_combatant.break_channel()
+
+	_combatant.deactivate_toggle()
+
+	_combatant.clear_all_active_effects()
+	_combatant.clear_all_cooldowns()
+	_combatant.restore_to_full()
+
+	_move_to_spawn_point()
+
+	# DEAD is terminal for try_enter(), so revive() is the only way out of it.
+	# Every other state may legally be left for IDLE, which is what the round
+	# boundary needs for a survivor mid-cast or mid-stun.
+	if _combatant.is_dead():
+		_combatant.revive_state()
+	else:
+		var state_machine := _combatant.get_state_machine()
+		if state_machine != null:
+			state_machine.try_enter(MobaState.IDLE)
+
+	# Reset death bookkeeping so death can fire again in the next round.
+	_has_died = false
+	_respawn_countdown = 0.0
+
+	_restore_death_visual()
+
+	_combatant.notify_health_and_resource_changed()
+	_combatant.notify_shield_changed()
+	_combatant.sync_character_sheet_hp()
+
+
+## Move the body to the respawn policy's spawn point, if a policy with one is
+## assigned. With no policy or no spawn_point, the body stays at its current
+## transform. Shared by respawn() and reset_for_round() so both move the body
+## through one implementation.
+func _move_to_spawn_point() -> void:
+	var policy := _combatant.respawn_policy
+	if policy == null or policy.spawn_point == null:
+		return
+
+	var parent := _combatant.get_parent()
+	if parent == null:
+		return
+
+	var body := parent.get_node_or_null("Body") as Node3D
+	if body == null:
+		return
+
+	body.transform = policy.spawn_point.transform
 
 
 ## Advance the auto-respawn countdown. Only called from MobaCombatant.tick()
