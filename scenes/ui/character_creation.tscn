@@ -1,0 +1,259 @@
+[gd_scene load_steps=2 format=3 uid="uid://d0x8qxz42u4fqjz2"]
+
+[ext_resource type="Script" path="res://scripts/character_creation.gd" id="1"]
+
+[node name="CharacterCreation" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="Title" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Create Character"
+horizontal_alignment = 1
+
+[node name="DisciplineSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="DisciplineLabel" type="Label" parent="MarginContainer/VBoxContainer/DisciplineSection"]
+layout_mode = 2
+text = "Disciplines"
+theme_override_font_sizes/font_size = 18
+
+[node name="PrimaryDisciplineContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/DisciplineSection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PrimaryLabel" type="Label" parent="MarginContainer/VBoxContainer/DisciplineSection/PrimaryDisciplineContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Primary:"
+
+[node name="PrimaryDisciplineOption" type="OptionButton" parent="MarginContainer/VBoxContainer/DisciplineSection/PrimaryDisciplineContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="SecondaryDisciplineContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/DisciplineSection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SecondaryLabel" type="Label" parent="MarginContainer/VBoxContainer/DisciplineSection/SecondaryDisciplineContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Secondary:"
+
+[node name="SecondaryDisciplineOption" type="OptionButton" parent="MarginContainer/VBoxContainer/DisciplineSection/SecondaryDisciplineContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="StatSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="StatsLabel" type="Label" parent="MarginContainer/VBoxContainer/StatSection"]
+layout_mode = 2
+text = "Stat Points: 0 / 10"
+
+[node name="StatScroll" type="ScrollContainer" parent="MarginContainer/VBoxContainer/StatSection"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 220)
+horizontal_scroll_mode = 0
+
+[node name="StatControls" type="VBoxContainer" parent="MarginContainer/VBoxContainer/StatSection/StatScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="LoadoutSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoadoutLabel" type="Label" parent="MarginContainer/VBoxContainer/LoadoutSection"]
+layout_mode = 2
+text = "Loadout"
+theme_override_font_sizes/font_size = 18
+
+[node name="WeaponContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/LoadoutSection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="WeaponLabel" type="Label" parent="MarginContainer/VBoxContainer/LoadoutSection/WeaponContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Weapon:"
+
+[node name="WeaponOption" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadoutSection/WeaponContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="ActionAbilitiesLabel" type="Label" parent="MarginContainer/VBoxContainer/LoadoutSection"]
+layout_mode = 2
+text = "Action Abilities"
+
+[node name="ActionAbilitiesContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/LoadoutSection"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Action1Container" type="HBoxContainer" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Action1Label" type="Label" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action1Container"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Action 1:"
+
+[node name="Action1Option" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action1Container"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="Action2Container" type="HBoxContainer" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Action2Label" type="Label" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action2Container"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Action 2:"
+
+[node name="Action2Option" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action2Container"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="Action3Container" type="HBoxContainer" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Action3Label" type="Label" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action3Container"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Action 3:"
+
+[node name="Action3Option" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action3Container"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="Action4Container" type="HBoxContainer" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Action4Label" type="Label" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action4Container"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Action 4:"
+
+[node name="Action4Option" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action4Container"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="PassiveContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/LoadoutSection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PassiveLabel" type="Label" parent="MarginContainer/VBoxContainer/LoadoutSection/PassiveContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Passive:"
+
+[node name="PassiveAbilityOption" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadoutSection/PassiveContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="CharacterNameLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Character Name"
+
+[node name="CharacterNameInput" type="LineEdit" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 60)
+placeholder_text = "Enter character name"
+
+[node name="LoadSavedSection" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoadSavedLabel" type="Label" parent="MarginContainer/VBoxContainer/LoadSavedSection"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Load Saved:"
+
+[node name="SavedCharacterOption" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadSavedSection"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="LoadCharacterButton" type="Button" parent="MarginContainer/VBoxContainer/LoadSavedSection"]
+layout_mode = 2
+custom_minimum_size = Vector2(60, 60)
+text = "Load"
+
+[node name="LoadTemplateSection" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoadTemplateLabel" type="Label" parent="MarginContainer/VBoxContainer/LoadTemplateSection"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Load Template:"
+
+[node name="TemplateOption" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadTemplateSection"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="TemplateLoadButton" type="Button" parent="MarginContainer/VBoxContainer/LoadTemplateSection"]
+layout_mode = 2
+custom_minimum_size = Vector2(60, 60)
+text = "Load"
+
+[node name="ErrorLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0, 0, 1)
+text = ""
+autowrap_mode = 3
+
+[node name="ButtonContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SaveButton" type="Button" parent="MarginContainer/VBoxContainer/ButtonContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+text = "Save"
+
+[node name="CancelButton" type="Button" parent="MarginContainer/VBoxContainer/ButtonContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+text = "Cancel"

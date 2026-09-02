@@ -6,6 +6,9 @@
 ## - Host: `SessionManager.host(port)`, then the world scene
 ## - Join: `SessionManager.join(address, port)`, then the world scene
 ##
+## Also offers an entry point to character creation (#335) where a player can
+## build, name, save, and load characters.
+##
 ## This is a thin wrapper over the #312 API: it validates the text fields,
 ## calls one of those three methods, and changes scene. No transport logic
 ## lives here -- `ENetMultiplayerPeer` is created only inside SessionManager.
@@ -21,6 +24,7 @@
 extends Control
 
 const _WORLD_SCENE := "res://scenes/main.tscn"
+const _CHARACTER_CREATION_SCENE := "res://scenes/ui/character_creation.tscn"
 
 ## Highest port number a peer can bind. Ports are 16-bit and 0 means
 ## "let the OS choose", which a player typing a port never wants.
@@ -30,6 +34,7 @@ const _MAX_PORT: int = 65535
 # with @onready and a full path each: the paths are long enough that spelling
 # them out individually runs past the line length gdlint enforces.
 var _offline_button: Button
+var _character_button: Button
 var _host_button: Button
 var _host_port_input: LineEdit
 var _join_button: Button
@@ -41,6 +46,7 @@ var _status_label: Label
 func _ready() -> void:
 	var menu := $CenterContainer/VBoxContainer as VBoxContainer
 	_offline_button = menu.get_node(^"OfflineButton")
+	_character_button = menu.get_node(^"CharacterButton")
 	_host_button = menu.get_node(^"HostContainer/HostButton")
 	_host_port_input = menu.get_node(^"HostContainer/HBoxContainer/PortInput")
 	_join_button = menu.get_node(^"JoinContainer/JoinButton")
@@ -49,6 +55,7 @@ func _ready() -> void:
 	_status_label = menu.get_node(^"StatusLabel")
 
 	_offline_button.pressed.connect(_on_play_offline)
+	_character_button.pressed.connect(_on_character_creation)
 	_host_button.pressed.connect(_on_host)
 	_join_button.pressed.connect(_on_join)
 
@@ -65,6 +72,11 @@ func _on_play_offline() -> void:
 		session.go_offline()
 
 	_enter_world()
+
+
+## Character creation: open the character creation screen.
+func _on_character_creation() -> void:
+	get_tree().change_scene_to_file(_CHARACTER_CREATION_SCENE)
 
 
 func _on_host() -> void:
