@@ -170,6 +170,33 @@ func blocks_action(action: StringName) -> bool:
 	return blocked
 
 
+## Whether the combatant may perform an action right now, accounting for the
+## active crowd control entries this tracker holds.
+##
+## While CROWD_CONTROLLED, a CC-gated action's answer REPLACES the state table's
+## conservative per_cc -> false with the precise union (OR) of active hard-CC entries'
+## per-effect flags, per MobaCrowdControl -- this is the whole reason MobaStateMachine.can()
+## deliberately stays generic there. Outside CROWD_CONTROLLED, a live entry can still exist
+## if some other try_enter() (e.g. completing a basic-attack cycle a non-blocking CC type
+## like BLIND permitted) moved the combatant out while it was ticking; there the CC union
+## is INTERSECTED with, not substituted for, the current real state's own legality, so e.g.
+## a new attack mid-windup is still forbidden regardless of what CC allows. Every other
+## action, and every case with no active entries, delegates straight to state_machine.can(action).
+func can_perform_action(state_machine: MobaStateMachine, action: StringName) -> bool:
+	if state_machine == null:
+		return false
+
+	var gated := gates_action(action)
+
+	if state_machine.current_state == MobaState.CROWD_CONTROLLED and gated:
+		return not blocks_action(action)
+
+	if gated and not is_empty():
+		return state_machine.can(action) and not blocks_action(action)
+
+	return state_machine.can(action)
+
+
 ## Whether a displacement (KNOCKBACK, PULL, or KNOCK_UP) is currently active.
 func has_displacement() -> bool:
 	return _active_displacement != null
