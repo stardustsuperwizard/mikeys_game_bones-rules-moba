@@ -10,3 +10,4 @@ actor_scene = ExtResource("2")
 character_sheet = ExtResource("3")
 color = Color(1, 0.2, 0.2, 1)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, -3)
+team = 1

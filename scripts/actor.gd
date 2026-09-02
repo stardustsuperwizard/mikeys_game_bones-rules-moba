@@ -27,6 +27,10 @@ const _DENIABLE_FAILURES: Array[StringName] = [
 # system -- nothing today needs more than "attackable or not."
 @export var hostile: bool = true
 
+# Which team this actor belongs to: 0 is Team A, 1 is Team B. Deliberately just
+# a flag, not a faction/relationship system -- nothing today needs more than "which of two sides."
+@export var team: int = 0
+
 # 0 means unowned/AI-controlled; a connected LAN client's peer id otherwise.
 # Checked by Authority.can_perform() before an Action is honored.
 var owner_id: int = 0

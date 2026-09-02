@@ -111,6 +111,7 @@ func spawn(
 		"color": spawn_point.color,
 		"transform": spawn_point.transform,
 		"authority_id": authority_id,
+		"team": spawn_point.team,
 	}
 
 	# Absent, not null, when there is no build: _spawn_actor() runs on every peer
@@ -129,6 +130,7 @@ func _spawn_actor(data: Dictionary) -> Actor:
 	actor.color = data["color"]
 	(actor.get_node("Body") as Node3D).transform = data["transform"]
 	actor.owner_id = data["authority_id"]
+	actor.team = data["team"]
 
 	# Equip the build the server accepted for this peer, replacing whatever
 	# loadout the actor scene baked in at design time. Plain property assignment,
