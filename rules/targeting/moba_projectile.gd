@@ -469,11 +469,34 @@ func _rewound_hits_along(
 	)
 
 	for candidate in candidates:
+		# _query_area() already keeps only candidates carrying a MobaCombatant,
+		# so this cannot be null; it is read here for the history handle.
 		var combatant := candidate.get_node_or_null("MobaCombatant") as MobaCombatant
 		if combatant == null:
 			continue
 
-		var rewound := _rewound_position(candidate, combatant)
+		var history := combatant.get_position_history()
+		var rewound: Vector3
+
+		if history != null and history.has_samples():
+			rewound = history.position_at(rewind_timestamp_ms)
+		else:
+			# Nothing recorded yet -- a combatant the server has not ticked.
+			# Resolve it live so it behaves exactly as it did before rewind
+			# existed rather than silently becoming unhittable, through the
+			# same MobaTargeting helpers the rest of targeting uses: Actor is a
+			# plain Node whose global_position bridges to its Body child, so a
+			# cast to Node3D here would miss every production candidate.
+			#
+			# A candidate with no resolvable anchor is skipped outright. Never
+			# substitute a placeholder: _get_position() answers Vector3.ZERO in
+			# that case, and treating the world origin as a real position is
+			# how a candidate gets hit somewhere it has never been.
+			var anchor := MobaTargeting._get_spatial_anchor(candidate)
+			if anchor == null or not anchor.is_inside_tree():
+				continue
+			rewound = MobaTargeting._get_position(candidate)
+
 		var along := _closest_point_ratio(start, motion, rewound)
 		if (start + motion * along).distance_to(rewound) > hit_radius:
 			continue
@@ -488,28 +511,6 @@ func _rewound_hits_along(
 		func(a: Dictionary, b: Dictionary) -> bool: return a["distance"] < b["distance"]
 	)
 	return hits
-
-
-## Where `candidate` was at rewind_timestamp_ms.
-##
-## Falls back to its live position when the history holds nothing to read --
-## a combatant the server has never ticked. Falling back rather than skipping
-## keeps an unticked candidate resolving exactly as it did before rewind
-## existed, instead of silently becoming unhittable.
-func _rewound_position(candidate: Node, combatant: MobaCombatant) -> Vector3:
-	var history := combatant.get_position_history()
-	if history == null or not history.has_samples():
-		return _live_position(candidate)
-	return history.position_at(rewind_timestamp_ms)
-
-
-## Current world position of a candidate, whether it is an Actor wrapping a
-## body or a bare Node3D fixture.
-func _live_position(candidate: Node) -> Vector3:
-	var spatial := candidate as Node3D
-	if spatial != null:
-		return spatial.global_position
-	return global_position
 
 
 ## How far along `motion` from `start` the closest approach to `point` sits, as

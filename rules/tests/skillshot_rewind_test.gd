@@ -121,6 +121,7 @@ static func run() -> bool:
 	var clamp_scene := _build_scene(tree, 3)
 	var health_scene := _build_scene(tree, 4)
 	var dead_scene := _build_scene(tree, 5)
+	var unticked_scene := _build_scene(tree, 6)
 
 	# Every scenario but the clamping one puts the target on the path at
 	# `rewind_ms` and off it now.
@@ -139,8 +140,17 @@ static func run() -> bool:
 	violations.append_array(_test_stale_timestamp_clamps_to_window(clamp_scene))
 	violations.append_array(_test_damage_uses_current_health(health_scene, rewind_ms))
 	violations.append_array(_test_dead_target_takes_nothing(dead_scene, rewind_ms))
+	violations.append_array(_test_unticked_candidate_is_not_phantom_hit(unticked_scene, rewind_ms))
 
-	for scene in [hit_scene, control_scene, wall_scene, clamp_scene, health_scene, dead_scene]:
+	for scene in [
+		hit_scene,
+		control_scene,
+		wall_scene,
+		clamp_scene,
+		health_scene,
+		dead_scene,
+		unticked_scene,
+	]:
 		(scene["container"] as Node).queue_free()
 
 	if violations.is_empty():
@@ -369,6 +379,59 @@ static func _test_dead_target_takes_nothing(scene: Dictionary, rewind_ms: int) -
 	return violations
 
 
+## A candidate the server has never ticked has an empty position history. It
+## must resolve at its own live position -- off the path here, so it is missed --
+## and never at some substitute the projectile invented.
+##
+## The specific regression: Actor is a plain Node, not a Node3D, so a
+## `candidate as Node3D` cast misses every production candidate. A fallback
+## written that way silently returns the *projectile's* own position, which puts
+## the candidate at distance 0 along the segment -- an unconditional hit, ahead
+## of any wall, on a target that was never in the path.
+static func _test_unticked_candidate_is_not_phantom_hit(
+	scene: Dictionary, rewind_ms: int
+) -> Array[String]:
+	var violations: Array[String] = []
+	var combatant := _combatant_of(scene["enemy"])
+
+	# Deliberately no _record_on_path_history() for this scenario: the whole
+	# point is a combatant whose history is empty.
+	if combatant.get_position_history().has_samples():
+		violations.append(
+			"unticked candidate: fixture recorded history it was meant to leave empty"
+		)
+		return violations
+
+	var health_before: float = combatant._current_health
+	var projectile := _spawn(scene, rewind_ms)
+	if projectile == null:
+		violations.append("unticked candidate: projectile did not spawn")
+		return violations
+
+	_drive(projectile)
+
+	if combatant._current_health != health_before:
+		violations.append(
+			(
+				(
+					"unticked candidate: a combatant %.1f m off the path with no recorded "
+					% _OFF_PATH_OFFSET_M
+				)
+				+ "history took damage -- its position was substituted, not resolved"
+			)
+		)
+
+	if projectile.despawn_reason == MobaProjectile.DespawnReason.COMBATANT_HIT:
+		(
+			violations
+			. append(
+				"unticked candidate: projectile despawned as COMBATANT_HIT on a target never in its path"
+			)
+		)
+
+	return violations
+
+
 ## Build one scenario cluster: a container, a non-hostile caster at its origin,
 ## and one hostile enemy already standing at its *live* position, off the travel
 ## line. The container makes the caster's parent scenario-local, since a
@@ -450,6 +513,14 @@ static func _arrange_clamp_history(scene: Dictionary, rewind_ms: int) -> void:
 	# _STALE_CLAIM_AGE_MS before rewind_ms. record_sample() stores
 	# `arrival - sent` as the offset, and get_rewind_delay_ms() adds it back to
 	# the claim, so this pair places _STALE_CLAIM_TICKS_MS there.
+	#
+	# This is the one place the suite touches process-wide state, and it is
+	# unavoidable: resolve_skillshot() reads MobaRewindClock.shared(), so an
+	# end-to-end assertion on the clamp has to seed the instance it reads. It is
+	# bounded by peer id -- _build_scene() hands every cluster its own, so this
+	# entry cannot collide with another scenario's or with a real peer's, and
+	# the write only ever adds one integer under an id nothing else uses. Every
+	# other scenario stamps its projectile directly and touches no shared state.
 	MobaRewindClock.shared().record_sample(
 		scene["peer_id"], _STALE_CLAIM_TICKS_MS, rewind_ms - _STALE_CLAIM_AGE_MS
 	)
