@@ -9,6 +9,21 @@
 [ext_resource type="Script" path="res://scripts/floating_text_binder.gd" id="9"]
 [ext_resource type="Script" path="res://scripts/target_frame_binder.gd" id="11"]
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="12"]
+[ext_resource type="Script" path="res://scripts/match_controller.gd" id="13"]
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_match"]
+properties/0/path = NodePath("MobaMatchState:team_a_score")
+properties/0/spawn = true
+properties/0/replication_mode = 2
+properties/1/path = NodePath("MobaMatchState:team_b_score")
+properties/1/spawn = true
+properties/1/replication_mode = 2
+properties/2/path = NodePath("MobaMatchState:winning_team")
+properties/2/spawn = true
+properties/2/replication_mode = 2
+properties/3/path = NodePath("MobaMatchState:round_in_progress")
+properties/3/spawn = true
+properties/3/replication_mode = 2
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(20, 0.2, 20)
@@ -139,6 +154,13 @@ player_spawn_point = ExtResource("4")
 
 [node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="WorldManager" unique_id=1605736643]
 spawn_path = NodePath("..")
+
+[node name="MatchController" type="Node" parent="." unique_id=1234567890]
+script = ExtResource("13")
+
+[node name="MatchStateSynchronizer" type="MultiplayerSynchronizer" parent="MatchController"]
+root_path = NodePath("..")
+replication_config = SubResource("SceneReplicationConfig_match")
 
 [node name="ThirdPersonCamera" type="Camera3D" parent="." unique_id=1317531167]
 script = ExtResource("2")
