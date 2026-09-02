@@ -40,7 +40,7 @@
 # established Moba* pattern: MobaDamageResolver (the apply_damage pipeline),
 # MobaActivationGate (can_activate/commit_activate), MobaStatCache (the
 # modifier bonus cache behind get_stat), and MobaCrowdControlTracker gained
-# can_perform_action(). The combatant is 1077, with 123 lines of headroom.
+# can_perform_action(). The combatant is 1081, with 119 lines of headroom.
 #
 # That is real headroom but short of the ~240 this file asked for in #249.
 # The rest of the decomposition is the facade: ~66 public methods, most of

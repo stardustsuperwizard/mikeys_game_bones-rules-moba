@@ -17,17 +17,23 @@
 ##
 ## The 10 ms assumed minimum interval is deliberately shorter than the interval
 ## this actually sees. MobaCombatant.tick() runs once per physics frame, 60 Hz
-## by default, so real samples land ~16.7 ms apart and 16 slots retain ~267 ms
+## by default, so real samples land ~16.7 ms apart and 16 slots retain ~250 ms
 ## -- comfortably past the 120 ms window. Assuming a faster tick than the real
 ## one is the safe direction: it over-allocates rather than letting the buffer
 ## wrap before the window is covered.
 ##
 ## That headroom is bounded, though, and the bound is the margin rather than the
-## assumed interval: 16 slots cover 120 ms only down to a 7.5 ms spacing, i.e. a
-## physics rate up to ~133 Hz. Past that the buffer wraps inside the rewind
-## window and position_at() starts clamping where it should interpolate. A
-## project that raises physics_ticks_per_second beyond ~133 must lower
-## _ASSUMED_MIN_SAMPLE_INTERVAL_MS to match.
+## assumed interval. Mind the fencepost: N slots span N-1 intervals, because the
+## oldest retained sample sits at `newest - (N-1) * spacing`. So covering 120 ms
+## with 16 slots needs `15 * spacing >= 120`, i.e. a spacing of at least 8 ms --
+## a physics rate of at most 125 Hz, and at exactly 125 Hz the margin of 4 is
+## fully spent. Past that the buffer wraps inside the rewind window and
+## position_at() clamps where it should interpolate.
+##
+## A project that raises physics_ticks_per_second toward or beyond ~125 must
+## lower _ASSUMED_MIN_SAMPLE_INTERVAL_MS to match; that genuinely raises
+## capacity, since it is the divisor above. At 5 ms it yields 28 slots spanning
+## 135 ms, which is ample at 200 Hz.
 ##
 ## ## Interpolation
 ##
