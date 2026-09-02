@@ -10,6 +10,8 @@
 [ext_resource type="Script" path="res://scripts/target_frame_binder.gd" id="11"]
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="12"]
 [ext_resource type="Script" path="res://scripts/match_controller.gd" id="13"]
+[ext_resource type="Script" path="res://rules/core/moba_match_state.gd" id="14"]
+[ext_resource type="Resource" path="res://rules/data/match/arena_best_of_three.tres" id="15"]
 
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_match"]
 properties/0/path = NodePath("MobaMatchState:team_a_score")
@@ -155,10 +157,21 @@ player_spawn_point = ExtResource("4")
 [node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="WorldManager" unique_id=1605736643]
 spawn_path = NodePath("..")
 
-[node name="MatchController" type="Node" parent="." unique_id=1234567890]
+[node name="MatchController" type="Node" parent="."]
 script = ExtResource("13")
 
-[node name="MatchStateSynchronizer" type="MultiplayerSynchronizer" parent="MatchController"]
+; Authored in the scene rather than created by MatchController._ready(): a
+; MultiplayerSynchronizer resolves its replication config when it readies, and
+; a child readies before its parent, so a state node built from code would not
+; exist yet at the path the config names.
+[node name="MobaMatchState" type="Node" parent="MatchController"]
+script = ExtResource("14")
+rules = ExtResource("15")
+
+; Server-authoritative round and match state. Parented to MobaMatchState and
+; reaching back up with root_path, the way CombatStateSynchronizer does in
+; scenes/player/player.tscn, so the config paths stay node-qualified.
+[node name="MatchStateSynchronizer" type="MultiplayerSynchronizer" parent="MatchController/MobaMatchState"]
 root_path = NodePath("..")
 replication_config = SubResource("SceneReplicationConfig_match")
 

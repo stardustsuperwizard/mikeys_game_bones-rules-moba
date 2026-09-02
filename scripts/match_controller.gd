@@ -1,96 +1,102 @@
-## Match lifecycle controller for a two-team MOBA match.
+## Drives the round/match lifecycle for the arena scene.
 ##
-## Owns a MobaMatchState and drives it according to the session mode:
-## - On the server or in offline mode, registers team rosters and calls tick()
-##   each frame to advance the round and match state.
-## - On a pure client, replicates match state through a MultiplayerSynchronizer
-##   and returns to the main menu when the match ends.
-##
-## When the match ends, returns to res://scenes/ui/main_menu.tscn via
-## get_tree().change_scene_to_file(). Gives clients a chance to observe the
-## final replicated score before the scene changes.
+## MobaMatchState holds the lifecycle and deliberately never reads
+## `multiplayer` or decides whether it should be running. This controller is
+## the one place that decides: it registers the team rosters, starts the first
+## round, and ticks the state -- but only on the process that owns the match,
+## which is the offline process acting as its own server, or the server itself.
+## A pure client never ticks its own copy; it observes the four replicated
+## properties and follows the server into the lobby when the match is decided.
 class_name MatchController
 extends Node
 
-## Authored series length. Assigned a .tres from rules/data/match/ so no round
-## count or win threshold is written in GDScript.
-@export var rules: MobaMatchRules = preload("res://rules/data/match/arena_best_of_three.tres")
+## Where a decided match returns to. The same scene scripts/main_menu.gd
+## leaves in the other direction.
+const LOBBY_SCENE_PATH := "res://scenes/ui/main_menu.tscn"
 
-## The match state. Owned by this controller.
-var match_state: MobaMatchState
+## The lifecycle state, authored as a child in scenes/main.tscn so its four
+## replicated properties exist under a stable node path before
+## MatchStateSynchronizer resolves its replication config. Creating it from
+## code here would leave that config pointing at a node that does not exist
+## yet: a MultiplayerSynchronizer child readies before its parent does.
+@onready var match_state: MobaMatchState = $MobaMatchState
 
 
 func _ready() -> void:
-	# Create and configure the match state
-	match_state = MobaMatchState.new()
-	match_state.rules = rules
-	add_child(match_state)
-
-	# Only the server or offline process starts the match
-	if multiplayer.is_server() or not multiplayer.has_multiplayer_peer():
+	if _is_authoritative():
+		match_state.match_ended.connect(_on_match_ended)
 		_register_teams()
-		_start_match()
+		match_state.start_round()
+		return
+
+	# A pure client. winning_team arrives on-change through
+	# MatchStateSynchronizer, and assigning it drives winning_team_changed
+	# here exactly as a local decision would have on the server.
+	match_state.winning_team_changed.connect(_on_winning_team_replicated)
 
 
 func _physics_process(delta: float) -> void:
-	# Only tick on the server or in offline mode
-	if multiplayer.is_server() or (multiplayer.has_multiplayer_peer() == false):
-		if match_state != null:
-			match_state.tick(delta)
+	if not _is_authoritative():
+		return
+	match_state.tick(delta)
 
 
+## True when this process decides the match: offline, or the server.
+##
+## Mirrors WorldManager._is_dedicated_server() -- the autoload is reached by
+## node path rather than by its global name, because a test running under
+## `--script` compiles this file without the autoload registered and a bare
+## `SessionManager` reference would fail to compile there.
+func _is_authoritative() -> bool:
+	var session := get_node_or_null(^"/root/SessionManager")
+	if session != null and session.mode == session.Mode.OFFLINE:
+		return true
+	return multiplayer.is_server()
+
+
+## Register both rosters from the arena's actors.
+##
+## The union of the "players" and "nonplayers" groups is every actor carrying a
+## Controller. Side is read off actor.team, never off which group the actor
+## landed in: a bot authored with team 0 belongs to Team A despite being
+## AI-controlled.
 func _register_teams() -> void:
-	## Enumerate all arena actors and register them by team.
-	var all_players := get_tree().get_nodes_in_group("players")
-	var all_nonplayers := get_tree().get_nodes_in_group("nonplayers")
+	var team_a: Array[MobaCombatant] = []
+	var team_b: Array[MobaCombatant] = []
 
-	# Combine both groups to get all actors
-	var all_actors: Array[Node] = []
-	all_actors.append_array(all_players)
-	all_actors.append_array(all_nonplayers)
+	for group in [&"players", &"nonplayers"]:
+		for node in get_tree().get_nodes_in_group(group):
+			var actor := node as Actor
+			if actor == null:
+				continue
 
-	# Build rosters by team
-	var team_a_combatants: Array[MobaCombatant] = []
-	var team_b_combatants: Array[MobaCombatant] = []
+			var combatant := actor.get_node_or_null(^"MobaCombatant") as MobaCombatant
+			if combatant == null:
+				continue
 
-	for node in all_actors:
-		var actor := node as Actor
-		if actor == null:
-			continue
+			if actor.team == MobaMatchState.TEAM_A:
+				if not team_a.has(combatant):
+					team_a.append(combatant)
+			elif actor.team == MobaMatchState.TEAM_B:
+				if not team_b.has(combatant):
+					team_b.append(combatant)
+			else:
+				push_error("MatchController: %s has unknown team %d." % [actor.name, actor.team])
 
-		var combatant := actor.get_node_or_null("MobaCombatant") as MobaCombatant
-		if combatant == null:
-			continue
-
-		if actor.team == 0:
-			team_a_combatants.append(combatant)
-		elif actor.team == 1:
-			team_b_combatants.append(combatant)
-
-	# Register the rosters
-	match_state.register_team(MobaMatchState.TEAM_A, team_a_combatants)
-	match_state.register_team(MobaMatchState.TEAM_B, team_b_combatants)
+	match_state.register_team(MobaMatchState.TEAM_A, team_a)
+	match_state.register_team(MobaMatchState.TEAM_B, team_b)
 
 
-func _start_match() -> void:
-	## Start the first round and listen for match end.
-	match_state.start_round()
-	match_state.match_ended.connect(_on_match_ended)
-
-	# On clients, listen for winning_team changes to know when match ends
-	if not (multiplayer.is_server() or not multiplayer.has_multiplayer_peer()):
-		match_state.winning_team_changed.connect(_on_client_match_ended)
-
-
-func _on_match_ended(winning_team: int) -> void:
-	## Called when the match ends on the server. Wait one frame to let clients
-	## observe the final score, then return to the main menu.
+## The server decided the match. Yield one processed frame first so the final
+## team_a_score/team_b_score/winning_team values leave through
+## MatchStateSynchronizer before the scene under it is torn down.
+func _on_match_ended(_winning_team: int) -> void:
 	await get_tree().process_frame
-	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
+	get_tree().change_scene_to_file(LOBBY_SCENE_PATH)
 
 
-func _on_client_match_ended(winning_team: int) -> void:
-	## Called when the client observes the match end through replication.
-	## Return to the main menu.
-	if winning_team != MobaMatchState.NO_WINNER:
-		get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
+## A client saw the replicated result. Follow the server back to the lobby.
+func _on_winning_team_replicated(value: int) -> void:
+	if value == MobaMatchState.NO_WINNER:
+		return
+	get_tree().change_scene_to_file(LOBBY_SCENE_PATH)

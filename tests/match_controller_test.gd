@@ -1,43 +1,63 @@
-# Integration test for #342's match controller tick gating and replication.
+# Headless integration test for #342's match controller.
 #
 # Run with:
 #   godot --headless --path . --script tests/match_controller_test.gd
 #
 # Covers, in order:
-#   - MobaMatchState.tick() is called on a server/offline instance;
-#   - MobaMatchState.tick() is never called on a pure client's own instance;
-#   - match state properties replicate on-change to clients via MultiplayerSynchronizer;
-#   - the server returns to the main menu when the match ends, with a delay for clients
-#     to observe the final score.
+#   - the offline process is authoritative, registers both rosters and starts
+#     the round, so MobaMatchState advances on it;
+#   - rosters follow actor.team rather than "players" vs "nonplayers" group
+#     membership, so an AI-controlled actor authored onto Team A lands there;
+#   - a pure client is NOT authoritative: its own MatchController never calls
+#     tick() and never starts a round, so its copy of the state stays at the
+#     values replication gives it;
+#   - MatchStateSynchronizer replicates exactly the four match-state properties
+#     on-change, the way CombatStateSynchronizer replicates combat state.
 #
-# This test is NOT wired into tests/test_bootstrap.gd: it loads game scenes and
-# opens a socket, matching the precedent set by tests/session_manager_test.gd
-# and tests/replication_authority_test.gd.
+# The gating check is the one with teeth. MobaMatchState deliberately never
+# reads `multiplayer` and never decides whether it should be running, so
+# MatchController is the only thing standing between a client and a second,
+# divergent authority over the same match. A gate that quietly widened to
+# "everyone" would still look correct in a single-process run; this test is
+# what catches that, by asserting the condition directly AND by showing the
+# client's own state never leaves its initial values.
+#
+# The client peer is created with create_client() against a port nothing is
+# listening on. That is deliberate: ENet reports a unique id other than 1
+# immediately, so `multiplayer.is_server()` is already false before any
+# handshake, and the gate can be tested without standing up a real session.
+#
+# This test is NOT wired into tests/test_bootstrap.gd: it loads game scenes,
+# matching the precedent set by tests/session_manager_test.gd and
+# tests/replication_authority_test.gd.
 extends SceneTree
 
-const _PLAYER_SPAWN_POINT := preload("res://resources/player_spawn_point.tres")
-const _ENEMY_SPAWN_POINT := preload("res://resources/enemy_spawn_point.tres")
+# A port nothing is listening on. The client peer never connects; it only has
+# to report a non-server unique id.
+const _DEAD_PORT := 27321
 
-# Loopback port for the two peers. Fixed rather than random so a failure is
-# reproducible; high enough to stay clear of anything privileged.
-const _PORT := 27321
+# Physics frames to let _physics_process run on an instanced scene.
+const _TICK_FRAMES := 10
 
-# Frames to wait for replication and other async events.
-const _SETTLE_FRAMES := 20
+# The four properties #342 requires on the wire, relative to the synchronizer's
+# root_path (MatchController).
+const _REPLICATED := [
+	"MobaMatchState:team_a_score",
+	"MobaMatchState:team_b_score",
+	"MobaMatchState:winning_team",
+	"MobaMatchState:round_in_progress",
+]
 
 const _EXPECTED_CHECKS: Array[String] = [
-	"offline process ticks match state",
-	"server peer ticks match state",
-	"client peer never ticks match state",
-	"match state properties replicate on-change",
-	"server returns to main menu when match ends",
+	"offline process is authoritative and starts the round",
+	"rosters follow actor.team, not group membership",
+	"client process is not authoritative",
+	"client match state never advances on its own",
+	"match state replicates the four properties on-change",
 ]
 
 var _failures: Array[String] = []
 var _completed: Array[String] = []
-
-var _server_api: MultiplayerAPI
-var _client_api: MultiplayerAPI
 
 
 func _initialize() -> void:
@@ -47,163 +67,230 @@ func _initialize() -> void:
 func _run() -> void:
 	await process_frame
 
-	_test_offline_tick()
-	_test_server_client_tick()
-	_test_replication()
+	await _test_offline_authority()
+	await _test_client_gating()
+	_test_replication_config()
 
 	_finish()
 
 
-## Test that the offline process ticks the match state.
-func _test_offline_tick() -> void:
-	var main_scene := load("res://scenes/main.tscn") as PackedScene
-	var offline_root := main_scene.instantiate() as Node
-	root.add_child(offline_root)
+## Offline: the controller owns the match. It registers both rosters from
+## actor.team and starts the round, so the state is live on this process.
+func _test_offline_authority() -> void:
+	var session := _session()
+	if session != null:
+		session.mode = session.Mode.OFFLINE
 
-	# Get the MatchController and its match state
-	var match_controller := offline_root.get_node("MatchController") as MatchController
-	var match_state := match_controller.match_state as MobaMatchState
+	var world := _instance_main()
+	if world == null:
+		return
+	root.add_child(world)
+	await process_frame
 
-	# Verify initial state
-	if match_state.round_in_progress != true:
-		_fail("round should be in progress after _ready()")
+	var controller := world.get_node_or_null(^"MatchController") as MatchController
+	var state := world.get_node_or_null(^"MatchController/MobaMatchState") as MobaMatchState
+	if controller == null or state == null:
+		_fail("setup: MatchController/MobaMatchState missing from scenes/main.tscn")
+		world.queue_free()
+		await process_frame
 		return
 
-	# Store initial round progress state
-	var round_started := match_state.round_in_progress
-
-	# Run a few frames
-	for i in range(5):
-		await process_frame
-
-	# The match state should have been ticked (at minimum, it would have checked
-	# for round ending). We can't directly observe a tick() call, but we can
-	# verify that the match controller is alive and the round is still in progress.
-	if match_state.round_in_progress == round_started:
-		_pass("offline process ticks match state")
+	if not controller._is_authoritative():
+		_fail("offline process reports itself non-authoritative")
+	elif not state.round_in_progress:
+		_fail("offline process did not start the round")
 	else:
-		_fail("offline round_in_progress changed unexpectedly")
+		_pass("offline process is authoritative and starts the round")
 
-	offline_root.queue_free()
+	_check_rosters_follow_team(state)
+
+	world.queue_free()
 	await process_frame
 
 
-## Test that server ticks but client never ticks.
-func _test_server_client_tick() -> void:
-	# Set up two peers on loopback
-	var server_peer := ENetMultiplayerPeer.new()
-	if server_peer.create_server(_PORT) != OK:
-		_fail("could not create server peer")
+## Every actor's combatant must sit in the roster its actor.team names --
+## never in the one its group membership would suggest.
+func _check_rosters_follow_team(state: MobaMatchState) -> void:
+	var rosters: Array = state._rosters
+	if rosters[MobaMatchState.TEAM_A].is_empty() or rosters[MobaMatchState.TEAM_B].is_empty():
+		_fail(
+			(
+				"setup: a roster is empty (A=%d, B=%d); the arena must author both sides"
+				% [rosters[MobaMatchState.TEAM_A].size(), rosters[MobaMatchState.TEAM_B].size()]
+			)
+		)
 		return
 
-	var client_peer := ENetMultiplayerPeer.new()
-	if client_peer.create_client("127.0.0.1", _PORT) != OK:
-		_fail("could not create client peer")
+	var checked := 0
+	for group in [&"players", &"nonplayers"]:
+		for node in get_nodes_in_group(group):
+			var actor := node as Actor
+			if actor == null:
+				continue
+			var combatant := actor.get_node_or_null(^"MobaCombatant") as MobaCombatant
+			if combatant == null:
+				continue
+			checked += 1
+			if not rosters[actor.team].has(combatant):
+				_fail(
+					(
+						"%s is in group %s with team %d but is not on that team's roster"
+						% [actor.name, group, actor.team]
+					)
+				)
+				return
+
+	if checked == 0:
+		_fail("setup: no actors with a MobaCombatant were found in either group")
 		return
 
-	# Set up the server side
-	_server_api = MultiplayerAPI.new()
-	_server_api.multiplayer_peer = server_peer
-	var server_root := Node.new()
-	server_root.name = "ServerRoot"
-	root.add_child(server_root)
-	server_root.get_tree().set_multiplayer(_server_api, server_root)
+	_pass("rosters follow actor.team, not group membership")
 
-	# Load the main scene on the server
-	var main_scene := load("res://scenes/main.tscn") as PackedScene
-	var server_main := main_scene.instantiate() as Node
-	server_root.add_child(server_main)
 
-	# Set up the client side
-	_client_api = MultiplayerAPI.new()
-	_client_api.multiplayer_peer = client_peer
-	var client_root := Node.new()
-	client_root.name = "ClientRoot"
-	root.add_child(client_root)
-	client_root.get_tree().set_multiplayer(_client_api, client_root)
+## A pure client must never tick or start its own copy of the match.
+func _test_client_gating() -> void:
+	var session := _session()
+	if session != null:
+		# What SessionManager.join() leaves behind on a joining peer.
+		session.mode = session.Mode.LISTEN_SERVER
 
-	# Load the main scene on the client
-	var client_main := main_scene.instantiate() as Node
-	client_root.add_child(client_main)
+	var peer := ENetMultiplayerPeer.new()
+	var err := peer.create_client("127.0.0.1", _DEAD_PORT)
+	if err != OK:
+		_fail("setup: create_client failed with error %d" % err)
+		_restore_offline(session)
+		return
+	multiplayer.multiplayer_peer = peer
 
-	# Wait for handshake and replication
-	for i in range(_SETTLE_FRAMES):
-		await process_frame
-
-	# Get match controllers on both sides
-	var server_match_controller := server_main.get_node("MatchController") as MatchController
-	var client_match_controller := client_main.get_node("MatchController") as MatchController
-
-	# Verify server match state exists and is being used
-	if server_match_controller.match_state == null:
-		_fail("server match state should exist")
+	if multiplayer.is_server():
+		_fail("setup: client peer still reports is_server()")
+		_restore_offline(session)
 		return
 
-	# Verify client match state also exists (it's created in _ready)
-	if client_match_controller.match_state == null:
-		_fail("client match state should exist")
+	var world := _instance_main()
+	if world == null:
+		_restore_offline(session)
 		return
-
-	# Test the tick gating condition directly:
-	# - Server should satisfy: is_server() or not has_multiplayer_peer()
-	# - Client should NOT satisfy: is_server() or not has_multiplayer_peer()
-	var server_api_inner := server_match_controller.get_multiplayer()
-	var client_api_inner := client_match_controller.get_multiplayer()
-
-	var server_should_tick := (server_api_inner.is_server() or
-		not server_api_inner.has_multiplayer_peer())
-	var client_should_tick := (client_api_inner.is_server() or
-		not client_api_inner.has_multiplayer_peer())
-
-	if server_should_tick and client_api_inner.is_server() == false and
-	   client_api_inner.has_multiplayer_peer():
-		_pass("server peer ticks match state")
-	else:
-		_fail("server peer should tick but doesn't or client shouldn't tick but does")
-
-	if not client_should_tick:
-		_pass("client peer never ticks match state")
-	else:
-		_fail("client peer should not tick but would")
-
-	server_root.queue_free()
-	client_root.queue_free()
+	root.add_child(world)
 	await process_frame
 
+	var controller := world.get_node_or_null(^"MatchController") as MatchController
+	var state := world.get_node_or_null(^"MatchController/MobaMatchState") as MobaMatchState
+	if controller == null or state == null:
+		_fail("setup: MatchController/MobaMatchState missing on the client instance")
+	else:
+		if controller._is_authoritative():
+			_fail("client process reports itself authoritative")
+		else:
+			_pass("client process is not authoritative")
 
-## Test that match state properties replicate on-change.
-func _test_replication() -> void:
-	# This is a simplified test that verifies the synchronizer is configured
-	# correctly. A full replication test would require forcing a state change
-	# and observing it replicate, which is complex in a headless test.
-	_pass("match state properties replicate on-change")
+		for _i in _TICK_FRAMES:
+			await physics_frame
+
+		if state.round_in_progress:
+			_fail("client started a round on its own")
+		elif state.team_a_score != 0 or state.team_b_score != 0:
+			_fail(
+				"client advanced its own score to %d-%d" % [state.team_a_score, state.team_b_score]
+			)
+		elif state.winning_team != MobaMatchState.NO_WINNER:
+			_fail("client decided a winner on its own: %d" % state.winning_team)
+		else:
+			_pass("client match state never advances on its own")
+
+	world.queue_free()
+	await process_frame
+	_restore_offline(session)
+
+
+## The synchronizer must carry exactly the four match-state properties, each
+## on-change (replication_mode 2), matching CombatStateSynchronizer.
+##
+## Read off an instanced-but-detached scene: _ready() never runs, so this
+## asserts what the scene authors rather than what any code path built.
+func _test_replication_config() -> void:
+	var world := _instance_main()
+	if world == null:
+		return
+
+	var path := ^"MatchController/MobaMatchState/MatchStateSynchronizer"
+	var sync := world.get_node_or_null(path) as MultiplayerSynchronizer
+	if sync == null:
+		_fail("MatchStateSynchronizer not found at %s" % path)
+		world.free()
+		return
+
+	var config := sync.replication_config
+	if config == null:
+		_fail("MatchStateSynchronizer has no replication_config")
+		world.free()
+		return
+
+	var found: Array[String] = []
+	var ok := true
+	for property: NodePath in config.get_properties():
+		found.append(String(property))
+		var mode := config.property_get_replication_mode(property)
+		if mode != SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE:
+			_fail("%s replicates in mode %d, expected on-change (2)" % [property, mode])
+			ok = false
+
+	for expected in _REPLICATED:
+		if expected not in found:
+			_fail("%s is not replicated by MatchStateSynchronizer" % expected)
+			ok = false
+
+	for property in found:
+		if property not in _REPLICATED:
+			_fail("MatchStateSynchronizer replicates unexpected property %s" % property)
+			ok = false
+
+	if ok:
+		_pass("match state replicates the four properties on-change")
+
+	world.free()
+
+
+## scenes/main.tscn, instantiated but not parented.
+func _instance_main() -> Node:
+	var packed := load("res://scenes/main.tscn") as PackedScene
+	if packed == null:
+		_fail("setup: res://scenes/main.tscn did not load")
+		return null
+	return packed.instantiate()
+
+
+## The SessionManager autoload. Autoloads are instantiated under --script too,
+## so this is normally present; reached by path rather than by its global name.
+func _session() -> Node:
+	return root.get_node_or_null(^"SessionManager")
+
+
+func _restore_offline(session: Node) -> void:
+	multiplayer.multiplayer_peer = null
+	if session != null:
+		session.mode = session.Mode.OFFLINE
 
 
 func _pass(check: String) -> void:
 	_completed.append(check)
-	print("PASS: %s" % check)
+	print("PASS %s" % check)
 
 
-func _fail(check: String) -> void:
-	_failures.append(check)
-	printerr("FAIL: %s" % check)
+func _fail(message: String) -> void:
+	_failures.append(message)
 
 
 func _finish() -> void:
-	_report()
-	_quit_engine()
-
-
-func _report() -> void:
 	for check in _EXPECTED_CHECKS:
 		if check not in _completed:
-			_fail(check)
+			_failures.append("check never ran: %s" % check)
 
 	if _failures.is_empty():
-		print("\nAll match controller checks passed.")
-	else:
-		printerr("\n%d checks FAILED: %s" % [_failures.size(), ", ".join(_failures)])
+		print("\nAll %d match controller checks passed." % _EXPECTED_CHECKS.size())
+		quit(0)
+		return
 
-
-func _quit_engine() -> void:
-	get_tree().quit(1 if not _failures.is_empty() else 0)
+	for failure in _failures:
+		printerr("FAIL %s" % failure)
+	quit(1)
