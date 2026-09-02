@@ -50,6 +50,7 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"a peer cannot submit a build for another peer's actor",
 	"build survives the spawn payload intact",
 	"a bot spawn keeps its scene loadout and baseline stats",
+	"editing a build after acceptance does not change stored state",
 ]
 
 var _failures: Array[String] = []
@@ -69,6 +70,7 @@ func _run() -> void:
 	_test_cannot_submit_for_another_peers_actor()
 	_test_build_survives_spawn_payload()
 	_test_bot_spawn_is_untouched_by_the_fallback_build()
+	_test_accepted_build_is_snapshotted()
 
 	_finish()
 
@@ -232,8 +234,16 @@ func _test_refusal_preserves_accepted_build() -> void:
 		)
 		return
 
-	if world_manager.get_peer_build(_OWNING_PEER) != accepted:
-		_fail("a refused submission overwrote the peer's accepted build")
+	# Compared by content, not identity: the server stores a snapshot of an
+	# accepted build rather than the caller's object (see _copy_accepted).
+	var still_stored := world_manager.get_peer_build(_OWNING_PEER)
+	if still_stored.character_name != accepted.character_name:
+		_fail(
+			(
+				"a refused submission overwrote the peer's accepted build: stored '%s', expected '%s'"
+				% [still_stored.character_name, accepted.character_name]
+			)
+		)
 		return
 
 	_pass("refused submission leaves the accepted build in place")
@@ -253,7 +263,7 @@ func _test_cannot_submit_for_another_peers_actor() -> void:
 	if result.success:
 		_fail("a peer submitted a build for an actor it does not own")
 		return
-	if world_manager.get_peer_build(_OWNING_PEER) == build:
+	if world_manager.get_peer_build(_OWNING_PEER).character_name == build.character_name:
 		_fail("a denied submission was stored anyway")
 		return
 
@@ -366,6 +376,53 @@ func _test_bot_spawn_is_untouched_by_the_fallback_build() -> void:
 		return
 
 	_pass("a bot spawn keeps its scene loadout and baseline stats")
+
+
+## What validated is what gets stored, and it stays stored.
+##
+## The server keeps a snapshot rather than the submitter's object. Without that,
+## a caller could hold its reference and edit the accepted build afterwards --
+## an illegal build reaching a spawn having never been refused, because it only
+## became illegal after the single check that would have caught it.
+func _test_accepted_build_is_snapshotted() -> void:
+	var world_manager := _make_world_manager()
+	if _spawn_player(world_manager, _OWNING_PEER) == null:
+		_fail("setup: player actor did not spawn")
+		return
+
+	var submitted := _make_legal_build("Snapshot", {MobaStatBlock.ARMOR: 2})
+	if not world_manager.submit_build(_OWNING_PEER, submitted).success:
+		_fail("setup: legal build was refused")
+		return
+
+	# Edit every mutable part of the build the submitter still holds, including
+	# an illegal ability the validator would have refused outright.
+	submitted.character_name = "Tampered"
+	submitted.loadout.set_action_slot(3, "aimed_shot")
+	submitted.stat_allocation[MobaStatBlock.ARMOR] = 999
+
+	var stored := world_manager.get_peer_build(_OWNING_PEER)
+	if stored.character_name != "Snapshot":
+		_fail("stored build's name followed a post-acceptance edit")
+		return
+	if stored.loadout.get_action_slot(3) != "":
+		_fail(
+			(
+				"stored build's loadout followed a post-acceptance edit: slot 3 is '%s'"
+				% stored.loadout.get_action_slot(3)
+			)
+		)
+		return
+	if stored.stat_allocation.get(MobaStatBlock.ARMOR, 0) != 2:
+		_fail(
+			(
+				"stored build's allocation followed a post-acceptance edit: armor is %s"
+				% stored.stat_allocation.get(MobaStatBlock.ARMOR, 0)
+			)
+		)
+		return
+
+	_pass("editing a build after acceptance does not change stored state")
 
 
 ## The path of the first Object found anywhere in a payload, or "" if it is

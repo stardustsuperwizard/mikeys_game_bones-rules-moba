@@ -212,7 +212,7 @@ func submit_build(peer_id: int, build: MobaCharacterBuild, requester_id: int = -
 	var action := MobaSubmitBuildAction.new(actor, build, _ALLOCATION_POLICY)
 	var result := ActionRunner.run(action, peer_id if requester_id == -1 else requester_id)
 	if result.success:
-		_peer_builds[peer_id] = build
+		_peer_builds[peer_id] = _copy_accepted(build)
 
 	return result
 
@@ -221,6 +221,29 @@ func submit_build(peer_id: int, build: MobaCharacterBuild, requester_id: int = -
 ## or the shipped fallback if that peer has never had one accepted.
 func get_peer_build(peer_id: int) -> MobaCharacterBuild:
 	return _peer_builds.get(peer_id, _FALLBACK_BUILD)
+
+
+# Snapshot an accepted build for authoritative storage.
+#
+# What validated is the state of the build at the instant it was checked, and
+# that is what has to be kept. Storing the caller's object would let whoever
+# submitted it keep a reference and edit the server's copy afterwards -- an
+# illegal build reaching a spawn without ever being refused, because it became
+# illegal after the only check. Cheap insurance now, and the submission path
+# gains a real remote caller in #335.
+#
+# stat_allocation and loadout are copied explicitly: Resource.duplicate()
+# without deep copying carries a Dictionary and a sub-Resource across as
+# references, so the two mutable parts of a build would still be shared. The
+# weapon inside the loadout stays shared on purpose -- MobaLoadout.weapon
+# documents why that is safe, and MobaCombatant's own loadout setter makes the
+# same shallow copy for the same reason.
+func _copy_accepted(build: MobaCharacterBuild) -> MobaCharacterBuild:
+	var copy := build.duplicate() as MobaCharacterBuild
+	copy.stat_allocation = build.stat_allocation.duplicate()
+	if build.loadout != null:
+		copy.loadout = build.loadout.duplicate() as MobaLoadout
+	return copy
 
 
 # Flatten a build into plain Variant data for MultiplayerSpawner.spawn().
