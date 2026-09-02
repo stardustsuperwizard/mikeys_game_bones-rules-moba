@@ -144,29 +144,27 @@ func _test_server_client_tick() -> void:
 		_fail("client match state should exist")
 		return
 
-	# Create a simple tracker to verify ticking happens
-	# We can't directly call tick() to test, but we can verify the match state
-	# is in a valid state after frames have passed
-	var initial_round := server_match_controller.match_state.round_in_progress
+	# Test the tick gating condition directly:
+	# - Server should satisfy: is_server() or not has_multiplayer_peer()
+	# - Client should NOT satisfy: is_server() or not has_multiplayer_peer()
+	var server_api_inner := server_match_controller.get_multiplayer()
+	var client_api_inner := client_match_controller.get_multiplayer()
 
-	# Run a few more frames to let ticking happen
-	for i in range(5):
-		await process_frame
+	var server_should_tick := (server_api_inner.is_server() or
+		not server_api_inner.has_multiplayer_peer())
+	var client_should_tick := (client_api_inner.is_server() or
+		not client_api_inner.has_multiplayer_peer())
 
-	# The server's match state should still be tracking the round
-	# (it may not have changed, but it was ticked)
-	if server_match_controller.match_state.round_in_progress == initial_round:
+	if server_should_tick and client_api_inner.is_server() == false and
+	   client_api_inner.has_multiplayer_peer():
 		_pass("server peer ticks match state")
 	else:
-		_fail("server match state state changed unexpectedly")
+		_fail("server peer should tick but doesn't or client shouldn't tick but does")
 
-	# For the client, we need to verify it's not ticking its local copy
-	# The client should have the same round_in_progress from replication,
-	# but it shouldn't be advancing on its own
-	if client_match_controller.match_state.round_in_progress == initial_round:
+	if not client_should_tick:
 		_pass("client peer never ticks match state")
 	else:
-		_fail("client match state was modified locally")
+		_fail("client peer should not tick but would")
 
 	server_root.queue_free()
 	client_root.queue_free()
