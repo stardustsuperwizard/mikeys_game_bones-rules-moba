@@ -46,6 +46,15 @@ size = Vector3(0.2, 4, 20)
 [sub_resource type="BoxMesh" id="BoxMesh_east"]
 size = Vector3(0.2, 4, 20)
 
+[sub_resource type="BoxShape3D" id="BoxShape3D_obstacle"]
+size = Vector3(2.0, 0.8, 2.0)
+
+[sub_resource type="StandardMaterial3D" id="Mat_obstacle"]
+albedo_color = Color(0.7, 0.7, 0.7, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_obstacle"]
+size = Vector3(2.0, 0.8, 2.0)
+
 [node name="Main" type="Node" unique_id=1142634838]
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=849271469]
@@ -105,6 +114,17 @@ shape = SubResource("BoxShape3D_east")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 2, 0)
 material_override = SubResource("Mat_wall")
 mesh = SubResource("BoxMesh_east")
+
+[node name="CenterObstacle" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CenterObstacle"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+shape = SubResource("BoxShape3D_obstacle")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CenterObstacle"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+material_override = SubResource("Mat_obstacle")
+mesh = SubResource("BoxMesh_obstacle")
 
 [node name="WorldManager" type="Node3D" parent="." unique_id=789669805]
 script = ExtResource("3")
