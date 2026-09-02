@@ -1,12 +1,34 @@
 class_name WorldManager
 extends Node3D
 
+# The build a peer spawns with when it has not had one accepted yet: a peer that
+# connects before visiting character creation, and every existing test or tool
+# that spawns without going through it at all. Shipped, authored, and covered by
+# build_validator_test.gd's "template validates unmodified" check, so the
+# fallback is a legal playable character rather than an empty loadout.
+const _FALLBACK_BUILD := preload("res://rules/data/builds/melee_bruiser_build.tres")
+
+# The baseline a build's stat allocation is added on top of, and the policy its
+# allocation is checked against. Preloaded rather than load()-ed per spawn: both
+# are authored single-instance data, and a parse-time failure here is a louder,
+# earlier signal than a null at spawn.
+const _BASELINE_STAT_BLOCK := preload("res://rules/data/stat_blocks/baseline.tres")
+const _ALLOCATION_POLICY := preload("res://rules/data/stat_blocks/stat_allocation_policy.tres")
+
 @export var spawn_points: Array[SpawnPoint] = []
 @export var player_spawn_point: SpawnPoint
 
 # Map of peer_id -> the player actor spawned for it, so a disconnect can find
 # and free the right one.
 var _peer_actors: Dictionary[int, Actor] = {}
+
+# Map of peer_id -> the last build that peer submitted and the server accepted.
+#
+# Authoritative state, and the reason a refused submission is a no-op rather
+# than an erase: write access is confined to submit_build(), which only reaches
+# here after MobaSubmitBuildAction has returned success. A peer with no entry
+# has not had a build accepted yet and spawns on _FALLBACK_BUILD.
+var _peer_builds: Dictionary[int, MobaCharacterBuild] = {}
 
 @onready var _spawner: MultiplayerSpawner = get_node_or_null("MultiplayerSpawner")
 
@@ -51,7 +73,9 @@ func spawn_player_for_peer(peer_id: int) -> void:
 	if _peer_actors.has(peer_id) and is_instance_valid(_peer_actors[peer_id]):
 		return
 
-	_peer_actors[peer_id] = spawn(player_spawn_point, peer_id)
+	# The build is passed in here rather than looked up inside spawn(), because
+	# spawn() is also the path for world and bot content. Only a peer has a build.
+	_peer_actors[peer_id] = spawn(player_spawn_point, peer_id, get_peer_build(peer_id))
 
 
 # Read off the SessionManager autoload, which has already run its own _ready()
@@ -71,7 +95,16 @@ func _is_dedicated_server() -> bool:
 # function receives identical data on every peer, which is what lets a
 # networked spawn reconstruct the same character_sheet/color/authority
 # everywhere instead of only on the spawning peer.
-func spawn(spawn_point: SpawnPoint, authority_id: int = 1) -> Actor:
+#
+# `build` is the character build the spawned actor should be equipped with, and
+# is deliberately a parameter rather than something this function looks up.
+# spawn() is the single path for every spawn point, world and bot content
+# included, and those are not peers: an actor spawned without a build keeps the
+# loadout and stats its scene authored. Defaulting to a lookup here handed the
+# per-peer fallback build to enemies as well, quietly restatting them.
+func spawn(
+	spawn_point: SpawnPoint, authority_id: int = 1, build: MobaCharacterBuild = null
+) -> Actor:
 	var data := {
 		"scene_path": spawn_point.actor_scene.resource_path,
 		"character_sheet_path": spawn_point.character_sheet.resource_path,
@@ -79,6 +112,12 @@ func spawn(spawn_point: SpawnPoint, authority_id: int = 1) -> Actor:
 		"transform": spawn_point.transform,
 		"authority_id": authority_id,
 	}
+
+	# Absent, not null, when there is no build: _spawn_actor() runs on every peer
+	# off this payload, and "no key" is the one state that cannot be confused with
+	# a build that failed to encode.
+	if build != null:
+		data["build"] = _encode_build(build)
 	if _spawner:
 		return _spawner.spawn(data) as Actor
 	return _spawn_actor(data)
@@ -91,6 +130,25 @@ func _spawn_actor(data: Dictionary) -> Actor:
 	(actor.get_node("Body") as Node3D).transform = data["transform"]
 	actor.owner_id = data["authority_id"]
 
+	# Equip the build the server accepted for this peer, replacing whatever
+	# loadout the actor scene baked in at design time. Plain property assignment,
+	# matching character_sheet/color above -- spawn initialization, not a
+	# mutator-method call, so command_mutator_contract_test.gd stays satisfied.
+	#
+	# stat_block is assigned before the actor enters the tree, which is what makes
+	# it stick: MobaCombatant seeds its runtime stat block from this property, so
+	# an effective block set here is the one health and resource are sized from.
+	#
+	# Only when the payload carries a build. World and bot actors are spawned
+	# without one and are left exactly as their scene authored them -- equipping
+	# them from the per-peer fallback would be a silent balance change to actors
+	# that have no build to submit in the first place.
+	var combatant := actor.get_node_or_null("MobaCombatant") as MobaCombatant
+	if combatant != null and data.has("build"):
+		var build := _decode_build(data["build"])
+		combatant.stat_block = build.get_effective_stat_block(_BASELINE_STAT_BLOCK)
+		combatant.loadout = build.loadout
+
 	# Set multiplayer authority for the actor and its movement body
 	# (connecting peer stays authoritative for movement).
 	actor.set_multiplayer_authority(data["authority_id"])
@@ -98,7 +156,6 @@ func _spawn_actor(data: Dictionary) -> Actor:
 	# Combat state is always server-authoritative (peer 1), regardless of which
 	# peer owns the actor. This is required so clients can never broadcast their
 	# own claimed health to other peers.
-	var combatant := actor.get_node_or_null("MobaCombatant") as Node
 	if combatant != null:
 		combatant.set_multiplayer_authority(1)
 
@@ -126,3 +183,129 @@ func _on_peer_disconnected(peer_id: int) -> void:
 	if is_instance_valid(actor):
 		actor.queue_free()
 	_peer_actors.erase(peer_id)
+	_peer_builds.erase(peer_id)
+
+
+## Submit a character build on behalf of a peer, and store it if the server
+## accepts it. Returns the ActionResult so a caller can surface the refusal.
+##
+## This is the server-side seam for the whole feature, and the only writer of
+## _peer_builds. The submission goes through ActionRunner rather than calling
+## MobaBuildValidator directly, which is what applies Authority.can_perform():
+## `requester_id` is the peer that asked, `actor.owner_id` is who it asked for,
+## and a mismatch is refused here without either this function or the Action
+## containing an ownership check of its own.
+##
+## Re-validating server-side is the point even though the creation UI already
+## validated: the UI's answer arrives over the network and is not evidence. Both
+## sides call the same MobaBuildValidator.validate(), so an illegal build is
+## refused with the identical reason wherever it is checked.
+##
+## A refusal deliberately leaves any previously accepted build in place. The
+## peer keeps playing the last build the server agreed to rather than being
+## dropped to the fallback by a bad submission.
+func submit_build(peer_id: int, build: MobaCharacterBuild, requester_id: int = -1) -> ActionResult:
+	var actor: Actor = _peer_actors.get(peer_id)
+	if actor == null:
+		return ActionResult.new(false, MobaSubmitBuildAction.FAILURE_NO_ACTOR)
+
+	var action := MobaSubmitBuildAction.new(actor, build, _ALLOCATION_POLICY)
+	var result := ActionRunner.run(action, peer_id if requester_id == -1 else requester_id)
+	if result.success:
+		_peer_builds[peer_id] = _copy_accepted(build)
+
+	return result
+
+
+## The build a peer's actor should spawn with: the last one the server accepted,
+## or the shipped fallback if that peer has never had one accepted.
+func get_peer_build(peer_id: int) -> MobaCharacterBuild:
+	return _peer_builds.get(peer_id, _FALLBACK_BUILD)
+
+
+# Snapshot an accepted build for authoritative storage.
+#
+# What validated is the state of the build at the instant it was checked, and
+# that is what has to be kept. Storing the caller's object would let whoever
+# submitted it keep a reference and edit the server's copy afterwards -- an
+# illegal build reaching a spawn without ever being refused, because it became
+# illegal after the only check. Cheap insurance now, and the submission path
+# gains a real remote caller in #335.
+#
+# stat_allocation and loadout are copied explicitly: Resource.duplicate()
+# without deep copying carries a Dictionary and a sub-Resource across as
+# references, so the two mutable parts of a build would still be shared. The
+# weapon inside the loadout stays shared on purpose -- MobaLoadout.weapon
+# documents why that is safe, and MobaCombatant's own loadout setter makes the
+# same shallow copy for the same reason.
+func _copy_accepted(build: MobaCharacterBuild) -> MobaCharacterBuild:
+	var copy := build.duplicate() as MobaCharacterBuild
+	copy.stat_allocation = build.stat_allocation.duplicate()
+	if build.loadout != null:
+		copy.loadout = build.loadout.duplicate() as MobaLoadout
+	return copy
+
+
+# Flatten a build into plain Variant data for MultiplayerSpawner.spawn().
+#
+# Resources cannot go in this dictionary. Spawn data is encoded with
+# var_to_bytes and object decoding is off (SceneMultiplayer.allow_object_decoding
+# defaults false and this project never enables it), so a MobaLoadout or
+# MobaStatBlock placed here survives an offline spawn -- which never serializes
+# -- and is dropped on the wire, giving every remote peer the scene's baked
+# loadout instead of the player's. That is precisely the bug this task exists to
+# fix, and it would be invisible in single-player. Hence plain fields, mirroring
+# how character_sheet already travels as a path rather than as a CharacterSheet.
+#
+# The weapon travels as a resource path for the same reason. Weapons are authored
+# files picked in the creation screen, never built at runtime, so a path always
+# resolves on the far side.
+func _encode_build(build: MobaCharacterBuild) -> Dictionary:
+	var loadout := build.loadout
+	return {
+		"character_name": build.character_name,
+		"primary_discipline": int(build.primary_discipline),
+		"secondary_discipline": int(build.secondary_discipline),
+		"stat_allocation": build.stat_allocation.duplicate(),
+		"weapon_path":
+		"" if loadout == null or loadout.weapon == null else loadout.weapon.resource_path,
+		"action_slots":
+		PackedStringArray(
+			(
+				[]
+				if loadout == null
+				else [
+					loadout.action_slot_1,
+					loadout.action_slot_2,
+					loadout.action_slot_3,
+					loadout.action_slot_4,
+				]
+			)
+		),
+		"passive_slot": "" if loadout == null else loadout.passive_slot,
+	}
+
+
+# Rebuild a MobaCharacterBuild from _encode_build()'s output. Runs on every peer,
+# including the one that spawned, so the server and its clients construct the
+# combatant from the same bytes rather than the server taking a shortcut the
+# clients cannot.
+func _decode_build(data: Dictionary) -> MobaCharacterBuild:
+	var loadout := MobaLoadout.new()
+	var action_slots: PackedStringArray = data["action_slots"]
+	for i in range(action_slots.size()):
+		loadout.set_action_slot(i + 1, action_slots[i])
+	loadout.passive_slot = data["passive_slot"]
+
+	var weapon_path: String = data["weapon_path"]
+	if weapon_path != "":
+		loadout.weapon = load(weapon_path) as MobaWeapon
+
+	var build := MobaCharacterBuild.new()
+	build.character_name = data["character_name"]
+	build.primary_discipline = data["primary_discipline"]
+	build.secondary_discipline = data["secondary_discipline"]
+	build.stat_allocation.assign(data["stat_allocation"])
+	build.loadout = loadout
+
+	return build
