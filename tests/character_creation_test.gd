@@ -20,6 +20,9 @@
 ##   - a hand-built character saves with the weapon the picker is showing
 ##   - a Discipline change clears an ability the new pair no longer allows
 ##   - the stat rows come from the policy's allocatable set, not the scene
+##   - a build whose weapon the picker cannot offer says so, and the warning
+##     survives to be seen
+##   - a successful save is not reported in the colour reserved for refusals
 ##   - the main menu entry point wires the Character button to this scene
 ##
 ## This test is NOT wired into tests/test_bootstrap.gd; it is a manual
@@ -81,6 +84,8 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"hand-built character saves the weapon the picker shows",
 	"discipline change clears an ability outside the new pair",
 	"stat rows cover the policy's allocatable stats",
+	"an unofferable weapon is reported, not silently swallowed",
+	"a successful save is not coloured as a failure",
 	"main menu Character button wired to character creation",
 ]
 
@@ -115,6 +120,8 @@ func _run() -> void:
 	await _test_weapon_applied_without_reselect()
 	await _test_discipline_change_clears_ability()
 	await _test_stat_rows_follow_policy()
+	await _test_unofferable_weapon_is_reported()
+	await _test_success_is_not_coloured_as_failure()
 	await _test_main_menu_entry_point()
 
 	_finish()
@@ -945,6 +952,84 @@ func _test_stat_rows_follow_policy() -> void:
 		)
 	else:
 		_pass("stat rows cover the policy's allocatable stats")
+
+
+## Loading a build whose weapon is not among the pickable ones says so.
+##
+## Regression for a warning that could never be read: _load_template() set the
+## message and then cleared the message area on its last line, so the text was
+## gone before a frame was drawn. Unreachable with the shipped data -- one
+## weapon, referenced by every template -- so only a build carrying a weapon
+## from outside rules/data/weapons/ exercises it.
+func _test_unofferable_weapon_is_reported() -> void:
+	if _character_creation == null:
+		return
+
+	var error_label := _character_creation.get_node_or_null(NodePath(_PATH_ERROR_LABEL)) as Label
+	if error_label == null:
+		_fail("error label missing from the scene")
+		return
+
+	var stray := MobaWeapon.new()  # never saved, so resource_path stays empty
+	var build := MobaCharacterBuild.new()
+	build.character_name = "Stray Weapon"
+	build.primary_discipline = MobaAbility.Discipline.WARRIOR
+	build.secondary_discipline = MobaAbility.Discipline.GUARDIAN
+	build.loadout = MobaLoadout.new()
+	build.loadout.weapon = stray
+
+	_character_creation._load_template(build)
+	await process_frame
+
+	if error_label.text.is_empty():
+		_fail("a weapon the picker cannot offer was swallowed without a word")
+	elif _character_creation._current_build.loadout.weapon != stray:
+		_fail("the build's own weapon was replaced by whatever the picker showed")
+	else:
+		_pass("an unofferable weapon is reported, not silently swallowed")
+
+
+## "Saved successfully." must not render in the refusal colour.
+##
+## The scene themes ErrorLabel red, which is right for a refusal and wrong for a
+## confirmation: reporting success in the colour reserved for failure is how a
+## player learns to distrust the only feedback this screen gives.
+func _test_success_is_not_coloured_as_failure() -> void:
+	if _character_creation == null:
+		return
+
+	var error_label := _character_creation.get_node_or_null(NodePath(_PATH_ERROR_LABEL)) as Label
+	var name_input := _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
+	var save_button := _character_creation.get_node_or_null(NodePath(_PATH_SAVE_BUTTON)) as Button
+	var template_opt := (
+		_character_creation.get_node_or_null(NodePath(_PATH_TEMPLATE_OPTION)) as OptionButton
+	)
+	if error_label == null or name_input == null or save_button == null or template_opt == null:
+		_fail("controls missing for the save-colour check")
+		return
+	if template_opt.item_count < 2:
+		_fail("template picker lists no templates")
+		return
+
+	var character_name := "ColourProbe"
+	var file_path: String = CharacterStorage.SAVE_DIR + character_name + ".tres"
+	DirAccess.remove_absolute(file_path)
+
+	template_opt.select(1)
+	_character_creation._on_load_template()
+	name_input.text = character_name
+	save_button.pressed.emit()
+	await process_frame
+
+	var colour := error_label.get_theme_color("font_color")
+	if not ResourceLoader.exists(file_path):
+		_fail("save did not write %s, so the colour check has nothing to assert" % file_path)
+	elif colour.is_equal_approx(_character_creation.MESSAGE_COLOR_ERROR):
+		_fail("a successful save was reported in the refusal colour %s" % str(colour))
+	else:
+		_pass("a successful save is not coloured as a failure")
+
+	DirAccess.remove_absolute(file_path)
 
 
 ## Test that the main menu Character button is wired to character creation.

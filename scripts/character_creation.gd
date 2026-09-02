@@ -23,6 +23,15 @@ const TEMPLATES_DIR := "res://rules/data/builds/"
 ## Minimum touch-target size to ensure gamepad and touch afford same sized buttons.
 const TOUCH_TARGET_SIZE := Vector2(60, 60)
 
+## Message-area colours. The scene themes the label red, which is right for a
+## refusal and wrong for "Saved successfully." -- reporting a success in the
+## colour reserved for failure is how a player learns to distrust the only
+## feedback this screen gives them. Applied per message rather than by adding a
+## second label: one message area is also one place to look, which matters more
+## on a gamepad than it does with a mouse.
+const MESSAGE_COLOR_ERROR := Color(1, 0, 0, 1)
+const MESSAGE_COLOR_SUCCESS := Color(0.3, 0.85, 0.4, 1)
+
 ## Discipline enum constant strings for display (indexed by enum value).
 const DISCIPLINE_NAMES := ["Warrior", "Guardian", "Slayer", "Marksman", "Mystic", "Adventurer"]
 
@@ -384,7 +393,7 @@ func _populate_template_options() -> void:
 		file_name = dir.get_next()
 
 	# If no templates found, disable the load template button
-	if _templates_cache.is_empty():
+	if _templates_cache.is_empty() and _load_template_button != null:
 		_load_template_button.disabled = true
 
 
@@ -696,7 +705,7 @@ func _on_primary_discipline_changed(_index: int) -> void:
 	_current_build.primary_discipline = MobaAbility.Discipline.values()[
 		_primary_discipline_option.get_selected_id()
 	]
-	_error_label.text = ""
+	_clear_message()
 	_update_ability_options()
 
 
@@ -705,7 +714,7 @@ func _on_secondary_discipline_changed(_index: int) -> void:
 	_current_build.secondary_discipline = MobaAbility.Discipline.values()[
 		_secondary_discipline_option.get_selected_id()
 	]
-	_error_label.text = ""
+	_clear_message()
 	_update_ability_options()
 
 
@@ -721,7 +730,7 @@ func _on_stat_value_changed(value: float, stat_name: StringName) -> void:
 
 	# Update display to show new total
 	_update_stat_display()
-	_error_label.text = ""
+	_clear_message()
 
 
 ## Signal handler: Action ability option changed.
@@ -738,23 +747,23 @@ func _on_action_ability_changed(_index: int, slot: int) -> void:
 	if _current_build.loadout.get_action_slot(slot) != ability_id:
 		# Revert the UI selection to what was actually set
 		_select_option_by_data(option, old_ability_id)
-		_error_label.text = "That ability is already selected in another slot."
+		_show_error("That ability is already selected in another slot.")
 		return
 
-	_error_label.text = ""
+	_clear_message()
 
 
 ## Signal handler: Passive ability option changed.
 func _on_passive_ability_changed(_index: int) -> void:
 	var ability_id = _passive_ability_option.get_selected_metadata()
 	_current_build.loadout.set_passive_slot(ability_id)
-	_error_label.text = ""
+	_clear_message()
 
 
 ## Signal handler: Weapon option changed.
 func _on_weapon_changed(_index: int) -> void:
 	_apply_selected_weapon()
-	_error_label.text = ""
+	_clear_message()
 
 
 ## Copy whatever the weapon picker currently shows into the working build.
@@ -777,13 +786,13 @@ func _on_load_template() -> void:
 	# added without an explicit id. Item 0 is the "(Select a template)"
 	# placeholder and carries no metadata.
 	if _template_option == null or _template_option.get_selected() < 1:
-		_error_label.text = "Please select a template."
+		_show_error("Please select a template.")
 		return
 
 	var template_name = _template_option.get_selected_metadata()
 	var template = _templates_cache.get(template_name, null)
 	if template == null:
-		_error_label.text = "Template not found."
+		_show_error("Template not found.")
 		return
 
 	_load_template(template)
@@ -798,13 +807,13 @@ func _on_load_character() -> void:
 	# with an id of its own. Item 0 is the "(No saved characters)" placeholder
 	# and carries no metadata.
 	if _saved_character_option == null or _saved_character_option.get_selected() < 1:
-		_error_label.text = "Please select a saved character."
+		_show_error("Please select a saved character.")
 		return
 
 	var char_name = _saved_character_option.get_selected_metadata()
 	var build = CharacterStorage.load_character(char_name)
 	if build == null:
-		_error_label.text = "Failed to load character."
+		_show_error("Failed to load character.")
 		return
 
 	# Re-saving updates this same character because _on_save() derives the
@@ -819,8 +828,12 @@ func _on_load_character() -> void:
 ## The player can then save unmodified or edit further.
 func _load_template(template: MobaCharacterBuild) -> void:
 	if template == null:
-		_error_label.text = "Failed to load template."
+		_show_error("Failed to load template.")
 		return
+
+	# Any warning raised while re-selecting the pickers below, applied once at
+	# the end so the message-area clear on the way out cannot swallow it.
+	var weapon_warning := ""
 
 	# Copy all fields from template to current build
 	_current_build.character_name = template.character_name
@@ -869,7 +882,11 @@ func _load_template(template: MobaCharacterBuild) -> void:
 			# The build carries a weapon this screen cannot offer. Keep the
 			# build's weapon -- it is the saved truth -- and say so rather than
 			# letting the picker imply a weapon that is not equipped.
-			_error_label.text = (
+			#
+			# Held in a local and applied after the clear below, not written
+			# straight to the label: this function ends by clearing the message
+			# area, so an early write is erased before the player ever sees it.
+			weapon_warning = (
 				"This character's weapon is not in %sweapons/ and cannot be shown."
 				% MobaRules.DATA_ROOT
 			)
@@ -877,7 +894,10 @@ func _load_template(template: MobaCharacterBuild) -> void:
 	# Update abilities
 	_update_ability_options()
 
-	_error_label.text = ""
+	if weapon_warning == "":
+		_clear_message()
+	else:
+		_show_error(weapon_warning)
 
 
 ## Signal handler: Save button pressed.
@@ -888,7 +908,7 @@ func _on_save() -> void:
 	_current_build.character_name = _character_name_input.text.strip_edges()
 
 	if _current_build.character_name.is_empty():
-		_error_label.text = "Character name is required."
+		_show_error("Character name is required.")
 		return
 
 	# Validate the build using the authoritative validator
@@ -900,15 +920,17 @@ func _on_save() -> void:
 		var message = failure_messages.get(
 			failure_reason, "Unknown validation error: %s" % failure_reason
 		)
-		_error_label.text = message
+		_show_error(message)
 		return
 
 	# Sanitize the filename: remove invalid characters and path separators
 	var file_name = _sanitize_filename(_current_build.character_name)
 	if file_name.is_empty():
-		_error_label.text = (
-			"Character name contains invalid characters. "
-			+ "Use only letters, numbers, and spaces."
+		_show_error(
+			(
+				"Character name contains invalid characters. "
+				+ "Use only letters, numbers, and spaces."
+			)
 		)
 		return
 
@@ -918,9 +940,34 @@ func _on_save() -> void:
 		# when the screen opened, and a player who saves and then tries to
 		# reload their character is told there are none.
 		_populate_saved_characters_option()
-		_error_label.text = "Saved successfully."
+		_show_success("Saved successfully.")
 	else:
-		_error_label.text = "Failed to save character."
+		_show_error("Failed to save character.")
+
+
+## Show a refusal or warning in the message area, in the failure colour.
+func _show_error(text: String) -> void:
+	if _error_label == null:
+		return
+	_error_label.add_theme_color_override("font_color", MESSAGE_COLOR_ERROR)
+	_error_label.text = text
+
+
+## Show a confirmation in the message area, in the success colour.
+func _show_success(text: String) -> void:
+	if _error_label == null:
+		return
+	_error_label.add_theme_color_override("font_color", MESSAGE_COLOR_SUCCESS)
+	_error_label.text = text
+
+
+## Empty the message area. Colour is reset with it so the next plain write
+## cannot inherit whichever state happened to be showing last.
+func _clear_message() -> void:
+	if _error_label == null:
+		return
+	_error_label.add_theme_color_override("font_color", MESSAGE_COLOR_ERROR)
+	_error_label.text = ""
 
 
 ## Signal handler: Cancel button pressed.
