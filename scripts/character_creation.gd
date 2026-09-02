@@ -26,20 +26,6 @@ const TOUCH_TARGET_SIZE := Vector2(60, 60)
 ## Discipline enum constant strings for display (indexed by enum value).
 const DISCIPLINE_NAMES := ["Warrior", "Guardian", "Slayer", "Marksman", "Mystic", "Adventurer"]
 
-## Build validator failure constants mapped to human-readable messages.
-## These match the StringName constants from MobaBuildValidator exactly.
-const FAILURE_MESSAGES := {
-	&"disciplines_not_distinct": "Primary and secondary Disciplines must be different.",
-	&"loadout_invalid": "Loadout configuration is invalid.",
-	&"unknown_ability": "One of the selected abilities does not exist.",
-	&"ability_outside_disciplines":
-	"All abilities must belong to the primary or secondary Discipline.",
-	&"stat_allocation_negative": "Stat allocations cannot be negative.",
-	&"stat_allocation_unknown_stat": "One or more allocated stats are invalid.",
-	&"stat_allocation_exceeds_per_stat_max": "One or more stats exceeds the per-stat maximum.",
-	&"stat_pool_overspent": "Total stat points exceed the pool.",
-}
-
 # Loaded stat allocation policy (Authoritative source for pool size and per-stat cap)
 var _allocation_policy: MobaStatAllocationPolicy
 
@@ -61,6 +47,9 @@ var _character_name_input: LineEdit
 var _save_button: Button
 var _cancel_button: Button
 var _load_template_button: Button
+var _template_option: OptionButton
+var _load_character_button: Button
+var _saved_character_option: OptionButton
 var _error_label: Label
 
 # Weapon list cache (file_name -> MobaWeapon resource)
@@ -71,6 +60,26 @@ var _templates_cache: Dictionary = {}
 
 # Ability library cache (discipline -> [ability_ids])
 var _abilities_by_discipline: Dictionary = {}
+
+
+## Build validator failure constants mapped to human-readable messages.
+## Keyed on MobaBuildValidator constants (not raw StringName literals) to prevent
+## silent drift if the validator's constants ever change.
+func _get_failure_messages() -> Dictionary:
+	return {
+		MobaBuildValidator.FAILURE_DISCIPLINES_NOT_DISTINCT:
+		"Primary and secondary Disciplines must be different.",
+		MobaBuildValidator.FAILURE_LOADOUT_INVALID: "Loadout configuration is invalid.",
+		MobaBuildValidator.FAILURE_UNKNOWN_ABILITY: "One of the selected abilities does not exist.",
+		MobaBuildValidator.FAILURE_ABILITY_OUTSIDE_DISCIPLINES:
+		"All abilities must belong to the primary or secondary Discipline.",
+		MobaBuildValidator.FAILURE_STAT_ALLOCATION_NEGATIVE: "Stat allocations cannot be negative.",
+		MobaBuildValidator.FAILURE_STAT_ALLOCATION_UNKNOWN_STAT:
+		"One or more allocated stats are invalid.",
+		MobaBuildValidator.FAILURE_STAT_ALLOCATION_EXCEEDS_PER_STAT_MAX:
+		"One or more stats exceeds the per-stat maximum.",
+		MobaBuildValidator.FAILURE_STAT_POOL_OVERSPENT: "Total stat points exceed the pool.",
+	}
 
 
 func _ready() -> void:
@@ -108,6 +117,8 @@ func _ready() -> void:
 	_populate_discipline_options()
 	_populate_weapon_options()
 	_populate_template_options()
+	_populate_template_option_button()
+	_populate_saved_characters_option()
 	_populate_ability_cache()
 
 	# Connect all signal handlers
@@ -120,9 +131,6 @@ func _ready() -> void:
 	# Initialize display
 	_update_stat_display()
 	_update_ability_options()
-
-	# Go back to main menu on cancel
-	_cancel_button.pressed.connect(_on_cancel)
 
 
 ## Resolve all control node references from the scene.
@@ -186,7 +194,18 @@ func _resolve_controls() -> void:
 
 	_save_button = main_container.get_node_or_null(^"ButtonContainer/SaveButton") as Button
 	_cancel_button = main_container.get_node_or_null(^"ButtonContainer/CancelButton") as Button
-	_load_template_button = main_container.get_node_or_null(^"TemplateLoadButton") as Button
+	_template_option = (
+		main_container.get_node_or_null(^"LoadTemplateSection/TemplateOption") as OptionButton
+	)
+	_load_template_button = (
+		main_container.get_node_or_null(^"LoadTemplateSection/TemplateLoadButton") as Button
+	)
+	_saved_character_option = (
+		main_container.get_node_or_null(^"LoadSavedSection/SavedCharacterOption") as OptionButton
+	)
+	_load_character_button = (
+		main_container.get_node_or_null(^"LoadSavedSection/LoadCharacterButton") as Button
+	)
 
 	_error_label = main_container.get_node_or_null(^"ErrorLabel") as Label
 
@@ -313,6 +332,72 @@ func _populate_template_options() -> void:
 		_load_template_button.disabled = true
 
 
+## Populate the template OptionButton with all available templates from cache.
+func _populate_template_option_button() -> void:
+	if _template_option == null:
+		return
+
+	_template_option.custom_minimum_size = TOUCH_TARGET_SIZE
+	_template_option.focus_mode = Control.FOCUS_ALL
+
+	_template_option.clear()
+
+	# Item 0 is always a placeholder, and real templates start at 1, because
+	# _on_load_template() treats index 0 as "nothing chosen yet". Filling from
+	# index 0 instead put the first template in the slot the handler refuses --
+	# with a single shipped template that is every template, so the Load button
+	# answered "Please select a template" no matter what the player did.
+	_template_option.add_item("(Select a template)")
+
+	_template_option.disabled = _templates_cache.is_empty()
+	if _templates_cache.is_empty():
+		_template_option.select(0)
+		return
+
+	var index := 1
+	for template_name in _templates_cache:
+		_template_option.add_item(template_name)
+		_template_option.set_item_metadata(index, template_name)
+		index += 1
+
+	_template_option.select(0)
+
+
+## Populate the saved characters OptionButton with all saved characters.
+func _populate_saved_characters_option() -> void:
+	if _saved_character_option == null:
+		return
+
+	# Presentation setup happens before the empty-list branch below. Leaving it
+	# after an early return meant a fresh install -- the one case where there
+	# are no saved characters yet -- got a picker with no touch-sized tap
+	# target, which is exactly the "operable by touch" bar this screen has to
+	# clear.
+	_saved_character_option.custom_minimum_size = TOUCH_TARGET_SIZE
+	_saved_character_option.focus_mode = Control.FOCUS_ALL
+
+	_saved_character_option.clear()
+	_saved_character_option.add_item("(No saved characters)")
+
+	var saved_chars = CharacterStorage.list_characters()
+
+	# Assigned on both branches, never only on one: this runs again after every
+	# successful save, so a picker disabled while the directory was empty has
+	# to re-enable itself once the first character lands in it.
+	_saved_character_option.disabled = saved_chars.is_empty()
+	if saved_chars.is_empty():
+		_saved_character_option.select(0)
+		return
+
+	var index := 1
+	for char_name in saved_chars:
+		_saved_character_option.add_item(char_name)
+		_saved_character_option.set_item_metadata(index, char_name)
+		index += 1
+
+	_saved_character_option.select(0)
+
+
 ## Populate the ability cache by scanning rules/data/abilities/ and indexing
 ## by discipline. This allows quick O(1) lookup when filtering abilities for
 ## discipline changes.
@@ -323,12 +408,7 @@ func _populate_ability_cache() -> void:
 	for d in range(MobaAbility.Discipline.values().size()):
 		_abilities_by_discipline[d] = []
 
-	# Load all abilities via the library
-	MobaAbilityLibrary._ensure_loaded()
-
-	# Iterate through all abilities in the cache and index by discipline
-	# Note: MobaAbilityLibrary's cache is static and private, so we need to
-	# scan the directory directly like we do for weapons
+	# Scan the abilities directory and load each resource
 	var dir = DirAccess.open(MobaRules.DATA_ROOT + "abilities/")
 	if dir == null:
 		push_error("Failed to open abilities directory: %s" % (MobaRules.DATA_ROOT + "abilities/"))
@@ -340,11 +420,12 @@ func _populate_ability_cache() -> void:
 	while file_name != "":
 		# Process .tres files only
 		if not file_name.begins_with(".") and file_name.ends_with(".tres"):
-			var file_path = (MobaRules.DATA_ROOT + "abilities/").path_join(file_name)
-			var ability = MobaAbilityLibrary.get_ability(StringName(file_name.trim_suffix(".tres")))
+			var ability_path = (MobaRules.DATA_ROOT + "abilities/").path_join(file_name)
+			var ability = ResourceLoader.load(ability_path) as MobaAbility
 
 			if ability != null:
 				var discipline = ability.discipline
+				# Index by the ability's authoritative id field, not the filename
 				_abilities_by_discipline[discipline].append(ability.id)
 
 		file_name = dir.get_next()
@@ -381,17 +462,20 @@ func _connect_signals() -> void:
 	if _weapon_option != null:
 		_weapon_option.item_selected.connect(_on_weapon_changed)
 
-	# Save and load template
+	# Save and load buttons
 	if _save_button != null:
 		_save_button.pressed.connect(_on_save)
+	if _cancel_button != null:
+		_cancel_button.pressed.connect(_on_cancel)
 	if _load_template_button != null:
 		_load_template_button.pressed.connect(_on_load_template)
+	if _load_character_button != null:
+		_load_character_button.pressed.connect(_on_load_character)
 
 
 ## Update the stat display: show total points spent vs. available pool,
-## and constrain each stat spinbox's max value to the per-stat cap.
-## Does NOT apply the UI's overspend check to refuse save; that goes
-## through MobaBuildValidator.validate() only.
+## and constrain each stat spinbox's max value to prevent overspend.
+## This is a UX affordance: MobaBuildValidator.validate() is the sole legality authority.
 func _update_stat_display() -> void:
 	if _stat_controls.is_empty() or _stat_points_label == null:
 		return
@@ -403,9 +487,13 @@ func _update_stat_display() -> void:
 		if points > 0:
 			total_spent += points
 
-	# Update display label
+	# Calculate remaining points
+	var points_remaining = _allocation_policy.total_points - total_spent
+
+	# Update display label to show remaining
 	_stat_points_label.text = (
-		"Stat Points: %d / %d" % [total_spent, _allocation_policy.total_points]
+		"Stat Points: %d / %d (remaining: %d)"
+		% [total_spent, _allocation_policy.total_points, points_remaining]
 	)
 
 	# Update each spinbox's range and current value
@@ -416,11 +504,18 @@ func _update_stat_display() -> void:
 		# Ensure spinbox has focus mode set
 		spinbox.focus_mode = Control.FOCUS_ALL
 
-		# Set the max to the per-stat cap
-		spinbox.max_value = _allocation_policy.per_stat_cap
+		# Get current value before changing max (to avoid jumping)
+		var current_value: int = _current_build.stat_allocation.get(stat_name, 0)
+
+		# Clamp the max to prevent exceeding pool:
+		# max = min(per_stat_cap, current_value + points_remaining)
+		# This allows incrementing within remaining pool while respecting the cap
+		var max_for_this_stat = mini(
+			_allocation_policy.per_stat_cap, current_value + points_remaining
+		)
+		spinbox.max_value = max_for_this_stat
 
 		# Set the current value (or 0 if not allocated)
-		var current_value: int = _current_build.stat_allocation.get(stat_name, 0)
 		spinbox.value = current_value
 
 
@@ -541,9 +636,22 @@ func _on_stat_value_changed(value: float, stat_name: StringName) -> void:
 
 
 ## Signal handler: Action ability option changed.
+## Handles duplicate ability rejection by reverting selection if set_action_slot fails.
 func _on_action_ability_changed(_index: int, slot: int) -> void:
-	var ability_id = _action_ability_options[slot - 1].get_selected_metadata()
+	var option = _action_ability_options[slot - 1]
+	var ability_id = option.get_selected_metadata()
+	var old_ability_id = _current_build.loadout.get_action_slot(slot)
+
+	# Try to set the ability. If it's a duplicate, loadout will reject it with push_error.
 	_current_build.loadout.set_action_slot(slot, ability_id)
+
+	# Check if the assignment actually took (it won't if it was a duplicate)
+	if _current_build.loadout.get_action_slot(slot) != ability_id:
+		# Revert the UI selection to what was actually set
+		_select_option_by_data(option, old_ability_id)
+		_error_label.text = "That ability is already selected in another slot."
+		return
+
 	_error_label.text = ""
 
 
@@ -563,18 +671,46 @@ func _on_weapon_changed(index: int) -> void:
 
 
 ## Signal handler: Load template button pressed.
-## Opens a picker to select a template, then pre-fills the form.
+## Loads the selected template from the OptionButton into the form.
 func _on_load_template() -> void:
-	if _templates_cache.is_empty():
-		_error_label.text = "No templates available."
+	# get_selected()/get_selected_metadata(), not the id-keyed pair: metadata is
+	# indexed by position. The two coincide only because every item here is
+	# added without an explicit id. Item 0 is the "(Select a template)"
+	# placeholder and carries no metadata.
+	if _template_option == null or _template_option.get_selected() < 1:
+		_error_label.text = "Please select a template."
 		return
 
-	# For now, simple picker: just load the first template (melee_bruiser_build)
-	# In a full implementation, this would be a modal dialog listing all templates
-	for template_name in _templates_cache:
-		var template = _templates_cache[template_name]
-		_load_template(template)
-		break  # Load first available template
+	var template_name = _template_option.get_selected_metadata()
+	var template = _templates_cache.get(template_name, null)
+	if template == null:
+		_error_label.text = "Template not found."
+		return
+
+	_load_template(template)
+
+
+## Signal handler: Load character button pressed.
+## Loads the selected saved character from the OptionButton into the form.
+func _on_load_character() -> void:
+	# Index, not id. add_item() without an explicit id makes the two equal here,
+	# so reading metadata by id happens to work today -- but get_item_metadata()
+	# is indexed by position, and the two diverge the moment any item is added
+	# with an id of its own. Item 0 is the "(No saved characters)" placeholder
+	# and carries no metadata.
+	if _saved_character_option == null or _saved_character_option.get_selected() < 1:
+		_error_label.text = "Please select a saved character."
+		return
+
+	var char_name = _saved_character_option.get_selected_metadata()
+	var build = CharacterStorage.load_character(char_name)
+	if build == null:
+		_error_label.text = "Failed to load character."
+		return
+
+	# Load the build and set edit file name so re-saving updates it
+	_load_template(build)
+	_edit_file_name = char_name
 
 
 ## Load a template build into the form, pre-filling all fields.
@@ -642,16 +778,29 @@ func _on_save() -> void:
 
 	if failure_reason != &"":
 		# Map the failure constant to human-readable text
-		var message = FAILURE_MESSAGES.get(
+		var failure_messages = _get_failure_messages()
+		var message = failure_messages.get(
 			failure_reason, "Unknown validation error: %s" % failure_reason
 		)
 		_error_label.text = message
 		return
 
-	# Build is valid; persist to disk
-	var file_name = _current_build.character_name
+	# Sanitize the filename: remove invalid characters and path separators
+	var file_name = _sanitize_filename(_current_build.character_name)
+	if file_name.is_empty():
+		_error_label.text = (
+			"Character name contains invalid characters. "
+			+ "Use only letters, numbers, and spaces."
+		)
+		return
+
 	if CharacterStorage.save_character(_current_build, file_name):
 		_edit_file_name = file_name
+		# Refresh the picker so the character just saved is immediately
+		# loadable. Without this the list only ever reflects what was on disk
+		# when the screen opened, and a player who saves and then tries to
+		# reload their character is told there are none.
+		_populate_saved_characters_option()
 		_error_label.text = "Saved successfully."
 	else:
 		_error_label.text = "Failed to save character."
@@ -663,8 +812,26 @@ func _on_cancel() -> void:
 	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
 
 
+## Helper: Sanitize a filename by removing invalid characters.
+## Returns empty string if the name contains no valid characters.
+func _sanitize_filename(name: String) -> String:
+	# Allow only alphanumeric, spaces, and underscores
+	var sanitized := ""
+	for char in name:
+		if (
+			(char >= "a" and char <= "z")
+			or (char >= "A" and char <= "Z")
+			or (char >= "0" and char <= "9")
+			or char == " "
+			or char == "_"
+		):
+			sanitized += char
+
+	return sanitized.strip_edges()
+
+
 ## Helper: Accept the ui_cancel action to close this screen.
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		_on_cancel()
-		get_tree().root.set_input_as_handled()
+		get_viewport().set_input_as_handled()

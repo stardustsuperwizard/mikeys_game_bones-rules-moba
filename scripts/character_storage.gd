@@ -93,30 +93,6 @@ static func list_characters() -> Array[String]:
 	return result
 
 
-## Delete a saved character by filename (without .tres extension).
-##
-## Returns true on success, false on failure. Errors are pushed on failure.
-static func delete_character(file_name: String) -> bool:
-	# Validate filename - same security check as save/load
-	if "/" in file_name or ".." in file_name:
-		push_error("Character filename cannot contain path separators: %s" % file_name)
-		return false
-
-	var file_path := SAVE_DIR + file_name + ".tres"
-
-	# Check if file exists
-	if not ResourceLoader.exists(file_path):
-		push_error("Character file not found: %s" % file_path)
-		return false
-
-	var error := DirAccess.remove_absolute(file_path)
-	if error != OK:
-		push_error("Failed to delete character from %s (error %d)" % [file_path, error])
-		return false
-
-	return true
-
-
 ## Ensure the save directory exists, creating it if necessary.
 ## Errors are pushed on failure.
 static func _ensure_save_dir() -> void:

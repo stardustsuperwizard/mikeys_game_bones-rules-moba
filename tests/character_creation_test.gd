@@ -14,6 +14,9 @@
 ##   - saving a valid template succeeds and round-trips (save + load = identical)
 ##   - same-discipline selection is rejected at save time with validator's reason
 ##   - overspending the stat pool is rejected at save time with validator's reason
+##   - a saved character is listed by, and loads back through, the screen's own
+##     saved-character picker (not just the CharacterStorage API underneath it)
+##   - the stat spinboxes cannot be driven past the policy's pool through the UI
 ##   - the main menu entry point wires the Character button to this scene
 ##
 ## This test is NOT wired into tests/test_bootstrap.gd; it is a manual
@@ -31,21 +34,27 @@ const _PATH_SECONDARY_DISC := (
 )
 const _PATH_STAT_LABEL := "MarginContainer/VBoxContainer/StatSection/StatsLabel"
 const _PATH_WEAPON := (
-	"MarginContainer/VBoxContainer/LoadoutSection/"
-	+ "WeaponContainer/WeaponOption"
+	"MarginContainer/VBoxContainer/LoadoutSection/" + "WeaponContainer/WeaponOption"
 )
 const _PATH_ACTION_1 := (
 	"MarginContainer/VBoxContainer/LoadoutSection/"
 	+ "ActionAbilitiesContainer/Action1Container/Action1Option"
 )
 const _PATH_PASSIVE := (
-	"MarginContainer/VBoxContainer/LoadoutSection/"
-	+ "PassiveContainer/PassiveAbilityOption"
+	"MarginContainer/VBoxContainer/LoadoutSection/" + "PassiveContainer/PassiveAbilityOption"
 )
 const _PATH_NAME_INPUT := "MarginContainer/VBoxContainer/CharacterNameInput"
 const _PATH_SAVE_BUTTON := "MarginContainer/VBoxContainer/ButtonContainer/SaveButton"
 const _PATH_CANCEL_BUTTON := "MarginContainer/VBoxContainer/ButtonContainer/CancelButton"
 const _PATH_ERROR_LABEL := "MarginContainer/VBoxContainer/ErrorLabel"
+const _PATH_SAVED_OPTION := "MarginContainer/VBoxContainer/LoadSavedSection/SavedCharacterOption"
+const _PATH_LOAD_SAVED_BUTTON := (
+	"MarginContainer/VBoxContainer/LoadSavedSection/" + "LoadCharacterButton"
+)
+const _PATH_STAT_CONTROLS := "MarginContainer/VBoxContainer/StatSection/StatControls"
+const _PATH_TEMPLATE_OPTION := (
+	"MarginContainer/VBoxContainer/LoadTemplateSection/" + "TemplateOption"
+)
 
 const _CHARACTER_CREATION_SCENE := preload("res://scenes/ui/character_creation.tscn")
 const _MAIN_MENU_SCENE := preload("res://scenes/ui/main_menu.tscn")
@@ -62,6 +71,8 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"template round-trips (save and load returns identical build)",
 	"same-discipline selection refused with validator's reason",
 	"overspend stat pool refused with validator's reason",
+	"saved character reloads through the screen's own picker",
+	"stat spinboxes cannot exceed the pool through the UI",
 	"main menu Character button wired to character creation",
 ]
 
@@ -91,6 +102,8 @@ func _run() -> void:
 	await _test_save_and_round_trip()
 	await _test_same_discipline_rejection()
 	await _test_overspend_rejection()
+	await _test_saved_character_reload()
+	await _test_ui_pool_clamp()
 	await _test_main_menu_entry_point()
 
 	_finish()
@@ -145,10 +158,7 @@ func _test_controls_accessible() -> void:
 		interactive_controls.append(child as Control)
 
 	# Input fields
-	var name_input = (
-		_character_creation.get_node_or_null(^"MarginContainer/VBoxContainer/CharacterNameInput")
-		as LineEdit
-	)
+	var name_input = _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
 	if name_input != null:
 		interactive_controls.append(name_input)
 
@@ -178,22 +188,10 @@ func _test_discipline_options() -> void:
 		return
 
 	var primary_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/DisciplineSection/PrimaryDisciplineContainer/PrimaryDisciplineOption"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC))) as OptionButton
 	)
 	var secondary_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/DisciplineSection/SecondaryDisciplineContainer/SecondaryDisciplineOption"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_SECONDARY_DISC))) as OptionButton
 	)
 
 	if primary_opt == null or secondary_opt == null:
@@ -258,12 +256,7 @@ func _test_weapon_picker() -> void:
 	if _character_creation == null:
 		return
 
-	var weapon_opt = (
-		_character_creation.get_node_or_null(
-			^"MarginContainer/VBoxContainer/LoadoutSection/WeaponContainer/WeaponOption"
-		)
-		as OptionButton
-	)
+	var weapon_opt = _character_creation.get_node_or_null(NodePath(_PATH_WEAPON)) as OptionButton
 	if weapon_opt == null:
 		_fail("weapon option button not found")
 		return
@@ -297,29 +290,12 @@ func _test_ability_pickers() -> void:
 		return
 
 	var primary_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/DisciplineSection/PrimaryDisciplineContainer/PrimaryDisciplineOption"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC))) as OptionButton
 	)
 	var action1_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action1Container/Action1Option"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_ACTION_1))) as OptionButton
 	)
-	var passive_opt = (
-		_character_creation.get_node_or_null(
-			^"MarginContainer/VBoxContainer/LoadoutSection/PassiveContainer/PassiveAbilityOption"
-		)
-		as OptionButton
-	)
+	var passive_opt = _character_creation.get_node_or_null(NodePath(_PATH_PASSIVE)) as OptionButton
 
 	if primary_opt == null or action1_opt == null or passive_opt == null:
 		_fail("discipline or ability option buttons not found")
@@ -354,22 +330,10 @@ func _test_ability_pickers_refilter() -> void:
 		return
 
 	var primary_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/DisciplineSection/PrimaryDisciplineContainer/PrimaryDisciplineOption"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC))) as OptionButton
 	)
 	var action1_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/LoadoutSection/ActionAbilitiesContainer/Action1Container/Action1Option"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_ACTION_1))) as OptionButton
 	)
 
 	if primary_opt == null or action1_opt == null:
@@ -414,10 +378,7 @@ func _test_template_loading() -> void:
 		return
 
 	# Get character_name_input and simulate loading
-	var name_input = (
-		_character_creation.get_node_or_null(^"MarginContainer/VBoxContainer/CharacterNameInput")
-		as LineEdit
-	)
+	var name_input = _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
 	if name_input == null:
 		_fail("character name input not found")
 		return
@@ -493,8 +454,10 @@ func _test_save_and_round_trip() -> void:
 		)
 		return
 
-	# Clean up
-	CharacterStorage.delete_character(file_name)
+	# Clean up. CharacterStorage exposes no delete: the screen never removes a
+	# character, so a delete helper there would be surface with no caller. The
+	# test owns the file it created and removes it directly.
+	DirAccess.remove_absolute(CharacterStorage.SAVE_DIR + file_name + ".tres")
 
 	_pass("template round-trips (save and load returns identical build)")
 
@@ -505,27 +468,12 @@ func _test_same_discipline_rejection() -> void:
 		return
 
 	var primary_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/DisciplineSection/PrimaryDisciplineContainer/PrimaryDisciplineOption"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC))) as OptionButton
 	)
 	var secondary_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/DisciplineSection/SecondaryDisciplineContainer/SecondaryDisciplineOption"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_SECONDARY_DISC))) as OptionButton
 	)
-	var name_input = (
-		_character_creation.get_node_or_null(^"MarginContainer/VBoxContainer/CharacterNameInput")
-		as LineEdit
-	)
+	var name_input = _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
 	var save_button = (
 		_character_creation.get_node_or_null(
 			^"MarginContainer/VBoxContainer/ButtonContainer/SaveButton"
@@ -586,10 +534,7 @@ func _test_overspend_rejection() -> void:
 		)
 		as VBoxContainer
 	)
-	var name_input = (
-		_character_creation.get_node_or_null(^"MarginContainer/VBoxContainer/CharacterNameInput")
-		as LineEdit
-	)
+	var name_input = _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
 	var save_button = (
 		_character_creation.get_node_or_null(
 			^"MarginContainer/VBoxContainer/ButtonContainer/SaveButton"
@@ -606,22 +551,10 @@ func _test_overspend_rejection() -> void:
 
 	# Set up disciplines (must be different)
 	var primary_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/DisciplineSection/PrimaryDisciplineContainer/PrimaryDisciplineOption"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC))) as OptionButton
 	)
 	var secondary_opt = (
-		(
-			_character_creation
-			. get_node_or_null(
-				^"MarginContainer/VBoxContainer/DisciplineSection/SecondaryDisciplineContainer/SecondaryDisciplineOption"
-			)
-		)
-		as OptionButton
+		(_character_creation.get_node_or_null(NodePath(_PATH_SECONDARY_DISC))) as OptionButton
 	)
 	primary_opt.select(0)
 	secondary_opt.select(1)
@@ -656,6 +589,197 @@ func _test_overspend_rejection() -> void:
 		return
 
 	_pass("overspend stat pool refused with validator's reason")
+
+
+## A character saved through the screen becomes selectable in the screen's own
+## saved-character picker and loads back into the form with the build intact.
+##
+## _test_save_and_round_trip() already proves CharacterStorage round-trips a
+## build, but it calls that API directly. Two acceptance criteria are about the
+## player: "create, name, save, and load a character entirely from this screen"
+## and "re-opening a previously saved character loads back the exact build that
+## was saved". Only driving the screen's own controls tests those -- an earlier
+## revision of this screen round-tripped perfectly through storage while the
+## picker that would have let a player reach it did not exist at all.
+func _test_saved_character_reload() -> void:
+	if _character_creation == null:
+		return
+
+	var saved_option := (
+		_character_creation.get_node_or_null(NodePath(_PATH_SAVED_OPTION)) as OptionButton
+	)
+	var load_button := (
+		_character_creation.get_node_or_null(NodePath(_PATH_LOAD_SAVED_BUTTON)) as Button
+	)
+	var name_input := _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
+	var save_button := _character_creation.get_node_or_null(NodePath(_PATH_SAVE_BUTTON)) as Button
+	var template_opt := (
+		_character_creation.get_node_or_null(NodePath(_PATH_TEMPLATE_OPTION)) as OptionButton
+	)
+	if saved_option == null or load_button == null or template_opt == null:
+		_fail("saved-character picker, load button or template picker missing from the scene")
+		return
+	if name_input == null or save_button == null:
+		_fail("setup: name input or save button missing")
+		return
+
+	var character_name := "RoundTripProbe"
+	var file_path: String = CharacterStorage.SAVE_DIR + character_name + ".tres"
+	DirAccess.remove_absolute(file_path)
+
+	# Start from the shipped template so the build is known-legal, then save it
+	# under a name of our own through the screen's save button. The template
+	# picker's item 0 is a placeholder, so a real template has to be selected
+	# before the load handler will do anything.
+	if template_opt.item_count < 2:
+		_fail("template picker lists no templates")
+		return
+	template_opt.select(1)
+	_character_creation._on_load_template()
+	name_input.text = character_name
+	save_button.pressed.emit()
+	await process_frame
+
+	if not ResourceLoader.exists(file_path):
+		_fail(
+			(
+				"saving through the screen did not write %s (screen said: %s)"
+				% [file_path, _screen_error_text()]
+			)
+		)
+		return
+
+	await _verify_saved_reload(saved_option, load_button, character_name)
+	DirAccess.remove_absolute(file_path)
+
+
+## Second half of _test_saved_character_reload: the character is on disk, so
+## check the picker lists it and the load button restores it over a changed form.
+func _verify_saved_reload(
+	saved_option: OptionButton, load_button: Button, character_name: String
+) -> void:
+	var saved_primary: int = _character_creation._current_build.primary_discipline
+	var allocation: Dictionary = _character_creation._current_build.stat_allocation
+	var saved_allocation: Dictionary = allocation.duplicate()
+
+	# The picker must list it without the screen being reopened.
+	var listed_index := -1
+	for i in range(saved_option.item_count):
+		if saved_option.get_item_metadata(i) == character_name:
+			listed_index = i
+			break
+	if listed_index < 1:
+		_fail("saved character '%s' never appeared in the picker" % character_name)
+		return
+	if saved_option.disabled:
+		_fail("saved-character picker stayed disabled after a character was saved")
+		return
+
+	# Perturb the form, then load the saved character back over it.
+	var primary_opt := (
+		_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC)) as OptionButton
+	)
+	primary_opt.select((saved_primary + 1) % primary_opt.item_count)
+	primary_opt.item_selected.emit(primary_opt.get_selected())
+	await process_frame
+
+	saved_option.select(listed_index)
+	load_button.pressed.emit()
+	await process_frame
+
+	var reloaded: MobaCharacterBuild = _character_creation._current_build
+	if reloaded.character_name != character_name:
+		_fail(
+			(
+				"reloaded name mismatch: got %s, expected %s"
+				% [reloaded.character_name, character_name]
+			)
+		)
+	elif reloaded.primary_discipline != saved_primary:
+		_fail(
+			(
+				"reloaded primary discipline mismatch: got %d, expected %d"
+				% [reloaded.primary_discipline, saved_primary]
+			)
+		)
+	elif reloaded.stat_allocation != saved_allocation:
+		_fail(
+			(
+				"reloaded stat allocation mismatch: got %s, expected %s"
+				% [reloaded.stat_allocation, saved_allocation]
+			)
+		)
+	else:
+		_pass("saved character reloads through the screen's own picker")
+
+
+## The screen's own error label, so a failure reports what the UI told the
+## player rather than only that the expected file was absent.
+func _screen_error_text() -> String:
+	var label := _character_creation.get_node_or_null(NodePath(_PATH_ERROR_LABEL)) as Label
+	return label.text if label != null else "<no error label>"
+
+
+## The stat spinboxes refuse to spend past the policy's pool.
+##
+## Scope requires the screen refuse overspend "in the UI itself (not only on
+## save)". _test_overspend_rejection() covers the validator's save-time refusal;
+## this covers the affordance layered on top, by driving each spinbox to its
+## max in turn and checking the running total never passes total_points.
+func _test_ui_pool_clamp() -> void:
+	if _character_creation == null or _allocation_policy == null:
+		return
+
+	var stat_controls := (
+		_character_creation.get_node_or_null(NodePath(_PATH_STAT_CONTROLS)) as VBoxContainer
+	)
+	if stat_controls == null:
+		_fail("stat controls container missing from the scene")
+		return
+
+	# Clear whatever a previous check left in the form.
+	_character_creation._current_build.stat_allocation.clear()
+	_character_creation._update_stat_display()
+	await process_frame
+
+	var spinboxes: Array[SpinBox] = []
+	for child in stat_controls.get_children():
+		var spinbox := child.get_node_or_null(^"Spinbox") as SpinBox
+		if spinbox != null:
+			spinboxes.append(spinbox)
+
+	if spinboxes.is_empty():
+		_fail("no stat spinboxes found under %s" % _PATH_STAT_CONTROLS)
+		return
+
+	# Push every stat as high as the UI will let it go, in order. A control that
+	# only capped per-stat would sail past the pool here: three stats capped at
+	# 5 each against a pool of 10 reaches 15.
+	for spinbox in spinboxes:
+		spinbox.value = spinbox.max_value
+		spinbox.value_changed.emit(spinbox.value)
+		await process_frame
+
+	var total := 0
+	for stat_name in _character_creation._current_build.stat_allocation:
+		total += _character_creation._current_build.stat_allocation[stat_name]
+
+	var pool: int = _allocation_policy.total_points
+	if total > pool:
+		_fail("UI let stat allocation reach %d against a pool of %d" % [total, pool])
+		return
+
+	# The clamp must not be so eager it makes the pool unspendable either.
+	if total != pool:
+		_fail(
+			(
+				"driving every spinbox to max spent %d of a %d pool; expected the full pool"
+				% [total, pool]
+			)
+		)
+		return
+
+	_pass("stat spinboxes cannot exceed the pool through the UI")
 
 
 ## Test that the main menu Character button is wired to character creation.

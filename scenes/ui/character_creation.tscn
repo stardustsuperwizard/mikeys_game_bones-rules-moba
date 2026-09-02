@@ -231,10 +231,43 @@ layout_mode = 2
 custom_minimum_size = Vector2(0, 60)
 placeholder_text = "Enter character name"
 
-[node name="TemplateLoadButton" type="Button" parent="MarginContainer/VBoxContainer"]
+[node name="LoadSavedSection" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoadSavedLabel" type="Label" parent="MarginContainer/VBoxContainer/LoadSavedSection"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Load Saved:"
+
+[node name="SavedCharacterOption" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadSavedSection"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="LoadCharacterButton" type="Button" parent="MarginContainer/VBoxContainer/LoadSavedSection"]
 layout_mode = 2
 custom_minimum_size = Vector2(60, 60)
-text = "Load Template"
+text = "Load"
+
+[node name="LoadTemplateSection" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoadTemplateLabel" type="Label" parent="MarginContainer/VBoxContainer/LoadTemplateSection"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Load Template:"
+
+[node name="TemplateOption" type="OptionButton" parent="MarginContainer/VBoxContainer/LoadTemplateSection"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="TemplateLoadButton" type="Button" parent="MarginContainer/VBoxContainer/LoadTemplateSection"]
+layout_mode = 2
+custom_minimum_size = Vector2(60, 60)
+text = "Load"
 
 [node name="ErrorLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
