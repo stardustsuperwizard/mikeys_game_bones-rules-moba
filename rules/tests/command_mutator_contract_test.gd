@@ -42,6 +42,10 @@ const MUTATOR_METHODS := [
 	"deactivate_toggle",
 	"cancel_cooldown",
 	"respawn",
+	# The composed round-boundary reset (#340). Listed for the same reason the
+	# five primitives it is built from are: game-side code that called it
+	# directly would get all of their effects at once, past the gate.
+	"reset_for_round",
 	"revive_state",
 	"restore_to_full",
 	"clear_all_cooldowns",

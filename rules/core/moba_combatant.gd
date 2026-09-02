@@ -409,6 +409,18 @@ func respawn() -> bool:
 	return _get_death_handler().respawn()
 
 
+## Reset to a clean, fully alive, IDLE state regardless of the current one:
+## no cast, channel, toggle, effects, shields, crowd control, or cooldowns,
+## full health and resource, and the body back at the respawn policy's spawn
+## point. The round-boundary reset MobaMatchState.start_round() runs on every
+## registered combatant.
+##
+## Unlike respawn(), this never refuses -- a round boundary must reset the
+## survivors too, not only the dead. Implemented by MobaDeathHandler.
+func reset_for_round() -> void:
+	_get_death_handler().reset_for_round()
+
+
 ## Whether the sibling state machine currently reports DEAD.
 ## Used by MobaDeathHandler.respawn() to enforce the "must be DEAD to
 ## respawn" rule without the handler reaching into the state machine wiring.
