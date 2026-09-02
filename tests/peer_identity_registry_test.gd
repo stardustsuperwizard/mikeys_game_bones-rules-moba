@@ -26,8 +26,23 @@ const _PLAYER_SPAWN_POINT := preload("res://resources/player_spawn_point.tres")
 # below and as what an unsubmitted peer is asserted to get back.
 const _FALLBACK_BUILD := preload("res://rules/data/builds/melee_bruiser_build.tres")
 
-# A peer id for testing
-const _TEST_PEER := 7
+# One peer id per check. The registry is process-global and outlives every
+# WorldManager built here, so a shared id would let one check pass on state a
+# previous check left behind -- an ordering dependency that only surfaces when
+# a check is reordered or removed.
+const _PEER_RESET := 11
+const _PEER_SUBMIT_SIGNATURE := 12
+const _PEER_GET_SIGNATURE := 13
+const _PEER_LEGAL := 14
+const _PEER_ILLEGAL := 15
+const _PEER_REFUSAL := 16
+const _PEER_OWNERSHIP := 17
+const _PEER_SNAPSHOT := 18
+const _PEER_NEVER_SUBMITTED := 19
+const _PEER_DISCONNECT := 20
+
+# A second peer, used as the requester that does not own the actor.
+const _OTHER_PEER := 9
 
 const _EXPECTED_CHECKS: Array[String] = [
 	"accepted build survives worldmanager reset",
@@ -112,19 +127,22 @@ func _test_build_survives_worldmanager_reset() -> void:
 		return
 
 	var wm1 := _make_world_manager()
-	var actor := _spawn_player(wm1, _TEST_PEER)
+	var actor := _spawn_player(wm1, _PEER_RESET)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm1.queue_free()
 		return
 
 	var build := _make_legal_build("Persistent", {})
-	if not wm1.submit_build(_TEST_PEER, build).success:
+	if not wm1.submit_build(_PEER_RESET, build).success:
 		_fail("setup: legal build was refused")
+		wm1.queue_free()
 		return
 
 	# Verify the registry has it
-	if registry.get_peer_build(_TEST_PEER).character_name != "Persistent":
+	if registry.get_peer_build(_PEER_RESET).character_name != "Persistent":
 		_fail("registry did not store the build")
+		wm1.queue_free()
 		return
 
 	# Free the first WorldManager
@@ -134,9 +152,17 @@ func _test_build_survives_worldmanager_reset() -> void:
 	# Create a new WorldManager
 	var wm2 := _make_world_manager()
 
-	# The registry should still have the build even though wm1 is gone
-	if registry.get_peer_build(_TEST_PEER).character_name != "Persistent":
+	# The registry still has it even though wm1 is gone ...
+	if registry.get_peer_build(_PEER_RESET).character_name != "Persistent":
 		_fail("build was lost when WorldManager was freed")
+		wm2.queue_free()
+		return
+
+	# ... and the replacement WorldManager reaches that same surviving storage,
+	# which is the half that would regress if the delegation were dropped.
+	if wm2.get_peer_build(_PEER_RESET).character_name != "Persistent":
+		_fail("the replacement WorldManager did not see the surviving build")
+		wm2.queue_free()
 		return
 
 	_pass("accepted build survives worldmanager reset")
@@ -146,18 +172,20 @@ func _test_build_survives_worldmanager_reset() -> void:
 ## WorldManager.submit_build() has not changed signature
 func _test_worldmanager_submit_signature() -> void:
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, _TEST_PEER)
+	var actor := _spawn_player(wm, _PEER_SUBMIT_SIGNATURE)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm.queue_free()
 		return
 
 	var build := _make_legal_build("Test", {})
 
 	# Original signature: submit_build(peer_id: int, build: MobaCharacterBuild, requester_id: int = -1)
 	# This should work exactly as before
-	var result := wm.submit_build(_TEST_PEER, build)
+	var result := wm.submit_build(_PEER_SUBMIT_SIGNATURE, build)
 	if not result.success:
 		_fail("submit_build call failed")
+		wm.queue_free()
 		return
 
 	_pass("worldmanager.submit_build signature unchanged")
@@ -167,19 +195,21 @@ func _test_worldmanager_submit_signature() -> void:
 ## WorldManager.get_peer_build() has not changed signature
 func _test_worldmanager_get_signature() -> void:
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, _TEST_PEER)
+	var actor := _spawn_player(wm, _PEER_GET_SIGNATURE)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm.queue_free()
 		return
 
 	var build := _make_legal_build("Test", {})
-	wm.submit_build(_TEST_PEER, build)
+	wm.submit_build(_PEER_GET_SIGNATURE, build)
 
 	# Original signature: get_peer_build(peer_id: int) -> MobaCharacterBuild
 	# This should work exactly as before
-	var retrieved: MobaCharacterBuild = wm.get_peer_build(_TEST_PEER)
+	var retrieved: MobaCharacterBuild = wm.get_peer_build(_PEER_GET_SIGNATURE)
 	if retrieved == null:
 		_fail("get_peer_build returned null")
+		wm.queue_free()
 		return
 
 	_pass("worldmanager.get_peer_build signature unchanged")
@@ -189,15 +219,17 @@ func _test_worldmanager_get_signature() -> void:
 ## A legal submission through WorldManager is accepted
 func _test_legal_submission() -> void:
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, _TEST_PEER)
+	var actor := _spawn_player(wm, _PEER_LEGAL)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm.queue_free()
 		return
 
 	var build := _make_legal_build("Legal", {})
-	var result := wm.submit_build(_TEST_PEER, build)
+	var result := wm.submit_build(_PEER_LEGAL, build)
 	if not result.success:
 		_fail("legal build was refused: %s" % String(result.reason))
+		wm.queue_free()
 		return
 
 	_pass("legal submission succeeds")
@@ -207,18 +239,20 @@ func _test_legal_submission() -> void:
 ## An illegal submission is refused
 func _test_illegal_submission_refused() -> void:
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, _TEST_PEER)
+	var actor := _spawn_player(wm, _PEER_ILLEGAL)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm.queue_free()
 		return
 
 	var illegal := _make_legal_build("Illegal", {})
 	# Add an ability outside the WARRIOR/GUARDIAN pair
 	illegal.loadout.set_action_slot(3, "aimed_shot")
 
-	var result := wm.submit_build(_TEST_PEER, illegal)
+	var result := wm.submit_build(_PEER_ILLEGAL, illegal)
 	if result.success:
 		_fail("illegal build was accepted")
+		wm.queue_free()
 		return
 	if result.reason != MobaBuildValidator.FAILURE_ABILITY_OUTSIDE_DISCIPLINES:
 		_fail(
@@ -230,6 +264,7 @@ func _test_illegal_submission_refused() -> void:
 				]
 			)
 		)
+		wm.queue_free()
 		return
 
 	_pass("illegal submission refused")
@@ -239,23 +274,26 @@ func _test_illegal_submission_refused() -> void:
 ## A refused submission does not overwrite the previously accepted build
 func _test_refusal_preserves_build() -> void:
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, _TEST_PEER)
+	var actor := _spawn_player(wm, _PEER_REFUSAL)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm.queue_free()
 		return
 
 	var accepted := _make_legal_build("Keeper", {})
-	if not wm.submit_build(_TEST_PEER, accepted).success:
+	if not wm.submit_build(_PEER_REFUSAL, accepted).success:
 		_fail("setup: legal build was refused")
+		wm.queue_free()
 		return
 
 	var illegal := _make_legal_build("Illegal", {})
 	illegal.loadout.set_action_slot(3, "aimed_shot")
-	wm.submit_build(_TEST_PEER, illegal)
+	wm.submit_build(_PEER_REFUSAL, illegal)
 
-	var stored := wm.get_peer_build(_TEST_PEER)
+	var stored := wm.get_peer_build(_PEER_REFUSAL)
 	if stored.character_name != "Keeper":
 		_fail("refusal overwrote the accepted build")
+		wm.queue_free()
 		return
 
 	_pass("refusal preserves accepted build")
@@ -265,16 +303,18 @@ func _test_refusal_preserves_build() -> void:
 ## A peer cannot submit a build for another peer's actor
 func _test_cannot_submit_for_another() -> void:
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, _TEST_PEER)
+	var actor := _spawn_player(wm, _PEER_OWNERSHIP)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm.queue_free()
 		return
 
 	var build := _make_legal_build("Hijack", {})
-	var result := wm.submit_build(_TEST_PEER, build, 9)
+	var result := wm.submit_build(_PEER_OWNERSHIP, build, _OTHER_PEER)
 
 	if result.success:
 		_fail("a peer submitted a build for another peer's actor")
+		wm.queue_free()
 		return
 
 	_pass("cannot submit for another peer")
@@ -284,14 +324,16 @@ func _test_cannot_submit_for_another() -> void:
 ## An accepted build is a snapshot; editing the original does not affect the stored copy
 func _test_accepted_build_is_snapshot() -> void:
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, _TEST_PEER)
+	var actor := _spawn_player(wm, _PEER_SNAPSHOT)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm.queue_free()
 		return
 
 	var submitted := _make_legal_build("Snapshot", {MobaStatBlock.ARMOR: 2})
-	if not wm.submit_build(_TEST_PEER, submitted).success:
+	if not wm.submit_build(_PEER_SNAPSHOT, submitted).success:
 		_fail("setup: legal build was refused")
+		wm.queue_free()
 		return
 
 	# Edit every mutable part of the caller's build after acceptance: the name,
@@ -302,13 +344,15 @@ func _test_accepted_build_is_snapshot() -> void:
 	submitted.stat_allocation[MobaStatBlock.ARMOR] = 999
 	submitted.loadout.set_action_slot(1, "aimed_shot")
 
-	var stored := wm.get_peer_build(_TEST_PEER)
+	var stored := wm.get_peer_build(_PEER_SNAPSHOT)
 	if stored.character_name != "Snapshot":
 		_fail("stored build's name was affected by post-submission edit")
+		wm.queue_free()
 		return
 
 	if stored.stat_allocation.get(MobaStatBlock.ARMOR, 0) != 2:
 		_fail("stored build's stat allocation was affected by post-submission edit")
+		wm.queue_free()
 		return
 
 	if stored.loadout.get_action_slot(1) != "whirlwind":
@@ -318,6 +362,7 @@ func _test_accepted_build_is_snapshot() -> void:
 				% stored.loadout.get_action_slot(1)
 			)
 		)
+		wm.queue_free()
 		return
 
 	_pass("accepted build is snapshot")
@@ -327,11 +372,11 @@ func _test_accepted_build_is_snapshot() -> void:
 ## A peer with no accepted build returns the fallback
 func _test_unsubmitted_peer_returns_fallback() -> void:
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, 99)  # A peer that never submitted anything
 
-	var fallback := wm.get_peer_build(99)
+	var fallback := wm.get_peer_build(_PEER_NEVER_SUBMITTED)
 	if fallback == null:
 		_fail("unsubmitted peer returned null instead of fallback")
+		wm.queue_free()
 		return
 
 	if fallback.character_name != _FALLBACK_BUILD.character_name:
@@ -341,10 +386,12 @@ func _test_unsubmitted_peer_returns_fallback() -> void:
 				% [fallback.character_name, _FALLBACK_BUILD.character_name]
 			)
 		)
+		wm.queue_free()
 		return
 
 	if fallback.loadout == null:
 		_fail("unsubmitted peer returned a build with no loadout")
+		wm.queue_free()
 		return
 
 	_pass("unsubmitted peer returns fallback")
@@ -359,26 +406,29 @@ func _test_peer_disconnect_clears_entry() -> void:
 		return
 
 	var wm := _make_world_manager()
-	var actor := _spawn_player(wm, _TEST_PEER)
+	var actor := _spawn_player(wm, _PEER_DISCONNECT)
 	if actor == null:
 		_fail("setup: player actor did not spawn")
+		wm.queue_free()
 		return
 
 	var build := _make_legal_build("Disconnecting", {})
-	if not wm.submit_build(_TEST_PEER, build).success:
+	if not wm.submit_build(_PEER_DISCONNECT, build).success:
 		_fail("setup: legal build was refused")
+		wm.queue_free()
 		return
 
 	# Verify the build is stored
-	if registry.get_peer_build(_TEST_PEER).character_name != "Disconnecting":
+	if registry.get_peer_build(_PEER_DISCONNECT).character_name != "Disconnecting":
 		_fail("setup: build was not stored")
+		wm.queue_free()
 		return
 
 	# Simulate disconnect
-	wm._on_peer_disconnected(_TEST_PEER)
+	wm._on_peer_disconnected(_PEER_DISCONNECT)
 
 	# After disconnect, get_peer_build should return fallback for that peer
-	var after_disconnect: MobaCharacterBuild = registry.get_peer_build(_TEST_PEER)
+	var after_disconnect: MobaCharacterBuild = registry.get_peer_build(_PEER_DISCONNECT)
 	if after_disconnect.character_name != _FALLBACK_BUILD.character_name:
 		_fail(
 			(
@@ -386,10 +436,12 @@ func _test_peer_disconnect_clears_entry() -> void:
 				% [after_disconnect.character_name, _FALLBACK_BUILD.character_name]
 			)
 		)
+		wm.queue_free()
 		return
 
 	if after_disconnect.loadout == null:
 		_fail("after disconnect, peer returned a build with no loadout")
+		wm.queue_free()
 		return
 
 	_pass("peer disconnect clears entry")
