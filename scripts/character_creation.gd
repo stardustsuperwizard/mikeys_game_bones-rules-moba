@@ -39,7 +39,8 @@ var _edit_file_name: String = ""
 var _primary_discipline_option: OptionButton
 var _secondary_discipline_option: OptionButton
 var _stat_points_label: Label
-var _stat_controls: Dictionary  # StringName -> VBoxContainer with label and spinbox
+var _stat_controls: Dictionary  # StringName -> the row Control holding that stat's Spinbox
+var _stat_controls_container: VBoxContainer
 var _weapon_option: OptionButton
 var _action_ability_options: Array[OptionButton]  # action_slot_options[0..3]
 var _passive_ability_option: OptionButton
@@ -114,6 +115,7 @@ func _ready() -> void:
 	_current_build.loadout = MobaLoadout.new()
 
 	# Populate option buttons and caches
+	_build_stat_rows()
 	_populate_discipline_options()
 	_populate_weapon_options()
 	_populate_template_options()
@@ -209,20 +211,65 @@ func _resolve_controls() -> void:
 
 	_error_label = main_container.get_node_or_null(^"ErrorLabel") as Label
 
-	# Build stat control dictionary. Resolve from a StatControls container
-	# that holds one VBox per stat.
-	var stat_controls_container = (
-		main_container.get_node_or_null(^"StatSection/StatControls") as VBoxContainer
+	_stat_controls_container = (
+		main_container.get_node_or_null(^"StatSection/StatScroll/StatControls") as VBoxContainer
 	)
-	if stat_controls_container != null and _allocation_policy != null:
-		_stat_controls = {}
 
-		for allocatable_stat in _allocation_policy.get_allocatable_stats():
-			var stat_vbox = stat_controls_container.get_node_or_null(
-				NodePath(str(allocatable_stat))
-			)
-			if stat_vbox != null:
-				_stat_controls[allocatable_stat] = stat_vbox
+
+## Build one row per allocatable stat, from the policy rather than from the scene.
+##
+## The scene ships StatControls empty on purpose. It previously carried three
+## authored rows -- health, attack_damage, armor -- while the shipped policy
+## leaves allocatable_stats empty, which get_allocatable_stats() expands to
+## every stat MobaStatBlock defines. _resolve_controls() then dropped the
+## seventeen with no matching node behind an `if node != null`, so the policy
+## governed the pool and the per-stat cap but not which stats a player could
+## actually spend on, and a policy naming a stat the scene had no row for would
+## have vanished without a word.
+func _build_stat_rows() -> void:
+	if _stat_controls_container == null or _allocation_policy == null:
+		return
+
+	for child in _stat_controls_container.get_children():
+		child.queue_free()
+		_stat_controls_container.remove_child(child)
+
+	_stat_controls = {}
+
+	for stat_name in _allocation_policy.get_allocatable_stats():
+		var row := HBoxContainer.new()
+		row.name = String(stat_name)
+
+		var label := Label.new()
+		label.text = _stat_display_name(stat_name)
+		label.custom_minimum_size = Vector2(180, 0)
+		row.add_child(label)
+
+		var spinbox := SpinBox.new()
+		spinbox.name = "Spinbox"
+		spinbox.min_value = 0
+		spinbox.step = 1
+		spinbox.rounded = true
+		spinbox.value = 0
+		# The cap is set here and refreshed on every _update_stat_display(),
+		# which also clamps it against what is left in the pool.
+		spinbox.max_value = _allocation_policy.per_stat_cap
+		spinbox.custom_minimum_size = TOUCH_TARGET_SIZE
+		spinbox.focus_mode = Control.FOCUS_ALL
+		row.add_child(spinbox)
+
+		_stat_controls_container.add_child(row)
+		_stat_controls[stat_name] = row
+
+
+## Turn a stat's StringName into something a player can read:
+## &"attack_damage" -> "Attack Damage".
+func _stat_display_name(stat_name: StringName) -> String:
+	var words := String(stat_name).split("_", false)
+	var parts: Array[String] = []
+	for word in words:
+		parts.append(word.capitalize())
+	return " ".join(parts)
 
 
 ## Populate the discipline option buttons with the six discipline choices.
@@ -300,6 +347,14 @@ func _populate_weapon_options() -> void:
 	_weapon_option.select(0)
 	_weapon_option.custom_minimum_size = TOUCH_TARGET_SIZE
 	_weapon_option.focus_mode = Control.FOCUS_ALL
+
+	# select() does not emit item_selected, so nothing here would reach
+	# _on_weapon_changed and the build would keep a null weapon while the picker
+	# read "longsword". With one weapon shipped there is no second entry to
+	# select, so the signal could never fire and every hand-built character
+	# saved weaponless -- MobaBuildValidator has no opinion on a null weapon
+	# (D3), so nothing downstream caught it either.
+	_apply_selected_weapon()
 
 
 ## Populate template load button's options (not a full menu, just a button
@@ -442,8 +497,8 @@ func _connect_signals() -> void:
 
 	# Stat controls emit signals when values change
 	for stat_name in _stat_controls:
-		var vbox = _stat_controls[stat_name] as VBoxContainer
-		var spinbox = vbox.get_node(^"Spinbox") as SpinBox
+		var row = _stat_controls[stat_name] as Control
+		var spinbox = row.get_node(^"Spinbox") as SpinBox
 		if spinbox != null:
 			spinbox.value_changed.connect(_on_stat_value_changed.bindv([stat_name]))
 
@@ -498,8 +553,8 @@ func _update_stat_display() -> void:
 
 	# Update each spinbox's range and current value
 	for stat_name in _stat_controls:
-		var vbox = _stat_controls[stat_name] as VBoxContainer
-		var spinbox = vbox.get_node(^"Spinbox") as SpinBox
+		var row = _stat_controls[stat_name] as Control
+		var spinbox = row.get_node(^"Spinbox") as SpinBox
 
 		# Ensure spinbox has focus mode set
 		spinbox.focus_mode = Control.FOCUS_ALL
@@ -551,9 +606,15 @@ func _update_ability_options() -> void:
 				option.set_item_metadata(idx, ability_id)
 				idx += 1
 
-		# Set to current value if it's still valid, else clear
+		# Set to current value if it's still valid, else clear BOTH the picker
+		# and the slot behind it. Resetting only the picker left the build
+		# holding an ability from the Discipline the player just navigated away
+		# from: Save then refused with "All abilities must belong to the primary
+		# or secondary Discipline" against a form showing no such ability, which
+		# is an error with nothing the player can act on.
 		var current_ability_id = _current_build.loadout.get_action_slot(i + 1)
-		_select_option_by_data(option, current_ability_id)
+		if not _select_option_by_data(option, current_ability_id):
+			_current_build.loadout.set_action_slot(i + 1, "")
 
 		option.custom_minimum_size = TOUCH_TARGET_SIZE
 		option.focus_mode = Control.FOCUS_ALL
@@ -571,9 +632,10 @@ func _update_ability_options() -> void:
 			_passive_ability_option.set_item_metadata(idx, ability_id)
 			idx += 1
 
-	# Set to current value if it's still valid, else clear
+	# Same for the passive slot, and for the same reason.
 	var current_passive_id = _current_build.loadout.get_passive_slot()
-	_select_option_by_data(_passive_ability_option, current_passive_id)
+	if not _select_option_by_data(_passive_ability_option, current_passive_id):
+		_current_build.loadout.set_passive_slot("")
 
 	_passive_ability_option.custom_minimum_size = TOUCH_TARGET_SIZE
 	_passive_ability_option.focus_mode = Control.FOCUS_ALL
@@ -663,11 +725,21 @@ func _on_passive_ability_changed(_index: int) -> void:
 
 
 ## Signal handler: Weapon option changed.
-func _on_weapon_changed(index: int) -> void:
-	var weapon = _weapon_cache.get(index, null) as MobaWeapon
+func _on_weapon_changed(_index: int) -> void:
+	_apply_selected_weapon()
+	_error_label.text = ""
+
+
+## Copy whatever the weapon picker currently shows into the working build.
+## The single place the picker's selection becomes build state, so the
+## populate path and the player's own selection cannot disagree.
+func _apply_selected_weapon() -> void:
+	if _weapon_option == null or _current_build == null:
+		return
+
+	var weapon = _weapon_cache.get(_weapon_option.get_selected_id(), null) as MobaWeapon
 	if weapon != null:
 		_current_build.loadout.weapon = weapon
-	_error_label.text = ""
 
 
 ## Signal handler: Load template button pressed.

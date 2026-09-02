@@ -17,6 +17,9 @@
 ##   - a saved character is listed by, and loads back through, the screen's own
 ##     saved-character picker (not just the CharacterStorage API underneath it)
 ##   - the stat spinboxes cannot be driven past the policy's pool through the UI
+##   - a hand-built character saves with the weapon the picker is showing
+##   - a Discipline change clears an ability the new pair no longer allows
+##   - the stat rows come from the policy's allocatable set, not the scene
 ##   - the main menu entry point wires the Character button to this scene
 ##
 ## This test is NOT wired into tests/test_bootstrap.gd; it is a manual
@@ -51,7 +54,9 @@ const _PATH_SAVED_OPTION := "MarginContainer/VBoxContainer/LoadSavedSection/Save
 const _PATH_LOAD_SAVED_BUTTON := (
 	"MarginContainer/VBoxContainer/LoadSavedSection/" + "LoadCharacterButton"
 )
-const _PATH_STAT_CONTROLS := "MarginContainer/VBoxContainer/StatSection/StatControls"
+const _PATH_STAT_CONTROLS := (
+	"MarginContainer/VBoxContainer/StatSection/" + "StatScroll/StatControls"
+)
 const _PATH_TEMPLATE_OPTION := (
 	"MarginContainer/VBoxContainer/LoadTemplateSection/" + "TemplateOption"
 )
@@ -73,6 +78,9 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"overspend stat pool refused with validator's reason",
 	"saved character reloads through the screen's own picker",
 	"stat spinboxes cannot exceed the pool through the UI",
+	"hand-built character saves the weapon the picker shows",
+	"discipline change clears an ability outside the new pair",
+	"stat rows cover the policy's allocatable stats",
 	"main menu Character button wired to character creation",
 ]
 
@@ -104,6 +112,9 @@ func _run() -> void:
 	await _test_overspend_rejection()
 	await _test_saved_character_reload()
 	await _test_ui_pool_clamp()
+	await _test_weapon_applied_without_reselect()
+	await _test_discipline_change_clears_ability()
+	await _test_stat_rows_follow_policy()
 	await _test_main_menu_entry_point()
 
 	_finish()
@@ -224,9 +235,7 @@ func _test_stat_allocation_policy() -> void:
 		return
 
 	# Find stat spinboxes
-	var stat_controls = _character_creation.get_node_or_null(
-		^"MarginContainer/VBoxContainer/StatSection/StatControls"
-	)
+	var stat_controls = _character_creation.get_node_or_null(NodePath(_PATH_STAT_CONTROLS))
 	if stat_controls == null:
 		_fail("stat controls container not found")
 		return
@@ -234,14 +243,14 @@ func _test_stat_allocation_policy() -> void:
 	# Each stat should have a spinbox with max_value = per_stat_cap
 	var invalid_caps: Array[String] = []
 	for child in stat_controls.get_children():
-		var vbox = child as VBoxContainer
-		if vbox != null:
-			var spinbox = vbox.get_node_or_null(^"Spinbox") as SpinBox
+		var row = child as Control
+		if row != null:
+			var spinbox = row.get_node_or_null(^"Spinbox") as SpinBox
 			if spinbox != null and spinbox.max_value != _allocation_policy.per_stat_cap:
 				invalid_caps.append(
 					(
 						"%s (max=%f, expected %d)"
-						% [vbox.name, spinbox.max_value, _allocation_policy.per_stat_cap]
+						% [row.name, spinbox.max_value, _allocation_policy.per_stat_cap]
 					)
 				)
 
@@ -528,67 +537,83 @@ func _test_overspend_rejection() -> void:
 		_fail("precondition failed: character creation or policy not initialized")
 		return
 
-	var stat_controls = (
-		_character_creation.get_node_or_null(
-			^"MarginContainer/VBoxContainer/StatSection/StatControls"
-		)
-		as VBoxContainer
+	var name_input := _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
+	var save_button := _character_creation.get_node_or_null(NodePath(_PATH_SAVE_BUTTON)) as Button
+	var error_label := _character_creation.get_node_or_null(NodePath(_PATH_ERROR_LABEL)) as Label
+	var primary_opt := (
+		_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC)) as OptionButton
 	)
-	var name_input = _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
-	var save_button = (
-		_character_creation.get_node_or_null(
-			^"MarginContainer/VBoxContainer/ButtonContainer/SaveButton"
-		)
-		as Button
+	var secondary_opt := (
+		_character_creation.get_node_or_null(NodePath(_PATH_SECONDARY_DISC)) as OptionButton
 	)
-	var error_label = (
-		_character_creation.get_node_or_null(^"MarginContainer/VBoxContainer/ErrorLabel") as Label
-	)
-
-	if stat_controls == null or name_input == null or save_button == null or error_label == null:
+	if name_input == null or save_button == null or error_label == null:
 		_fail("required controls not found for overspend test")
 		return
+	if primary_opt == null or secondary_opt == null:
+		_fail("discipline pickers not found for overspend test")
+		return
 
-	# Set up disciplines (must be different)
-	var primary_opt = (
-		(_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC))) as OptionButton
-	)
-	var secondary_opt = (
-		(_character_creation.get_node_or_null(NodePath(_PATH_SECONDARY_DISC))) as OptionButton
-	)
+	# Distinct disciplines, so the refusal below is the pool one and not
+	# FAILURE_DISCIPLINES_NOT_DISTINCT arriving first.
 	primary_opt.select(0)
+	primary_opt.item_selected.emit(0)
 	secondary_opt.select(1)
+	secondary_opt.item_selected.emit(1)
+	await process_frame
 
 	name_input.text = "Overspend Test"
 
-	# Find the first stat spinbox and overspend it
-	var first_spinbox: SpinBox = null
-	for vbox in stat_controls.get_children():
-		var spinbox = vbox.get_node_or_null(^"Spinbox") as SpinBox
-		if spinbox != null:
-			first_spinbox = spinbox
+	# Write the overspend straight into the build rather than through a spinbox.
+	# _test_ui_pool_clamp() covers the UI affordance, and that affordance now
+	# makes an overspent allocation unreachable by driving the controls -- which
+	# is the point of it. What this check is for is the layer underneath: that
+	# MobaBuildValidator, not the UI, is what actually refuses, so a build that
+	# arrives overspent by any other route is still rejected at save.
+	var allocation: Dictionary = _character_creation._current_build.stat_allocation
+	allocation.clear()
+	# Untyped on purpose: get_allocatable_stats() is declared Array[StringName]
+	# but falls back to MobaStatBlock's untyped _VALID_STATS const, so inferring
+	# the declared type here fails the assignment at runtime.
+	var allocatable: Array = _allocation_policy.get_allocatable_stats()
+	var over := _allocation_policy.total_points + 1
+	var spent := 0
+	for stat_name in allocatable:
+		if spent >= over:
 			break
+		var points: int = mini(_allocation_policy.per_stat_cap, over - spent)
+		allocation[stat_name] = points
+		spent += points
 
-	if first_spinbox == null:
-		_fail("no stat spinbox found for overspend test")
+	if spent <= _allocation_policy.total_points:
+		_fail(
+			(
+				"could not construct an overspent allocation: %d of a %d pool across %d stats"
+				% [spent, _allocation_policy.total_points, allocatable.size()]
+			)
+		)
 		return
 
-	# Set the spinbox to more than the total pool
-	first_spinbox.value = _allocation_policy.total_points + 1
-	first_spinbox.value_changed.emit(first_spinbox.value)
-	await process_frame
-
-	# Clear error and press save
 	error_label.text = ""
 	save_button.pressed.emit()
 	await process_frame
 
-	# Check that error label now has text
-	if error_label.text.is_empty():
-		_fail("overspend stat pool not rejected with error message")
-		return
+	var expected: String = _get_pool_overspent_message()
+	if error_label.text != expected:
+		_fail("overspend should be refused with %s, screen said: %s" % [expected, error_label.text])
+	else:
+		_pass("overspend stat pool refused with validator's reason")
 
-	_pass("overspend stat pool refused with validator's reason")
+	# Leave the form clean for the checks that follow.
+	_character_creation._current_build.stat_allocation.clear()
+	_character_creation._update_stat_display()
+	await process_frame
+
+
+## The readable text the screen maps FAILURE_STAT_POOL_OVERSPENT to, read back
+## from the screen itself so this test cannot drift from the wording it ships.
+func _get_pool_overspent_message() -> String:
+	var messages: Dictionary = _character_creation._get_failure_messages()
+	return messages.get(MobaBuildValidator.FAILURE_STAT_POOL_OVERSPENT, "")
 
 
 ## A character saved through the screen becomes selectable in the screen's own
@@ -780,6 +805,146 @@ func _test_ui_pool_clamp() -> void:
 		return
 
 	_pass("stat spinboxes cannot exceed the pool through the UI")
+
+
+## A character built from scratch saves with the weapon the picker displays.
+##
+## Regression for a divergence the validator cannot catch: OptionButton.select()
+## does not emit item_selected, so populating the picker left the build's weapon
+## null while the control read "longsword". Only one weapon ships, so there was
+## no second entry to select and no way for a player to ever fire the signal --
+## every hand-built character saved weaponless, and MobaBuildValidator has no
+## opinion on a null weapon (D3), so nothing downstream objected.
+func _test_weapon_applied_without_reselect() -> void:
+	if _character_creation == null:
+		return
+
+	var weapon_option := (
+		_character_creation.get_node_or_null(NodePath(_PATH_WEAPON)) as OptionButton
+	)
+	if weapon_option == null:
+		_fail("weapon picker missing from the scene")
+		return
+
+	# A fresh screen, with nothing selected by hand and no template loaded.
+	var fresh := _CHARACTER_CREATION_SCENE.instantiate() as Control
+	root.add_child(fresh)
+	await process_frame
+
+	var build: MobaCharacterBuild = fresh._current_build
+	if build == null or build.loadout == null:
+		_fail("fresh screen has no working build")
+	elif build.loadout.weapon == null:
+		_fail("fresh screen shows a weapon in the picker but saved build.loadout.weapon is null")
+	else:
+		_pass("hand-built character saves the weapon the picker shows")
+
+	fresh.queue_free()
+	await process_frame
+
+
+## Changing a Discipline drops an equipped ability the new pair no longer allows.
+##
+## Regression: the picker reset to "(None)" while MobaLoadout kept the old id,
+## so Save refused with "All abilities must belong to the primary or secondary
+## Discipline" against a form displaying no such ability.
+func _test_discipline_change_clears_ability() -> void:
+	if _character_creation == null:
+		return
+
+	var primary_opt := (
+		_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC)) as OptionButton
+	)
+	var action_1 := _character_creation.get_node_or_null(NodePath(_PATH_ACTION_1)) as OptionButton
+	if primary_opt == null or action_1 == null:
+		_fail("discipline picker or action slot 1 missing from the scene")
+		return
+
+	# Equip the first real ability offered for the current pair.
+	if action_1.item_count < 2:
+		_fail("action slot 1 lists no abilities for the current discipline pair")
+		return
+	action_1.select(1)
+	action_1.item_selected.emit(1)
+	await process_frame
+
+	var equipped: String = _character_creation._current_build.loadout.get_action_slot(1)
+	if equipped == "":
+		_fail("selecting an ability did not reach the build")
+		return
+
+	var equipped_ability := MobaAbilityLibrary.get_ability(StringName(equipped))
+	if equipped_ability == null:
+		_fail("equipped ability '%s' does not resolve" % equipped)
+		return
+
+	# Move both Disciplines away from the one that ability belongs to.
+	await _move_disciplines_off(equipped_ability.discipline)
+
+	var still_held: String = _character_creation._current_build.loadout.get_action_slot(1)
+	if still_held == equipped:
+		_fail("ability '%s' survived a discipline change that made it illegal" % equipped)
+	else:
+		_pass("discipline change clears an ability outside the new pair")
+
+
+## Point both Discipline pickers at something other than `avoided`.
+func _move_disciplines_off(avoided: int) -> void:
+	var primary_opt := (
+		_character_creation.get_node_or_null(NodePath(_PATH_PRIMARY_DISC)) as OptionButton
+	)
+	var secondary_opt := (
+		_character_creation.get_node_or_null(NodePath(_PATH_SECONDARY_DISC)) as OptionButton
+	)
+
+	var picks: Array[int] = []
+	for i in range(primary_opt.item_count):
+		if i != avoided:
+			picks.append(i)
+		if picks.size() == 2:
+			break
+
+	primary_opt.select(picks[0])
+	primary_opt.item_selected.emit(picks[0])
+	await process_frame
+	secondary_opt.select(picks[1])
+	secondary_opt.item_selected.emit(picks[1])
+	await process_frame
+
+
+## The stat rows are built from the policy's allocatable set, not authored in
+## the scene. The shipped policy leaves allocatable_stats empty, which
+## get_allocatable_stats() expands to every stat MobaStatBlock defines; the
+## scene used to carry three rows and silently drop the rest.
+func _test_stat_rows_follow_policy() -> void:
+	if _character_creation == null or _allocation_policy == null:
+		return
+
+	var stat_controls := (
+		_character_creation.get_node_or_null(NodePath(_PATH_STAT_CONTROLS)) as VBoxContainer
+	)
+	if stat_controls == null:
+		_fail("stat controls container not found at %s" % _PATH_STAT_CONTROLS)
+		return
+
+	var present: Array[String] = []
+	for child in stat_controls.get_children():
+		present.append(String(child.name))
+
+	var missing: Array[String] = []
+	for stat_name in _allocation_policy.get_allocatable_stats():
+		if String(stat_name) not in present:
+			missing.append(String(stat_name))
+
+	if not missing.is_empty():
+		_fail(
+			(
+				"policy allows %d stats but the screen offers no row for: %s"
+				% [_allocation_policy.get_allocatable_stats().size(), ", ".join(missing)]
+			)
+		)
+	else:
+		_pass("stat rows cover the policy's allocatable stats")
 
 
 ## Test that the main menu Character button is wired to character creation.
