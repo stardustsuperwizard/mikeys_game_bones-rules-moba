@@ -69,9 +69,13 @@ static func resolve_channeled(_caster: Node, target: Node, _ability: MobaAbility
 ## The projectile is parented to the caster's parent, not to the caster, so it
 ## outlives the activation call and does not inherit the caster's movement.
 ##
+## For skillshots from networked clients, the rewind delay is computed from the
+## client's send timestamp and used to set the projectile's rewind_timestamp_ms,
+## enabling lag-compensated hit detection against rewound target positions.
+##
 ## Args:
 ##   ability: The MobaAbility being resolved
-##   context: The activation context supplying aim_direction
+##   context: The activation context supplying aim_direction, requester_id, and client_send_ticks_ms
 ##   caster: The ability caster
 ##
 ## Returns: The spawned MobaProjectile, or null when it could not be spawned --
@@ -108,6 +112,23 @@ static func resolve_skillshot(
 	parent.add_child(projectile)
 	projectile.global_position = _get_position(caster)
 	projectile.configure(ability, caster, context.aim_direction)
+
+	# Date the shot once, here at activation, and never again: the projectile
+	# carries this one timestamp for its whole flight, so every tick tests the
+	# same instant of the target's history rather than a receding one.
+	#
+	# Only a networked client's request carries the two fields, so a local or
+	# server-originated cast leaves the timestamp at 0 and resolves live.
+	if context.requester_id > 0 and context.client_send_ticks_ms > 0:
+		var server_now_ms := Time.get_ticks_msec()
+		var rewind_delay_ms := MobaRewindClock.shared().get_rewind_delay_ms(
+			context.requester_id,
+			context.client_send_ticks_ms,
+			server_now_ms,
+			MobaPositionHistory.DEFAULT_REWIND_WINDOW_MS
+		)
+		projectile.set_rewind_timestamp_ms(server_now_ms - rewind_delay_ms)
+
 	return projectile
 
 

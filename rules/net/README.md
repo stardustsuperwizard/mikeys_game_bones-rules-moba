@@ -191,3 +191,38 @@ have given: only the server can deny.
   getter only, keeping `rules/ui/`'s "signals in, nothing out" rule intact
 
 The client's soft-lock/magnetism computation (#38) stays client-side for feel — only the final confirmation (whether the projectile actually spawns) is server-side.
+
+### Lag-Compensated Skillshot Hit Detection (#48)
+
+Skillshots spawned by networked clients test combatant candidates against their **rewound** position (from `MobaPositionHistory`) at a delay validated by `MobaRewindClock`, enabling hits on targets whose current position has already left the shot's path but whose position at send-time was inside it.
+
+#### Rewind Window
+
+The rewind window bounds how far back a client's position is rewound. The default is `MobaPositionHistory.DEFAULT_REWIND_WINDOW_MS` (120 ms), matching the §64 specification of 100–150 ms. The recorded delay is clamped to this window regardless of the peer's measured latency:
+
+- **Past-window clamp**: a claimed timestamp older than the window's edge is clamped to the edge, so an old/forged/stale timestamp produces a hit outcome that matches the window-edge position, never the fully-old one
+- **Future clamp**: a timestamp translating to after the server's current time is clamped to 0 ("resolve as of now"), never rewinding into the future
+- **Unproven-peer clamp**: a peer with no recorded sample has no offset estimate, so `get_rewind_delay_ms()` returns the full window width as a conservative fallback
+
+#### What is and is not rewound
+
+Only the *positions of combatant candidates* are rewound. Everything else resolves live:
+
+- the projectile spawns at the caster's real current position and flies the direction the client sent — the caster is never rewound
+- world geometry is resolved by the live `ShapeCast3D` sweep at its real current position, so a wall still blocks the shot; a wall nearer than a rewound target stops the projectile before that target is considered
+- validity — aliveness, allegiance, caster exclusion — is read live through `MobaTargeting.filter_valid_targets()`, so a target that died before the shot resolves is never hit even though its rewound position still exists in history
+- damage and effects apply against the target's **current** health, armour and shields; position history carries positions and nothing else
+
+The rewind timestamp is computed once, at activation, and held constant for the projectile's whole flight, so every tick tests the same instant of history rather than a receding one.
+
+#### Known Trade-off
+
+Lag compensation favours the shooter: a rewound hit can land on a target from a position the target had already left on their own screen (§64/§1). That is the accepted cost of making networked skillshots feel responsive.
+
+It is bounded in two ways. The window caps how stale the rewound position can be at `DEFAULT_REWIND_WINDOW_MS`, and because world geometry is *not* rewound, a shot still cannot travel through a wall to reach a rewound position behind it — what a victim can lose is a step of their own movement, not a corner they had already broken line of sight behind.
+
+#### Sample Recording
+
+Every ability activation from a networked client records a `(peer_id, client_ticks_msec, server_arrival_ticks_msec)` sample via `MobaRewindClock.shared().record_sample()`, whether the ability is a skillshot or not. This continuously improves the peer's offset estimate. The estimate converges toward the true one-way latency plus the epoch offset, and only ever improves (never relaxes) as jitter subsides.
+
+`MobaRewindClock.shared()` is the process-wide instance: `scripts/actor.gd` records into it and `MobaTargeting.resolve_skillshot()` reads from it, and estimates are only useful when both sides see the same ones. It is a lazily created plain `RefCounted`, not an autoload — the class stays node-free, and tests construct their own isolated `MobaRewindClock.new()`.

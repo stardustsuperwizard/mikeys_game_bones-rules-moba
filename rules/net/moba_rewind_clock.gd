@@ -43,14 +43,40 @@
 ##
 ## The returned delay is always within `[0, window_ms]`: 0 means "resolve as of
 ## now", window_ms means "rewind the whole window".
+##
+## ## The shared instance
+##
+## Offset estimates are only useful when the handler that observes a peer's
+## timestamps and the resolver that spends them read the same estimates. Those
+## two live in different layers -- `scripts/actor.gd` records, and
+## `MobaTargeting.resolve_skillshot()` reads -- and neither owns the other, so
+## shared() hands both the one process-wide instance. It is a lazily created
+## plain instance, not an autoload: this class stays node-free and every method
+## stays an ordinary instance method, so tests construct their own isolated
+## MobaRewindClock.new() and never touch the shared one.
 class_name MobaRewindClock
 extends RefCounted
+
+## The process-wide instance shared by the recording and resolving call sites.
+## Never read directly -- shared() creates it on first use.
+static var _shared: MobaRewindClock = null
 
 ## Best offset estimate per peer id, as `int -> int`. The value is the smallest
 ## `server_arrival_ticks_ms - client_sent_ticks_ms` yet observed for that peer:
 ## adding it to a client tick count translates that tick count into the server's
 ## timeline. One entry per peer id, one integer per entry.
 var _peer_offsets: Dictionary = {}
+
+
+## The process-wide clock both the recording and the resolving call site use.
+##
+## Created on first call and kept for the life of the process. A test that wants
+## isolation constructs MobaRewindClock.new() instead; nothing here is static
+## state a test is forced to share.
+static func shared() -> MobaRewindClock:
+	if _shared == null:
+		_shared = MobaRewindClock.new()
+	return _shared
 
 
 ## Fold one observed `(client_sent, server_arrival)` pair into the peer's offset

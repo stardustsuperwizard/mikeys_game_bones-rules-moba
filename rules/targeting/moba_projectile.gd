@@ -56,6 +56,32 @@ enum DespawnReason {
 ## range is allowed to keep existing.
 const _LIFETIME_FALLBACK_FACTOR := 2.0
 
+## Extra metres added to the rewound candidate query's radius, on top of the
+## segment and the hit radius.
+##
+## The live sweep can only report bodies the segment touches *now*, which is
+## exactly the set a rewound shot must not be limited to: the whole point is to
+## hit a target whose current position has already left the path. So rewound
+## resolution gathers candidates with its own, wider query and this margin is
+## how much wider.
+##
+## It has to cover the furthest a combatant could have travelled since the
+## rewound instant. Base movement_speed is 5 m/s (MobaStatBlock), and the window
+## is 120 ms (MobaPositionHistory.DEFAULT_REWIND_WINDOW_MS), so an unmodified
+## combatant moves 0.6 m. 6.0 m keeps a full order of magnitude of headroom for
+## haste, dashes and blinks. Too small silently drops legitimate rewound hits;
+## too large only costs a wider broadphase query, so it is deliberately generous.
+const _REWIND_CANDIDATE_MARGIN_M := 6.0
+
+## Hit radius used when the projectile's own CollisionShape3D carries a shape
+## whose radius is not meaningful (or carries none at all).
+##
+## Only reachable from a fixture that authors an exotic shape; every projectile
+## scene in this repository uses a SphereShape3D. Kept small so a misconfigured
+## shape fails toward "misses" rather than toward a projectile that hits
+## everything near its path.
+const _REWIND_FALLBACK_HIT_RADIUS_M := 0.5
+
 ## Number of live projectiles holding a slot against max_active_projectiles.
 static var _active_count: int = 0
 
@@ -118,6 +144,20 @@ var elapsed_lifetime: float = 0.0
 
 ## Why this projectile despawned, DespawnReason.NONE while it is still flying.
 var despawn_reason: DespawnReason = DespawnReason.NONE
+
+## The server-timeline instant, in Time.get_ticks_msec() terms, that combatant
+## candidates are hit-tested at. 0 means "no rewind": resolve live, exactly as
+## before this existed.
+##
+## Set once by MobaTargeting.resolve_skillshot() at activation and held constant
+## for the whole flight, so a projectile alive for several ticks keeps testing
+## the same instant of history instead of a receding one.
+##
+## Only combatant *positions* are rewound. The projectile itself flies from the
+## caster's real position along the real aim direction, world geometry still
+## blocks it at its real current position, and every validity decision
+## (aliveness, allegiance, caster exclusion) is still read live.
+var rewind_timestamp_ms: int = 0
 
 ## Per-instance hit set, keyed by instance id, so a piercing projectile never
 ## hits the same target twice -- including when a sweep re-clips the edge of a
@@ -242,6 +282,14 @@ func configure(p_ability: MobaAbility, p_caster: Node, p_direction: Vector3) -> 
 	_sync_sweep()
 
 
+## Date this projectile's hit tests at `timestamp_ms` on the server timeline.
+##
+## Called by MobaTargeting.resolve_skillshot() immediately after configure(),
+## before the first tick. Passing 0 leaves the projectile resolving live.
+func set_rewind_timestamp_ms(timestamp_ms: int) -> void:
+	rewind_timestamp_ms = timestamp_ms
+
+
 ## Reserve one of the max_active_projectiles slots for this instance.
 ##
 ## Returns false when the cap is already saturated; the caller must free the
@@ -316,6 +364,9 @@ func _sync_sweep() -> void:
 ## the end of the segment: a fast projectile must not record travel past the
 ## thing that stopped it.
 func _sweep_and_resolve(motion: Vector3) -> bool:
+	if rewind_timestamp_ms > 0:
+		return _sweep_and_resolve_rewound(motion)
+
 	var start := global_position
 
 	for hit in _cast_segment(motion):
@@ -332,6 +383,169 @@ func _sweep_and_resolve(motion: Vector3) -> bool:
 		return false
 
 	return true
+
+
+## Lag-compensated variant of _sweep_and_resolve(), used only while this
+## projectile carries a rewind timestamp.
+##
+## The split this makes is the whole feature. World geometry is resolved by the
+## same live sweep as ever, at its real current position, because a wall does
+## not move and must still block the shot. Combatants are resolved against the
+## position they held at rewind_timestamp_ms instead.
+##
+## Combatant candidates deliberately do *not* come from the live sweep. The
+## sweep reports only bodies the segment touches now, and the case this feature
+## exists for is precisely a target that has since moved out of the segment --
+## it would never appear. So candidates come from a wider query
+## (_REWIND_CANDIDATE_MARGIN_M) and each is tested by comparing its rewound
+## position against the segment, which can both add a hit the live sweep missed
+## and withhold one the live sweep found.
+##
+## Ordering and blocking are preserved: a wall nearer than a rewound target
+## stops the projectile before that target is ever considered, matching the
+## nearest-first guarantee the live path documents.
+func _sweep_and_resolve_rewound(motion: Vector3) -> bool:
+	var start := global_position
+	var length := motion.length()
+
+	# Nearest world-geometry collider on the live sweep, if any. _cast_segment()
+	# returns nearest-first, so the first one found is the blocking one.
+	var block_distance := INF
+	for hit in _cast_segment(motion):
+		var collider := hit["collider"] as Node
+		if collider == null or not is_instance_valid(collider):
+			continue
+		var blocker := MobaTargeting._normalize_to_actor(collider)
+		if blocker.get_node_or_null("MobaCombatant") == null:
+			block_distance = clampf(hit["distance"], 0.0, length)
+			break
+
+	for entry in _rewound_hits_along(start, motion, block_distance):
+		if _resolve_combatant(entry["candidate"] as Node):
+			continue
+
+		var travelled: float = entry["distance"]
+		global_position = start + direction * travelled
+		distance_traveled += travelled
+		return false
+
+	# Nothing rewound stopped the shot, so the wall (if there was one) does.
+	if block_distance < INF:
+		global_position = start + direction * block_distance
+		distance_traveled += block_distance
+		_despawn(DespawnReason.WORLD_GEOMETRY)
+		return false
+
+	return true
+
+
+## Combatants whose rewound position lies within the hit radius of this tick's
+## motion segment, as {"candidate": Node, "distance": float}, nearest first.
+##
+## `distance` is how far along the segment the rewound contact sits, so the
+## caller can order these against a blocking wall and place the projectile at
+## the contact point exactly as the live path does.
+##
+## Candidates past `block_distance` are dropped: a wall in front of a target
+## stops the shot whether or not the target's rewound position was on the line.
+func _rewound_hits_along(
+	start: Vector3, motion: Vector3, block_distance: float
+) -> Array[Dictionary]:
+	var hits: Array[Dictionary] = []
+	var length := motion.length()
+	if length <= 0.0:
+		return hits
+
+	var hit_radius := _rewind_hit_radius()
+
+	# One sphere covering the whole segment: centred on its midpoint, reaching
+	# its ends, plus the hit radius, plus how far a combatant could have moved
+	# since the rewound instant.
+	var candidates := MobaTargeting._query_area(
+		start + motion * 0.5,
+		length * 0.5 + hit_radius + _REWIND_CANDIDATE_MARGIN_M,
+		collision_mask,
+		self
+	)
+
+	for candidate in candidates:
+		var combatant := candidate.get_node_or_null("MobaCombatant") as MobaCombatant
+		if combatant == null:
+			continue
+
+		var rewound := _rewound_position(candidate, combatant)
+		var along := _closest_point_ratio(start, motion, rewound)
+		if (start + motion * along).distance_to(rewound) > hit_radius:
+			continue
+
+		var distance := along * length
+		if distance > block_distance:
+			continue
+
+		hits.append({"candidate": candidate, "distance": distance})
+
+	hits.sort_custom(
+		func(a: Dictionary, b: Dictionary) -> bool: return a["distance"] < b["distance"]
+	)
+	return hits
+
+
+## Where `candidate` was at rewind_timestamp_ms.
+##
+## Falls back to its live position when the history holds nothing to read --
+## a combatant the server has never ticked. Falling back rather than skipping
+## keeps an unticked candidate resolving exactly as it did before rewind
+## existed, instead of silently becoming unhittable.
+func _rewound_position(candidate: Node, combatant: MobaCombatant) -> Vector3:
+	var history := combatant.get_position_history()
+	if history == null or not history.has_samples():
+		return _live_position(candidate)
+	return history.position_at(rewind_timestamp_ms)
+
+
+## Current world position of a candidate, whether it is an Actor wrapping a
+## body or a bare Node3D fixture.
+func _live_position(candidate: Node) -> Vector3:
+	var spatial := candidate as Node3D
+	if spatial != null:
+		return spatial.global_position
+	return global_position
+
+
+## How far along `motion` from `start` the closest approach to `point` sits, as
+## a 0..1 ratio clamped to the segment's ends.
+func _closest_point_ratio(start: Vector3, motion: Vector3, point: Vector3) -> float:
+	var length_sq := motion.length_squared()
+	if length_sq <= 0.0:
+		return 0.0
+	return clampf((point - start).dot(motion) / length_sq, 0.0, 1.0)
+
+
+## Radius the rewound point test treats as a hit.
+##
+## The projectile's own CollisionShape3D is the source, so the rewound test and
+## the live sweep measure the same projectile: _sync_sweep() already hands that
+## same shape to the ShapeCast3D. A point test against the shape's radius is a
+## sphere approximation of that shape, which is exact for the SphereShape3D
+## every projectile scene here uses.
+func _rewind_hit_radius() -> float:
+	if _volume == null or _volume.shape == null:
+		return _REWIND_FALLBACK_HIT_RADIUS_M
+
+	var shape := _volume.shape
+	if shape is SphereShape3D:
+		return (shape as SphereShape3D).radius
+	if shape is CapsuleShape3D:
+		return (shape as CapsuleShape3D).radius
+	if shape is CylinderShape3D:
+		return (shape as CylinderShape3D).radius
+	if shape is BoxShape3D:
+		# Half the smallest dimension: the largest sphere the box contains, so
+		# the approximation never claims reach the authored shape lacks.
+		var half_size: Vector3 = (shape as BoxShape3D).size * 0.5
+		return minf(half_size.x, minf(half_size.y, half_size.z))
+
+	return _REWIND_FALLBACK_HIT_RADIUS_M
 
 
 ## Sweep the projectile's own shape along `motion` and return every collider it
@@ -379,6 +593,17 @@ func _resolve_collider(collider: Node) -> bool:
 		_despawn(DespawnReason.WORLD_GEOMETRY)
 		return false
 
+	return _resolve_combatant(candidate)
+
+
+## Apply one combatant hit. Returns true when the projectile should keep going,
+## false when this candidate despawned it.
+##
+## Shared by the live and rewound paths so that what a hit *does* -- piercing,
+## the per-instance hit set, the validity filter, effect application, the
+## despawn reason -- is written once and cannot drift between them. Only how a
+## candidate is *found* differs between the two.
+func _resolve_combatant(candidate: Node) -> bool:
 	if ability == null:
 		return true
 
