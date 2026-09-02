@@ -73,7 +73,9 @@ func spawn_player_for_peer(peer_id: int) -> void:
 	if _peer_actors.has(peer_id) and is_instance_valid(_peer_actors[peer_id]):
 		return
 
-	_peer_actors[peer_id] = spawn(player_spawn_point, peer_id)
+	# The build is passed in here rather than looked up inside spawn(), because
+	# spawn() is also the path for world and bot content. Only a peer has a build.
+	_peer_actors[peer_id] = spawn(player_spawn_point, peer_id, get_peer_build(peer_id))
 
 
 # Read off the SessionManager autoload, which has already run its own _ready()
@@ -93,15 +95,29 @@ func _is_dedicated_server() -> bool:
 # function receives identical data on every peer, which is what lets a
 # networked spawn reconstruct the same character_sheet/color/authority
 # everywhere instead of only on the spawning peer.
-func spawn(spawn_point: SpawnPoint, authority_id: int = 1) -> Actor:
+#
+# `build` is the character build the spawned actor should be equipped with, and
+# is deliberately a parameter rather than something this function looks up.
+# spawn() is the single path for every spawn point, world and bot content
+# included, and those are not peers: an actor spawned without a build keeps the
+# loadout and stats its scene authored. Defaulting to a lookup here handed the
+# per-peer fallback build to enemies as well, quietly restatting them.
+func spawn(
+	spawn_point: SpawnPoint, authority_id: int = 1, build: MobaCharacterBuild = null
+) -> Actor:
 	var data := {
 		"scene_path": spawn_point.actor_scene.resource_path,
 		"character_sheet_path": spawn_point.character_sheet.resource_path,
 		"color": spawn_point.color,
 		"transform": spawn_point.transform,
 		"authority_id": authority_id,
-		"build": _encode_build(get_peer_build(authority_id)),
 	}
+
+	# Absent, not null, when there is no build: _spawn_actor() runs on every peer
+	# off this payload, and "no key" is the one state that cannot be confused with
+	# a build that failed to encode.
+	if build != null:
+		data["build"] = _encode_build(build)
 	if _spawner:
 		return _spawner.spawn(data) as Actor
 	return _spawn_actor(data)
@@ -122,8 +138,13 @@ func _spawn_actor(data: Dictionary) -> Actor:
 	# stat_block is assigned before the actor enters the tree, which is what makes
 	# it stick: MobaCombatant seeds its runtime stat block from this property, so
 	# an effective block set here is the one health and resource are sized from.
+	#
+	# Only when the payload carries a build. World and bot actors are spawned
+	# without one and are left exactly as their scene authored them -- equipping
+	# them from the per-peer fallback would be a silent balance change to actors
+	# that have no build to submit in the first place.
 	var combatant := actor.get_node_or_null("MobaCombatant") as MobaCombatant
-	if combatant != null:
+	if combatant != null and data.has("build"):
 		var build := _decode_build(data["build"])
 		combatant.stat_block = build.get_effective_stat_block(_BASELINE_STAT_BLOCK)
 		combatant.loadout = build.loadout

@@ -33,6 +33,7 @@
 extends SceneTree
 
 const _PLAYER_SPAWN_POINT := preload("res://resources/player_spawn_point.tres")
+const _ENEMY_SPAWN_POINT := preload("res://resources/enemy_spawn_point.tres")
 const _FALLBACK_BUILD := preload("res://rules/data/builds/melee_bruiser_build.tres")
 const _BASELINE_STAT_BLOCK := preload("res://rules/data/stat_blocks/baseline.tres")
 
@@ -48,6 +49,7 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"refused submission leaves the accepted build in place",
 	"a peer cannot submit a build for another peer's actor",
 	"build survives the spawn payload intact",
+	"a bot spawn keeps its scene loadout and baseline stats",
 ]
 
 var _failures: Array[String] = []
@@ -66,6 +68,7 @@ func _run() -> void:
 	_test_refusal_preserves_accepted_build()
 	_test_cannot_submit_for_another_peers_actor()
 	_test_build_survives_spawn_payload()
+	_test_bot_spawn_is_untouched_by_the_fallback_build()
 
 	_finish()
 
@@ -297,6 +300,72 @@ func _test_build_survives_spawn_payload() -> void:
 		_fail("stat allocation lost in the spawn payload")
 	else:
 		_pass("build survives the spawn payload intact")
+
+
+## An actor that is not a peer must come out of spawn() exactly as its scene
+## authored it.
+##
+## spawn() is the single path for every spawn point, so the per-peer fallback
+## build was briefly applied to world and bot content too -- silently giving
+## enemies the melee-bruiser allocation (+5 health, +3 attack_damage, +2 armor)
+## over baseline and overwriting enemy.tscn's own loadout. Nothing in #336 asks
+## for that, and it is invisible without a check like this one: today the bot's
+## baked loadout and the fallback build's loadout happen to be the same file, so
+## only the stats actually diverge, and only until someone changes either file.
+func _test_bot_spawn_is_untouched_by_the_fallback_build() -> void:
+	var world_manager := _make_world_manager()
+
+	# Exactly how _ready() spawns world content: no build argument at all.
+	var enemy: Node = world_manager.spawn(_ENEMY_SPAWN_POINT, _ENEMY_SPAWN_POINT.authority_id)
+	if enemy == null:
+		_fail("bot actor did not spawn")
+		return
+	world_manager.add_child(enemy)
+
+	var combatant := enemy.get_node_or_null("MobaCombatant")
+	if combatant == null:
+		_fail("bot actor has no MobaCombatant")
+		return
+
+	# The fallback build allocates points on top of baseline, so a bot showing
+	# baseline numbers is proof the build was not applied to it. Guarded first:
+	# an allocation that ever went empty would make these assertions vacuous.
+	var allocated := _FALLBACK_BUILD.get_effective_stat_block(_BASELINE_STAT_BLOCK)
+	if allocated.attack_damage == _BASELINE_STAT_BLOCK.attack_damage:
+		_fail(
+			(
+				"fixture is stale: the fallback build no longer changes attack_damage, "
+				+ "so this check can no longer tell an equipped bot from an untouched one"
+			)
+		)
+		return
+
+	if combatant.stat_block.attack_damage != _BASELINE_STAT_BLOCK.attack_damage:
+		_fail(
+			(
+				"bot attack_damage is %s, expected the scene's baseline %s"
+				% [combatant.stat_block.attack_damage, _BASELINE_STAT_BLOCK.attack_damage]
+			)
+		)
+		return
+	if combatant.stat_block.armor != _BASELINE_STAT_BLOCK.armor:
+		_fail(
+			(
+				"bot armor is %s, expected the scene's baseline %s"
+				% [combatant.stat_block.armor, _BASELINE_STAT_BLOCK.armor]
+			)
+		)
+		return
+	if combatant.stat_block.health != _BASELINE_STAT_BLOCK.health:
+		_fail(
+			(
+				"bot health is %s, expected the scene's baseline %s"
+				% [combatant.stat_block.health, _BASELINE_STAT_BLOCK.health]
+			)
+		)
+		return
+
+	_pass("a bot spawn keeps its scene loadout and baseline stats")
 
 
 ## The path of the first Object found anywhere in a payload, or "" if it is
