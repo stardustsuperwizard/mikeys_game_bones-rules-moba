@@ -21,7 +21,14 @@ extends Resource
 ## Stat point allocation keyed by MobaStatBlock stat StringName constants.
 ## Values are non-negative int representing points added on top of the baseline.
 ## Validated and applied by MobaBuildValidator.
-@export var stat_allocation: Dictionary = {}
+##
+## Typed rather than a bare Dictionary so the key and value types are enforced
+## where the data is authored. Untyped, a .tres holding a non-int value made
+## MobaBuildValidator._check_stat_allocation() abort mid-loop on the assignment
+## and fall out of validate() returning &"" -- reporting an unreadable build as
+## legal, which is the one answer this gate must never give. The negative,
+## per-stat-cap and pool checks all assume an int is what they are comparing.
+@export var stat_allocation: Dictionary[StringName, int] = {}
 
 ## Combat loadout: weapon + 4 action slots + 1 passive slot.
 @export var loadout: MobaLoadout = null

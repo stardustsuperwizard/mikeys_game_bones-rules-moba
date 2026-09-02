@@ -60,7 +60,7 @@ static func _make_build(
 	secondary: int,
 	action_ids: Array,
 	passive_id: String = "",
-	allocation: Dictionary = {}
+	allocation: Dictionary[StringName, int] = {}
 ) -> MobaCharacterBuild:
 	var build := MobaCharacterBuild.new()
 	build.character_name = "Fixture"
@@ -198,8 +198,8 @@ static func _test_stat_pool_one_over_cap_refused() -> bool:
 
 ## Spread `total` points across distinct allocatable stats without exceeding the
 ## policy's per-stat cap, so a pool-size assertion is not masked by the cap check.
-static func _allocation_summing_to(total: int) -> Dictionary:
-	var allocation: Dictionary = {}
+static func _allocation_summing_to(total: int) -> Dictionary[StringName, int]:
+	var allocation: Dictionary[StringName, int] = {}
 	var remaining := total
 	for stat_name in _ALLOCATION_POLICY.get_allocatable_stats():
 		if remaining <= 0:
