@@ -24,13 +24,7 @@
 extends SceneTree
 
 const _MAIN_SCENE := preload("res://scenes/main.tscn")
-
-# Mirrors of the shipped constants this test measures against. If either of
-# these changes, the arena's obstacle has to be re-checked against it -- which
-# is the whole point of asserting them here rather than hardcoding an apex.
-const _JUMP_VELOCITY := 5.0  # PlayerBody3D.jump_velocity
-const _CAPSULE_HEIGHT := 2.0  # scenes/player/player.tscn body capsule
-const _CAPSULE_RADIUS := 0.4
+const _PLAYER_SCENE := preload("res://scenes/player/player.tscn")
 
 const _EXPECTED_CHECKS: Array[String] = [
 	"spawn_point.team defaults to 0",
@@ -49,20 +43,27 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"walk-around route is longer than the jump route",
 ]
 
+# Read off the shipped player rather than mirrored here. A copy of these
+# numbers would keep passing after someone retuned the real ones, against an
+# arena that no longer matches -- which is exactly the regression this file is
+# supposed to catch.
+var _jump_velocity: float
+var _capsule_height: float
+var _capsule_radius: float
+
 var _failures: Array[String] = []
 var _completed: Array[String] = []
 
 
-# A CharacterBody3D driven by the same constants PlayerBody3D/ActorBody3D use.
+# A CharacterBody3D driven by the same values PlayerBody3D/ActorBody3D use.
 # The acceptance criterion is about what a body can and cannot do against the
 # shipped geometry, so this simulates one rather than reasoning about the box.
 class TestBody:
 	extends CharacterBody3D
 
-	# An inner class cannot see the outer script's constants, so these repeat
-	# PlayerBody3D.jump_velocity and ActorBody3D.SPEED. Keep them in step.
-	const JUMP_VELOCITY := 5.0
-	const SPEED := 5.0
+	# Set from the shipped PlayerBody3D; ActorBody3D.SPEED is a const and can be
+	# read straight off the class.
+	var jump_velocity: float
 
 	var move_direction := Vector3.ZERO
 	var jump_queued := false
@@ -71,12 +72,12 @@ class TestBody:
 		# Jump before gravity, only while grounded -- the same order
 		# PlayerBody3D uses before delegating to ActorBody3D.
 		if jump_queued and is_on_floor():
-			velocity.y = JUMP_VELOCITY
+			velocity.y = jump_velocity
 			jump_queued = false
 		if not is_on_floor():
 			velocity += get_gravity() * delta
-		velocity.x = move_direction.x * SPEED
-		velocity.z = move_direction.z * SPEED
+		velocity.x = move_direction.x * ActorBody3D.SPEED
+		velocity.z = move_direction.z * ActorBody3D.SPEED
 		move_and_slide()
 
 
@@ -87,11 +88,34 @@ func _initialize() -> void:
 func _run() -> void:
 	await process_frame
 
+	if not _read_shipped_player_constants():
+		_finish()
+		return
+
 	_test_team_defaults()
 	await _test_arena_spawn_teams()
 	await _test_arena_obstacle()
 
 	_finish()
+
+
+## Pull jump velocity and body capsule off the shipped player scene, so the
+## obstacle is measured against what the game actually ships.
+func _read_shipped_player_constants() -> bool:
+	var player := _PLAYER_SCENE.instantiate()
+	var body := player.get_node_or_null("Body") as PlayerBody3D
+	var shape_node := player.get_node_or_null("Body/CollisionShape3D") as CollisionShape3D
+	var capsule := shape_node.shape as CapsuleShape3D if shape_node else null
+	if body == null or capsule == null:
+		_fail("setup: scenes/player/player.tscn has no PlayerBody3D with a CapsuleShape3D")
+		player.free()
+		return false
+
+	_jump_velocity = body.jump_velocity
+	_capsule_height = capsule.height
+	_capsule_radius = capsule.radius
+	player.free()
+	return true
 
 
 ## Actor.team and SpawnPoint.team exist and default to 0.
@@ -244,7 +268,7 @@ func _test_arena_obstacle() -> void:
 	# Apex of a jump launched at jump_velocity under the project's own gravity,
 	# rather than a hardcoded 1.2 m: v^2 / 2g.
 	var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
-	var jump_apex := (_JUMP_VELOCITY * _JUMP_VELOCITY) / (2.0 * gravity)
+	var jump_apex := (_jump_velocity * _jump_velocity) / (2.0 * gravity)
 
 	if obstacle_height < jump_apex:
 		_pass("obstacle height is below jump apex")
@@ -281,7 +305,7 @@ func _test_arena_obstacle() -> void:
 	# side of the obstacle.
 	var near_face := obstacle_centre.z + box.size.z * 0.5
 	var far_face := obstacle_centre.z - box.size.z * 0.5
-	var start := Vector3(point_a.x, _CAPSULE_HEIGHT * 0.5 + 0.05, point_a.z)
+	var start := Vector3(point_a.x, _capsule_height * 0.5 + 0.05, point_a.z)
 
 	var walk_end := await _simulate(scene, start, -INF)
 	if walk_end.z > near_face:
@@ -299,13 +323,13 @@ func _test_arena_obstacle() -> void:
 	# above it when clearing the far side. A body that jumps on contact clips
 	# the near face instead.
 	var jump_end := await _simulate(scene, start, near_face + 2.0)
-	if jump_end.z < far_face - _CAPSULE_RADIUS:
+	if jump_end.z < far_face - _capsule_radius:
 		_pass("jumping crosses the obstacle")
 	else:
 		_fail(
 			(
 				"a jumping body did not clear the obstacle: ended at z=%.2f, needed z<%.2f"
-				% [jump_end.z, far_face - _CAPSULE_RADIUS]
+				% [jump_end.z, far_face - _capsule_radius]
 			)
 		)
 
@@ -318,7 +342,7 @@ func _test_arena_obstacle() -> void:
 	var detour := INF
 	for side in [-1.0, 1.0]:
 		var corner := Vector3(
-			obstacle_centre.x + side * (box.size.x * 0.5 + _CAPSULE_RADIUS + 0.1),
+			obstacle_centre.x + side * (box.size.x * 0.5 + _capsule_radius + 0.1),
 			0.0,
 			obstacle_centre.z
 		)
@@ -369,12 +393,12 @@ func _floor_extent(scene: Node) -> Vector2:
 ## Whether a player-sized capsule fits at `point` without overlapping anything.
 func _standable(space_state: PhysicsDirectSpaceState3D, point: Vector3) -> bool:
 	var capsule := CapsuleShape3D.new()
-	capsule.height = _CAPSULE_HEIGHT
-	capsule.radius = _CAPSULE_RADIUS
+	capsule.height = _capsule_height
+	capsule.radius = _capsule_radius
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = capsule
 	query.transform = Transform3D(
-		Basis.IDENTITY, Vector3(point.x, _CAPSULE_HEIGHT * 0.5 + 0.05, point.z)
+		Basis.IDENTITY, Vector3(point.x, _capsule_height * 0.5 + 0.05, point.z)
 	)
 	return space_state.intersect_shape(query, 1).is_empty()
 
@@ -393,12 +417,13 @@ func _cast(
 func _simulate(scene: Node, start: Vector3, jump_at_z: float) -> Vector3:
 	var body := TestBody.new()
 	var capsule := CapsuleShape3D.new()
-	capsule.height = _CAPSULE_HEIGHT
-	capsule.radius = _CAPSULE_RADIUS
+	capsule.height = _capsule_height
+	capsule.radius = _capsule_radius
 	var shape_node := CollisionShape3D.new()
 	shape_node.shape = capsule
 	body.add_child(shape_node)
 	scene.add_child(body)
+	body.jump_velocity = _jump_velocity
 	body.global_position = start
 
 	# Let it settle onto the floor before it starts moving, so the first
