@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="MobaCharacterBuild" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://rules/abilities/moba_character_build.gd" id="1"]
+[ext_resource type="Resource" path="res://rules/data/loadouts/melee_bruiser.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+character_name = "Warrior Bruiser"
+primary_discipline = 0
+secondary_discipline = 1
+stat_allocation = {
+&"attack_damage": 3,
+&"armor": 2,
+&"health": 5
+}
+loadout = ExtResource("2")

@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="MobaStatAllocationPolicy" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://rules/core/moba_stat_allocation_policy.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+total_points = 10
+per_stat_cap = 5
+allocatable_stats = []
