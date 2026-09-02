@@ -17,11 +17,12 @@ extends Node
 # fallback is a legal playable character rather than an empty loadout.
 const _FALLBACK_BUILD := preload("res://rules/data/builds/melee_bruiser_build.tres")
 
-# The baseline a build's stat allocation is added on top of, and the policy its
-# allocation is checked against. Preloaded rather than load()-ed per submit: both
-# are authored single-instance data, and a parse-time failure here is a louder,
-# earlier signal than a null at submission.
-const _BASELINE_STAT_BLOCK := preload("res://rules/data/stat_blocks/baseline.tres")
+# The policy a build's stat allocation is checked against. Preloaded rather than
+# load()-ed per submit: it is authored single-instance data, and a parse-time
+# failure here is a louder, earlier signal than a null at submission.
+#
+# The baseline stat block a build is applied on top of stays in WorldManager:
+# that is spawn-time concern, and this registry never builds a stat block.
 const _ALLOCATION_POLICY := preload("res://rules/data/stat_blocks/stat_allocation_policy.tres")
 
 # Map of peer_id -> the last build that peer submitted and the server accepted.
@@ -51,7 +52,9 @@ var _peer_builds: Dictionary[int, MobaCharacterBuild] = {}
 ## A refusal deliberately leaves any previously accepted build in place. The
 ## peer keeps playing the last build the server agreed to rather than being
 ## dropped to the fallback by a bad submission.
-func submit_build(peer_id: int, actor: Actor, build: MobaCharacterBuild, requester_id: int = -1) -> ActionResult:
+func submit_build(
+	peer_id: int, actor: Actor, build: MobaCharacterBuild, requester_id: int = -1
+) -> ActionResult:
 	var action := MobaSubmitBuildAction.new(actor, build, _ALLOCATION_POLICY)
 	var result := ActionRunner.run(action, peer_id if requester_id == -1 else requester_id)
 	if result.success:

@@ -21,9 +21,10 @@
 extends SceneTree
 
 const _PLAYER_SPAWN_POINT := preload("res://resources/player_spawn_point.tres")
-const _ENEMY_SPAWN_POINT := preload("res://resources/enemy_spawn_point.tres")
+
+# The shipped fallback, both as the source of a legal weapon for the builds
+# below and as what an unsubmitted peer is asserted to get back.
 const _FALLBACK_BUILD := preload("res://rules/data/builds/melee_bruiser_build.tres")
-const _BASELINE_STAT_BLOCK := preload("res://rules/data/stat_blocks/baseline.tres")
 
 # A peer id for testing
 const _TEST_PEER := 7
@@ -52,7 +53,7 @@ func _initialize() -> void:
 func _run() -> void:
 	await process_frame
 
-	_test_build_survives_worldmanager_reset()
+	await _test_build_survives_worldmanager_reset()
 	_test_worldmanager_submit_signature()
 	_test_worldmanager_get_signature()
 	_test_legal_submission()
@@ -219,6 +220,17 @@ func _test_illegal_submission_refused() -> void:
 	if result.success:
 		_fail("illegal build was accepted")
 		return
+	if result.reason != MobaBuildValidator.FAILURE_ABILITY_OUTSIDE_DISCIPLINES:
+		_fail(
+			(
+				"illegal build refused with '%s', expected '%s'"
+				% [
+					String(result.reason),
+					String(MobaBuildValidator.FAILURE_ABILITY_OUTSIDE_DISCIPLINES),
+				]
+			)
+		)
+		return
 
 	_pass("illegal submission refused")
 	wm.queue_free()
@@ -282,9 +294,13 @@ func _test_accepted_build_is_snapshot() -> void:
 		_fail("setup: legal build was refused")
 		return
 
-	# Edit the submitted build
+	# Edit every mutable part of the caller's build after acceptance: the name,
+	# the stat allocation Dictionary, and the loadout sub-Resource. Each is a
+	# separate way a shallow copy would leak the caller's later edits into
+	# authoritative state.
 	submitted.character_name = "Tampered"
 	submitted.stat_allocation[MobaStatBlock.ARMOR] = 999
+	submitted.loadout.set_action_slot(1, "aimed_shot")
 
 	var stored := wm.get_peer_build(_TEST_PEER)
 	if stored.character_name != "Snapshot":
@@ -293,6 +309,15 @@ func _test_accepted_build_is_snapshot() -> void:
 
 	if stored.stat_allocation.get(MobaStatBlock.ARMOR, 0) != 2:
 		_fail("stored build's stat allocation was affected by post-submission edit")
+		return
+
+	if stored.loadout.get_action_slot(1) != "whirlwind":
+		_fail(
+			(
+				"stored build's loadout slot changed after acceptance: got '%s', expected 'whirlwind'"
+				% stored.loadout.get_action_slot(1)
+			)
+		)
 		return
 
 	_pass("accepted build is snapshot")
@@ -309,8 +334,13 @@ func _test_unsubmitted_peer_returns_fallback() -> void:
 		_fail("unsubmitted peer returned null instead of fallback")
 		return
 
-	if fallback.character_name == "":
-		_fail("unsubmitted peer returned an empty build instead of the shipped fallback")
+	if fallback.character_name != _FALLBACK_BUILD.character_name:
+		_fail(
+			(
+				"unsubmitted peer returned '%s', expected the shipped fallback '%s'"
+				% [fallback.character_name, _FALLBACK_BUILD.character_name]
+			)
+		)
 		return
 
 	if fallback.loadout == null:
@@ -348,9 +378,14 @@ func _test_peer_disconnect_clears_entry() -> void:
 	wm._on_peer_disconnected(_TEST_PEER)
 
 	# After disconnect, get_peer_build should return fallback for that peer
-	var after_disconnect := registry.get_peer_build(_TEST_PEER)
-	if after_disconnect.character_name == "Disconnecting":
-		_fail("peer's build was not cleared on disconnect")
+	var after_disconnect: MobaCharacterBuild = registry.get_peer_build(_TEST_PEER)
+	if after_disconnect.character_name != _FALLBACK_BUILD.character_name:
+		_fail(
+			(
+				"disconnect left '%s' for the peer, expected the shipped fallback '%s'"
+				% [after_disconnect.character_name, _FALLBACK_BUILD.character_name]
+			)
+		)
 		return
 
 	if after_disconnect.loadout == null:

@@ -6,6 +6,10 @@ extends Node3D
 # failure here is a louder, earlier signal than a null at spawn.
 const _BASELINE_STAT_BLOCK := preload("res://rules/data/stat_blocks/baseline.tres")
 
+# Reported when the PeerIdentityRegistry autoload is missing, which means the
+# project is misconfigured rather than that a submission was illegal.
+const _FAILURE_NO_REGISTRY := "PeerIdentityRegistry autoload not found"
+
 @export var spawn_points: Array[SpawnPoint] = []
 @export var player_spawn_point: SpawnPoint
 
@@ -169,8 +173,7 @@ func _on_peer_disconnected(peer_id: int) -> void:
 		actor.queue_free()
 	_peer_actors.erase(peer_id)
 
-	# Clear the peer's stored build from the registry
-	var registry := get_node_or_null(^"/root/PeerIdentityRegistry")
+	var registry := _identity_registry()
 	if registry != null:
 		registry.clear_peer(peer_id)
 
@@ -188,9 +191,9 @@ func submit_build(peer_id: int, build: MobaCharacterBuild, requester_id: int = -
 	if actor == null:
 		return ActionResult.new(false, MobaSubmitBuildAction.FAILURE_NO_ACTOR)
 
-	var registry := get_node_or_null(^"/root/PeerIdentityRegistry")
+	var registry := _identity_registry()
 	if registry == null:
-		return ActionResult.new(false, "PeerIdentityRegistry autoload not found")
+		return ActionResult.new(false, _FAILURE_NO_REGISTRY)
 
 	return registry.submit_build(peer_id, actor, build, requester_id)
 
@@ -199,11 +202,24 @@ func submit_build(peer_id: int, build: MobaCharacterBuild, requester_id: int = -
 ## or the shipped fallback if that peer has never had one accepted.
 ## This is a thin delegator to PeerIdentityRegistry.
 func get_peer_build(peer_id: int) -> MobaCharacterBuild:
-	var registry := get_node_or_null(^"/root/PeerIdentityRegistry")
+	var registry := _identity_registry()
 	if registry == null:
-		# Fallback if the autoload is not available (should not happen in normal flow)
-		return preload("res://rules/data/builds/melee_bruiser_build.tres")
+		push_error(_FAILURE_NO_REGISTRY)
+		return null
 	return registry.get_peer_build(peer_id)
+
+
+# The PeerIdentityRegistry autoload, resolved by node path rather than by its
+# global name for the same reason _is_dedicated_server() resolves SessionManager
+# that way: a bare global reference makes this script fail to compile wherever
+# the autoload is absent, and returning null lets the caller say so instead.
+#
+# Deliberately the only place this script knows where peer builds live. The
+# shipped fallback for a peer with no accepted build is the registry's to define,
+# not this node's -- a second copy of that constant here is exactly the
+# duplication moving the storage out was meant to remove.
+func _identity_registry() -> Node:
+	return get_node_or_null(^"/root/PeerIdentityRegistry")
 
 
 # Flatten a build into plain Variant data for MultiplayerSpawner.spawn().
