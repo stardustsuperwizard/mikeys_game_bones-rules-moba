@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="SpawnPoint" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/spawn_point.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/lobby/lobby_avatar.tscn" id="2"]
+[ext_resource type="Resource" path="res://resources/player_character_sheet.tres" id="3"]
+
+[resource]
+script = ExtResource("1")
+actor_scene = ExtResource("2")
+character_sheet = ExtResource("3")
+color = Color(0.5, 0.7, 1, 1)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 4)
+authority_id = 1
+team = 0

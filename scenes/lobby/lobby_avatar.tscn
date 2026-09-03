@@ -1,0 +1,52 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://scripts/actor.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/actor_body_3d.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/lobby_avatar_controller.gd" id="3"]
+[ext_resource type="Resource" path="res://resources/player_character_sheet.tres" id="4"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+height = 2.0
+radius = 0.4
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_1"]
+height = 2.0
+radius = 0.4
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1"]
+albedo_color = Color(0.5, 0.7, 1, 1)
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_body"]
+properties/0/path = NodePath("Body:transform")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+
+[node name="LobbyAvatar" type="Node"]
+script = ExtResource("1")
+character_sheet = ExtResource("4")
+color = Color(0.5, 0.7, 1, 1)
+hostile = false
+
+[node name="Body" type="CharacterBody3D" parent="."]
+script = ExtResource("2")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Body"]
+shape = SubResource("CapsuleShape3D_1")
+position = Vector3(0, 1, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Body"]
+mesh = SubResource("CapsuleMesh_1")
+position = Vector3(0, 1, 0)
+material_override = SubResource("StandardMaterial3D_1")
+
+[node name="NameDisplay" type="Label3D" parent="Body"]
+text = "Character"
+position = Vector3(0, 2.4, 0)
+scale = Vector3(0.7, 0.7, 0.7)
+billboard = 1
+
+[node name="Controller" type="Node" parent="."]
+script = ExtResource("3")
+
+[node name="BodyTransformSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_body")
