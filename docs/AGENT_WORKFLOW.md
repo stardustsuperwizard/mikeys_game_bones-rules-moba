@@ -296,12 +296,16 @@ and their review verdicts.
 
 ## The workflow
 
-Six workflows in `.github/workflows/`, `agent-00` through `agent-05`. The
+Seven workflows in `.github/workflows/`, `agent-00` through `agent-06`. The
 number no longer maps to file purpose one-to-one — `agent-03-rollup.yml` and
 `agent-04-review.yml` swapped which number carries which role after
 `agent-05-fix.yml` was added — so treat the filename, not the number, as
 authoritative. Four spend AI credits (planner, execute, review, fix); two are
-plumbing and cost nothing (dashboard, rollup). `agent-00-dashboard.yml` no
+plumbing and cost nothing (dashboard, rollup). The seventh,
+`agent-06-claude.yml`, is the Claude Code side of the same four roles and
+spends a Claude subscription or Claude API tokens rather than AI credits; the
+diagram below covers the Copilot path only, and *Two executors* covers that
+one. `agent-00-dashboard.yml` no
 longer runs on every event — it renders on demand now. See *Issue views* and
 *The control plane* below.
 
@@ -1253,6 +1257,69 @@ honored. Everything else — labels, the control plane, rollup, the
 dashboard — reads the Issue graph the same way regardless of which tool
 produced the diff, so switching tools mid-Feature, or per task, doesn't
 require picking one system and discarding the other.
+
+### Two executors
+
+`agent-06-claude.yml` gives the Claude Code roles the same label-driven entry
+point the Copilot roles have, for the reason *Mostly label-driven, on purpose*
+gives: adding a label is something every GitHub client can do, a phone
+included. Four labels, one per role:
+
+| Label | Target | Prompt | Model |
+| --- | --- | --- | --- |
+| `claude:plan` | intake Issue | `.claude/commands/plan-feature.md` | `vars.CLAUDE_PLANNER_MODEL`, default Opus 5 |
+| `claude:execute` | `[impl]` Issue | `.claude/commands/execute-task.md` | `vars.CLAUDE_EXECUTOR_MODEL`, default Haiku 4.5 |
+| `claude:review` | pull request | `.claude/commands/review-task.md` | `vars.CLAUDE_REVIEWER_MODEL`, default Opus 5 |
+| `claude:fix` | pull request | `.claude/commands/fix-review.md` | `vars.CLAUDE_FIXER_MODEL`, default Sonnet 5 |
+
+The tiers mirror the Copilot routing table above, for the same reason. The ids
+do not: these are Claude Code model ids (`claude-opus-5`,
+`claude-haiku-4-5-20251001`), not the Copilot CLI ids the other workflows pass
+to `--model`. The `CLAUDE_*` variable names keep the two namespaces from being
+confused, which *`model:` in an agent file takes a display name* warns about
+in the other direction.
+
+So the repository now has two executors, and the label namespaces are separate
+so that a choice between them is always explicit. `agent:execute` and
+`claude:execute` do the same job through different products, and **nothing
+stops both being added to one Issue.** They would race: two sessions, two
+branches, two pull requests closing the same task. Nothing in either workflow
+detects the other, deliberately — a cross-check would couple them and give
+each a way to suppress the other. Adding one label at a time is the contract.
+
+Which to reach for:
+
+- **`agent:*`** — the default. Copilot AI credits, a mature pipeline, and the
+  reviewer and rollup wired to it already.
+- **`claude:*`** — when the work wants a Claude Code session specifically:
+  a Claude subscription rather than AI credits, the `.claude/` subagents, or
+  a model the Copilot CLI will not resolve for the Actions identity. Also the
+  path that keeps working when a Copilot catalogue regression takes every
+  Anthropic model off the CLI, as it did in August 2026.
+
+`agent-06-claude.yml` is inert until someone completes the setup block at the
+top of the file: the Claude GitHub App installed, one of
+`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` added as a repository secret,
+and the four labels created. Without a secret it comments what is missing on
+the target and stops, rather than failing red with an authentication error.
+
+It is one file where the Copilot side is five, because
+`anthropics/claude-code-action` performs the branch, commit, push, pull
+request and comment plumbing that those five hand-roll. What remains per role
+is a prompt path and a model, so the roles are a `case` statement rather than
+four files sharing one guard to keep in sync.
+
+Its prompts are the same `.claude/commands/*.md` files a human invokes as
+`/execute-task` — one contract per role, not a workflow copy that drifts from
+the interactive one. It addresses them by path rather than as slash commands,
+because a slash command resolving inside the action is an assumption the
+workflow does not need to make; reading a checked-out file is not.
+
+**What has not been proven.** This workflow has never run. It was written and
+reviewed but not executed, because it needs a secret only the repository owner
+can add. The first run should be a `claude:review` on a pull request that is
+already reviewed by other means, where a wrong verdict costs nothing — not a
+`claude:execute` on real work.
 
 ## Running in VS Code
 
