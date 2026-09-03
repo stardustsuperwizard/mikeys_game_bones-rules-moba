@@ -121,7 +121,12 @@ func _get_peer_name(peer_id: int) -> String:
 # Source the avatar's color. For now, returns a fixed default for every peer.
 # A future appearance system can replace only this lookup.
 func _peer_color(_peer_id: int) -> Color:
-	# Lobby's default color for all avatars
+	# Every peer gets the lobby's own authored default, read off the spawn point
+	# rather than restated as a literal here: a second copy of the colour is free
+	# to drift from the one an author edits. There is no per-character colour
+	# field to read yet (#283); when there is, only this function changes.
+	if avatar_spawn_point != null:
+		return avatar_spawn_point.color
 	return Color(0.5, 0.7, 1.0, 1.0)
 
 
