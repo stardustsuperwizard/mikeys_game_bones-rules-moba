@@ -19,7 +19,7 @@ supplied acceptance criteria.
 Fetch the Issue first:
 
 ```bash
-gh issue view <n> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh issue view <n> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,parent
 ```
 
@@ -86,7 +86,7 @@ as the body structure:
 
 ```bash
 gh pr create \
-  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+  --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --title "<summary>" \
   --body-file <prepared-body-file>
 ```

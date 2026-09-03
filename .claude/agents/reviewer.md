@@ -16,9 +16,9 @@ Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 ## Gathering context
 
 ```bash
-gh pr view <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr view <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,headRefName,isDraft,files
-gh pr diff <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba
+gh pr diff <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba
 
 gh api graphql -f owner=stardustsuperwizard -f name=sword-and-planet \
   -F number=<pr-number> -f query='
@@ -35,7 +35,7 @@ The Issue the PR closes (`closingIssuesReferences`) is the authoritative
 work contract:
 
 ```bash
-gh issue view <task-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh issue view <task-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,parent
 ```
 
@@ -131,14 +131,14 @@ what makes the result visible to `agent-03-rollup.yml`, the Issue views, and
 the control plane, exactly as `agent-04-review.yml` does:
 
 ```bash
-gh pr comment <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr comment <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --body-file <review-file>
 
 # clear the other three first, then add the one that applies
-gh pr edit <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr edit <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --remove-label review:pass --remove-label review:fix \
   --remove-label review:planning-failure --remove-label review:design-ambiguity
-gh pr edit <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr edit <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --add-label review:<pass|fix|planning-failure|design-ambiguity>
 ```
 

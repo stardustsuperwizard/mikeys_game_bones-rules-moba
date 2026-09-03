@@ -18,9 +18,9 @@ raise.
 ## Gathering context
 
 ```bash
-gh pr view <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr view <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,headRefName,closingIssuesReferences
-gh pr checkout <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba
+gh pr checkout <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba
 ```
 
 The most recent comment containing `<!-- agent-review-verdict -->` (posted

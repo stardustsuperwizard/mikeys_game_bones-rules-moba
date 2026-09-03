@@ -3,15 +3,15 @@ description: Review a pull request against its Implementation Task Issue's accep
 argument-hint: <pr-number>
 ---
 
-Review pull request #$ARGUMENTS in stardustsuperwizard/mikeys_gamebones-rules-moba.
+Review pull request #$ARGUMENTS in stardustsuperwizard/mikeys_game_bones-rules-moba.
 
 First fetch it and the Issue it closes so you have real content to hand
 off, not a guess:
 
 ```bash
-gh pr view $ARGUMENTS --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr view $ARGUMENTS --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,headRefName,isDraft,files
-gh pr diff $ARGUMENTS --repo stardustsuperwizard/mikeys_gamebones-rules-moba
+gh pr diff $ARGUMENTS --repo stardustsuperwizard/mikeys_game_bones-rules-moba
 ```
 
 If the PR doesn't exist or is still a draft, say so and confirm with the

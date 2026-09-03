@@ -124,9 +124,9 @@ that tests it: that leaves an intermediate state nobody can ship.
    type label; note it before reading the body:
 
    ```bash
-   gh issue view <n> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+   gh issue view <n> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
      --json number,title,body,milestone,url,labels
-   gh api --paginate repos/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/<n>/comments
+   gh api --paginate repos/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/<n>/comments
    ```
 
    Comments amend the Issue body — a later comment wins over the original
@@ -190,7 +190,7 @@ Use `.github/ISSUE_TEMPLATE/99-execute_task.md` as the body structure.
 
 ```bash
 gh issue create \
-  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+  --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --title "[impl] <task title>" \
   --body-file <prepared-body-file> \
   --label "implementation,machine" \
@@ -202,7 +202,7 @@ a textual "Depends On" field:
 
 ```bash
 gh issue edit <child-number> \
-  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+  --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --add-blocked-by <dependency-issue-number>
 ```
 

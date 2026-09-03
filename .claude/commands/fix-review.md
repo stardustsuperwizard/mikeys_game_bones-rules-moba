@@ -3,14 +3,14 @@ description: Apply a bounded correction to a PR in response to its review:fix ve
 argument-hint: <pr-number>
 ---
 
-Fix pull request #$ARGUMENTS in stardustsuperwizard/mikeys_gamebones-rules-moba per its
+Fix pull request #$ARGUMENTS in stardustsuperwizard/mikeys_game_bones-rules-moba per its
 latest automated review.
 
 First fetch the PR and its review comments so you have the real verdict, not
 a guess:
 
 ```bash
-gh pr view $ARGUMENTS --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr view $ARGUMENTS --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,headRefName,labels,comments
 ```
 

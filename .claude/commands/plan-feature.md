@@ -3,16 +3,16 @@ description: Plan an intake Issue of any type (Feature, Task, Bug, Infrastructur
 argument-hint: <intake-issue-number>
 ---
 
-Plan intake Issue #$ARGUMENTS in stardustsuperwizard/mikeys_gamebones-rules-moba.
+Plan intake Issue #$ARGUMENTS in stardustsuperwizard/mikeys_game_bones-rules-moba.
 
 First fetch it and its comments so you have real content to hand off, not a
 guess. The `labels` field carries the type label, which tells the planner
 which sections the body has and which it must derive:
 
 ```bash
-gh issue view $ARGUMENTS --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh issue view $ARGUMENTS --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,milestone,url,labels
-gh api --paginate repos/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/$ARGUMENTS/comments
+gh api --paginate repos/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/$ARGUMENTS/comments
 ```
 
 Stop and say so, rather than proceeding, if the Issue:
