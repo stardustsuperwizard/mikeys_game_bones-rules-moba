@@ -36,22 +36,63 @@ var _weapon_label: Label
 var _action_slot_labels: Array[Label] = []
 var _passive_slot_label: Label
 var _stats_container: VBoxContainer
+var _detail_container: VBoxContainer
 var _peers_container: VBoxContainer
 var _close_button: Button
 
-# The lobby this panel inspects through. Resolved by path rather than exported
-# so the panel scene stays instantiable on its own in a test.
-@onready var _lobby_manager: LobbyManager = get_node_or_null(^"../../LobbyManager")
+# The lobby this panel inspects through, set by bind_lobby().
+var _lobby_manager: LobbyManager
 
 
 func _ready() -> void:
 	_resolve_controls()
 
+	# Found by path rather than exported so the scene stays instantiable on its
+	# own; binding is a separate step so the wiring is exercised the same way
+	# whether the lobby is found here or handed over directly.
+	bind_lobby(get_node_or_null(^"../../LobbyManager") as LobbyManager)
+
+	# The panel stays on screen: it carries the only affordance for selecting a
+	# peer, so hiding it would leave the request path unreachable in a running
+	# game. Only the read-out for one build is hidden until a reply arrives.
+	if _detail_container != null:
+		_detail_container.hide()
+
+
+## Point this panel at a lobby, connecting the signals it needs and rebuilding
+## the peer list. Safe to call again with a different lobby, or with null.
+func bind_lobby(lobby_manager: LobbyManager) -> void:
+	if _lobby_manager == lobby_manager:
+		refresh_peer_list()
+		return
+
+	if _lobby_manager != null and is_instance_valid(_lobby_manager):
+		_lobby_manager.build_inspection_received.disconnect(_on_build_inspection_received)
+		_lobby_manager.child_entered_tree.disconnect(_on_lobby_presence_changed)
+		_lobby_manager.child_exiting_tree.disconnect(_on_lobby_presence_changed)
+
+	_lobby_manager = lobby_manager
+
 	if _lobby_manager != null:
 		_lobby_manager.build_inspection_received.connect(_on_build_inspection_received)
 
+		# Presence changes after _ready(), on both routes: the host spawns remote
+		# avatars as peers connect, and a client receives them through the
+		# spawner. Watching the lobby's children covers both, where connecting to
+		# multiplayer.peer_connected alone would miss the replicated case. Without
+		# this the list is whatever existed for one frame at startup -- on a host,
+		# only its own avatar, which is never offered.
+		_lobby_manager.child_entered_tree.connect(_on_lobby_presence_changed)
+		_lobby_manager.child_exiting_tree.connect(_on_lobby_presence_changed)
+
 	refresh_peer_list()
-	hide()
+
+
+# A child entering or leaving the lobby is a peer arriving or going. Deferred
+# because child_exiting_tree fires while the departing avatar is still parented,
+# so refreshing now would re-list the peer that is on its way out.
+func _on_lobby_presence_changed(_child: Node) -> void:
+	refresh_peer_list.call_deferred()
 
 
 ## Rebuild the "inspect this peer" list from the lobby avatars currently present.
@@ -121,19 +162,23 @@ func _resolve_controls() -> void:
 	if box == null:
 		return
 
-	_character_name_label = box.get_node_or_null(^"CharacterNameLabel")
-	_weapon_label = box.get_node_or_null(^"WeaponLabel")
-	_passive_slot_label = box.get_node_or_null(^"PassiveLabel")
-	_stats_container = box.get_node_or_null(^"StatsContainer")
 	_peers_container = box.get_node_or_null(^"PeersContainer")
-	_close_button = box.get_node_or_null(^"CloseButton")
+	_detail_container = box.get_node_or_null(^"DetailContainer")
+	if _detail_container == null:
+		return
 
-	var disciplines := box.get_node_or_null(^"DisciplinesContainer")
+	_character_name_label = _detail_container.get_node_or_null(^"CharacterNameLabel")
+	_weapon_label = _detail_container.get_node_or_null(^"WeaponLabel")
+	_passive_slot_label = _detail_container.get_node_or_null(^"PassiveLabel")
+	_stats_container = _detail_container.get_node_or_null(^"StatsContainer")
+	_close_button = _detail_container.get_node_or_null(^"CloseButton")
+
+	var disciplines := _detail_container.get_node_or_null(^"DisciplinesContainer")
 	if disciplines != null:
 		_primary_discipline_label = disciplines.get_node_or_null(^"PrimaryDisciplineLabel")
 		_secondary_discipline_label = disciplines.get_node_or_null(^"SecondaryDisciplineLabel")
 
-	var actions := box.get_node_or_null(^"ActionsContainer")
+	var actions := _detail_container.get_node_or_null(^"ActionsContainer")
 	if actions != null:
 		for i in range(4):
 			var label := actions.get_node_or_null("Action%dLabel" % (i + 1)) as Label
@@ -155,7 +200,8 @@ func _on_build_inspection_received(encoded_build: Dictionary) -> void:
 	else:
 		_display_build(encoded_build)
 
-	show()
+	if _detail_container != null:
+		_detail_container.show()
 
 	# Put focus somewhere reachable the moment the panel opens, so a gamepad or
 	# keyboard user is never left with focus on a control behind the panel.
@@ -235,14 +281,23 @@ func _display_stat_allocation(stat_allocation: Dictionary) -> void:
 	# Keys arrive as StringName (MobaCharacterBuild types the allocation
 	# Dictionary[StringName, int]) and are formatted through str(), not iterated
 	# as String, which would not match the key type.
+	# Every submitted entry is rendered, including an explicit 0. The Issue asks
+	# for the full allocation, and dropping a zero would show a build the player
+	# did not submit -- a stat they deliberately left at baseline reads the same
+	# as one they never allocated at all.
 	for stat_name in stat_allocation:
 		var value: int = stat_allocation[stat_name]
-		if value == 0:
-			continue
-
 		var stat_label := Label.new()
-		stat_label.text = "%s: %+d" % [str(stat_name).capitalize(), value]
+		stat_label.text = "%s: %s" % [str(stat_name).capitalize(), _signed(value)]
 		_stats_container.add_child(stat_label)
+
+
+# A signed allocation reads as a delta on the baseline, except at 0, where "+0"
+# would be noise.
+func _signed(value: int) -> String:
+	if value > 0:
+		return "+%d" % value
+	return "%d" % value
 
 
 func _show_not_present() -> void:
@@ -265,4 +320,14 @@ func _show_not_present() -> void:
 
 
 func _on_close_pressed() -> void:
-	hide()
+	if _detail_container != null:
+		_detail_container.hide()
+
+	# Hand focus back to the list the panel was opened from, so closing does not
+	# strand a gamepad or keyboard user on a control that just disappeared.
+	if _peers_container != null:
+		for child in _peers_container.get_children():
+			var button := child as Button
+			if button != null:
+				button.grab_focus()
+				return

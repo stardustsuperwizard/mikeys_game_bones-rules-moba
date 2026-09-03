@@ -41,6 +41,9 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"panel controls are focusable and touch-sized",
 	"inspection is idempotent and does not mutate stored state",
 	"panel offers a focusable entry point per present peer",
+	"selection is reachable before any inspection",
+	"peer list follows presence changes after ready",
+	"a zero-valued stat is rendered, not dropped",
 ]
 
 var _failures: Array[String] = []
@@ -60,6 +63,9 @@ func _run() -> void:
 	await _test_panel_controls_are_accessible()
 	_test_inspection_is_idempotent()
 	await _test_panel_lists_present_peers()
+	await _test_selection_is_reachable_before_any_inspection()
+	await _test_peer_list_follows_presence()
+	await _test_zero_stat_is_rendered()
 
 	_finish()
 
@@ -319,8 +325,7 @@ func _test_panel_lists_present_peers() -> void:
 
 	# The panel resolves its lobby by path; in the real scene it hangs off a
 	# CanvasLayer beside LobbyManager, so point it at this one directly.
-	panel._lobby_manager = manager
-	panel.refresh_peer_list()
+	panel.bind_lobby(manager)
 
 	var buttons := _find_buttons(panel)
 	var peer_buttons: Array[Button] = []
@@ -339,6 +344,113 @@ func _test_panel_lists_present_peers() -> void:
 
 	_pass("panel offers a focusable entry point per present peer")
 	manager.queue_free()
+
+
+## The selection affordance is on screen from the start.
+##
+## Regression guard: the peer buttons once lived inside a panel hidden in
+## _ready(), and the only code that revealed it ran on an inspection reply --
+## which needed one of those hidden buttons pressed first. Every criterion held
+## in the harness while no player could reach the feature at all.
+func _test_selection_is_reachable_before_any_inspection() -> void:
+	var manager := _make_lobby_manager()
+	_spawn_avatar(manager, _PEER_LIST_A)
+
+	var panel := _PANEL_SCENE.instantiate() as LobbyBuildInspector
+	manager.add_child(panel)
+	await process_frame
+
+	panel.bind_lobby(manager)
+	await process_frame
+
+	var reachable: Array[Button] = []
+	for button in _find_buttons(panel):
+		if button.text.begins_with("Inspect peer") and button.is_visible_in_tree():
+			reachable.append(button)
+
+	if reachable.is_empty():
+		_fail_cleanup("no peer button is visible without a prior inspection", [manager])
+		return
+
+	_pass("selection is reachable before any inspection")
+	manager.queue_free()
+
+
+## A peer arriving after the panel is ready appears in the list, and one leaving
+## drops out of it -- without anyone calling refresh_peer_list() by hand.
+func _test_peer_list_follows_presence() -> void:
+	var manager := _make_lobby_manager()
+
+	var panel := _PANEL_SCENE.instantiate() as LobbyBuildInspector
+	manager.add_child(panel)
+	await process_frame
+
+	panel.bind_lobby(manager)
+
+	if _count_peer_buttons(panel) != 0:
+		_fail_cleanup("expected an empty list before anyone is present", [manager])
+		return
+
+	_spawn_avatar(manager, _PEER_LIST_A)
+	_spawn_avatar(manager, _PEER_LIST_B)
+	await process_frame
+	await process_frame
+
+	if _count_peer_buttons(panel) != 2:
+		_fail_cleanup(
+			"list did not follow two arrivals (got %d)" % _count_peer_buttons(panel), [manager]
+		)
+		return
+
+	manager._on_peer_disconnected(_PEER_LIST_B)
+	await process_frame
+	await process_frame
+
+	if _count_peer_buttons(panel) != 1:
+		_fail_cleanup(
+			"list did not follow a departure (got %d)" % _count_peer_buttons(panel), [manager]
+		)
+		return
+
+	_pass("peer list follows presence changes after ready")
+	manager.queue_free()
+
+
+## An explicitly submitted 0 is part of "the full stat allocation" and is shown.
+func _test_zero_stat_is_rendered() -> void:
+	var panel := _PANEL_SCENE.instantiate() as LobbyBuildInspector
+	root.add_child(panel)
+	await process_frame
+
+	panel._display_stat_allocation({&"health": 0, &"armor": 3})
+
+	var rendered: Array[String] = []
+	if panel._stats_container != null:
+		for child in panel._stats_container.get_children():
+			var label := child as Label
+			if label != null and label.name != "StatsLabel":
+				rendered.append(label.text)
+
+	var joined := ", ".join(rendered)
+	if not joined.contains("Health"):
+		_fail_cleanup("a zero-valued stat was dropped (rendered: %s)" % joined, [panel])
+		return
+
+	if not joined.contains("+3"):
+		_fail_cleanup("a positive stat lost its sign (rendered: %s)" % joined, [panel])
+		return
+
+	_pass("a zero-valued stat is rendered, not dropped")
+	panel.queue_free()
+
+
+## Visible peer buttons currently offered by the panel.
+func _count_peer_buttons(panel: LobbyBuildInspector) -> int:
+	var count := 0
+	for button in _find_buttons(panel):
+		if button.text.begins_with("Inspect peer"):
+			count += 1
+	return count
 
 
 ## Every Button in a subtree, so a check covers controls added at runtime too.
