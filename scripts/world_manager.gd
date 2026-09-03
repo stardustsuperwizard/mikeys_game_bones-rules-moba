@@ -124,19 +124,23 @@ func _spawn_actor(data: Dictionary) -> Actor:
 	# matching character_sheet/color above -- spawn initialization, not a
 	# mutator-method call, so command_mutator_contract_test.gd stays satisfied.
 	#
-	# stat_block is assigned before the actor enters the tree, which is what makes
-	# it stick: MobaCombatant seeds its runtime stat block from this property, so
-	# an effective block set here is the one health and resource are sized from.
-	#
 	# Only when the payload carries a build. World and bot actors are spawned
 	# without one and are left exactly as their scene authored them -- equipping
 	# them from the per-peer fallback would be a silent balance change to actors
-	# that have no build to submit in the first place.
+	# that have no build to submit in the first place, and renaming them would
+	# take the Goblin's authored "Enemy" away with it.
 	var combatant := actor.get_node_or_null("MobaCombatant") as MobaCombatant
-	if combatant != null and data.has("build"):
+	if data.has("build"):
 		var build := _decode_build(data["build"])
-		combatant.stat_block = build.get_effective_stat_block(_BASELINE_STAT_BLOCK)
-		combatant.loadout = build.loadout
+		_apply_build_name(actor, build)
+
+		# stat_block is assigned before the actor enters the tree, which is what
+		# makes it stick: MobaCombatant seeds its runtime stat block from this
+		# property, so an effective block set here is the one health and resource
+		# are sized from.
+		if combatant != null:
+			combatant.stat_block = build.get_effective_stat_block(_BASELINE_STAT_BLOCK)
+			combatant.loadout = build.loadout
 
 	# Set multiplayer authority for the actor and its movement body
 	# (connecting peer stays authoritative for movement).
@@ -153,6 +157,44 @@ func _spawn_actor(data: Dictionary) -> Actor:
 		state_machine.set_multiplayer_authority(1)
 
 	return actor
+
+
+# Put the build's character_name on the actor's own sheet, which is what
+# rules/ui/moba_target_frame.gd reads to label a target.
+#
+# The duplicate() is load-bearing, not defensive copying. _spawn_actor() assigns
+# actor.character_sheet from load(), and load() hands back Godot's cached,
+# shared instance of the .tres -- every player spawn point references the same
+# resources/player_character_sheet.tres. Setting character_name on that instance
+# writes the name into the object the *next* spawn starts from.
+#
+# Actor._ready() does duplicate the sheet, so each actor still ends up holding
+# its own object and two named players still read back correctly. The damage is
+# narrower and easier to miss: a spawn that has no name to apply -- world and
+# bot content, and any build whose name is empty -- inherits whatever the last
+# named spawn left behind. tests/build_spawn_integration_test.gd pins this as
+# "a build with no name leaves the spawn point's authored name alone", which
+# fails with the actor named "Warrior Bruiser" if this duplicate() is removed.
+#
+# LobbyManager._spawn_avatar() duplicates before assigning for the same reason.
+#
+# An empty name is left alone rather than written through, and that guard is
+# load-bearing rather than defensive: the non-empty check lives in
+# scripts/character_creation.gd's save path, on the client, while
+# MobaBuildValidator -- the one the server re-runs on submission -- does not
+# look at character_name at all. So an empty name is a shape the server can
+# legitimately accept, and writing it through would blank the sheet and send
+# the target frame to its node-name fallback ("Player" the node, rather than
+# "Player" the sheet -- no better, and now unauthored).
+func _apply_build_name(actor: Actor, build: MobaCharacterBuild) -> void:
+	if build.character_name.is_empty():
+		return
+	if actor.character_sheet == null:
+		return
+
+	var sheet := actor.character_sheet.duplicate() as CharacterSheet
+	sheet.character_name = build.character_name
+	actor.character_sheet = sheet
 
 
 ## Called when a peer connects to the session.
