@@ -11,6 +11,9 @@ extends Resource
 ## Character display name.
 @export var character_name: String = ""
 
+## Character appearance (helmet, chest piece, color scheme).
+@export var appearance: MobaAppearance = null
+
 ## Primary combat Discipline, defining which abilities are available.
 @export var primary_discipline: MobaAbility.Discipline = MobaAbility.Discipline.WARRIOR
 
