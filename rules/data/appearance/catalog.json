@@ -1,0 +1,15 @@
+{
+  "helms": [
+    "basic_helm",
+    "iron_helm"
+  ],
+  "chests": [
+    "basic_chest",
+    "leather_chest"
+  ],
+  "color_schemes": [
+    "crimson",
+    "azure",
+    "emerald"
+  ]
+}

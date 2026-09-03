@@ -9,6 +9,8 @@ const MobaCharacterBuild = preload("res://rules/abilities/moba_character_build.g
 const MobaBuildValidator = preload("res://rules/abilities/moba_build_validator.gd")
 const MobaStatAllocationPolicy = preload("res://rules/core/moba_stat_allocation_policy.gd")
 const MobaLoadout = preload("res://rules/abilities/moba_loadout.gd")
+const MobaAppearance = preload("res://rules/appearance/moba_appearance.gd")
+const MobaAppearanceValidator = preload("res://rules/appearance/moba_appearance_validator.gd")
 const MobaWeapon = preload("res://rules/core/moba_weapon.gd")
 const _ALLOCATION_POLICY = preload("res://rules/data/stat_blocks/stat_allocation_policy.tres")
 const _TEMPLATE_BUILD = preload("res://rules/data/builds/melee_bruiser_build.tres")
@@ -33,6 +35,15 @@ const _ADVENTURER := 5
 static func run() -> bool:
 	var results: Array[bool] = []
 
+	results.append(_test_empty_character_name_refused())
+	results.append(_test_character_name_too_long_refused())
+	results.append(_test_character_name_invalid_characters_refused())
+	results.append(_test_character_name_with_valid_characters_legal())
+	results.append(_test_appearance_with_unknown_helm_refused())
+	results.append(_test_appearance_with_unknown_chest_refused())
+	results.append(_test_appearance_with_unknown_color_scheme_refused())
+	results.append(_test_appearance_does_not_affect_stat_block())
+	results.append(_test_appearance_does_not_affect_loadout())
 	results.append(_test_primary_equals_secondary_refused())
 	results.append(_test_legal_3_1_discipline_split())
 	results.append(_test_legal_2_2_discipline_split())
@@ -81,9 +92,197 @@ static func _make_build(
 ## Report a mismatch between the expected and actual validator verdict.
 static func _expect(label: String, actual: StringName, expected: StringName) -> bool:
 	if actual != expected:
-		print("ERROR: %s -- expected '%s', got '%s'" % [label, String(expected), String(actual)])
+		printerr("ERROR: %s -- expected '%s', got '%s'" % [label, String(expected), String(actual)])
 		return false
 	return true
+
+
+## An empty character name is refused with FAILURE_NAME_EMPTY.
+static func _test_empty_character_name_refused() -> bool:
+	var build := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	build.character_name = ""
+
+	return _expect(
+		"empty character_name",
+		MobaBuildValidator.validate(build, _ALLOCATION_POLICY),
+		MobaBuildValidator.FAILURE_NAME_EMPTY
+	)
+
+
+## A character name exceeding MAX_NAME_LENGTH is refused with FAILURE_NAME_TOO_LONG.
+static func _test_character_name_too_long_refused() -> bool:
+	var build := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	# Create a name longer than MAX_NAME_LENGTH (32)
+	build.character_name = "a".repeat(MobaBuildValidator.MAX_NAME_LENGTH + 1)
+
+	return _expect(
+		"character_name exceeds MAX_NAME_LENGTH",
+		MobaBuildValidator.validate(build, _ALLOCATION_POLICY),
+		MobaBuildValidator.FAILURE_NAME_TOO_LONG
+	)
+
+
+## A character name with invalid characters is refused with FAILURE_NAME_INVALID_CHARACTERS.
+static func _test_character_name_invalid_characters_refused() -> bool:
+	var build := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	build.character_name = "Invalid@Name"  # @ is not allowed
+
+	return _expect(
+		"character_name with invalid characters",
+		MobaBuildValidator.validate(build, _ALLOCATION_POLICY),
+		MobaBuildValidator.FAILURE_NAME_INVALID_CHARACTERS
+	)
+
+
+## A character name with valid characters (letters, digits, spaces, underscores) is legal.
+static func _test_character_name_with_valid_characters_legal() -> bool:
+	var build := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	build.character_name = "Brave Knight 42_v2"  # Mix of valid characters
+
+	return _expect(
+		"character_name with valid characters",
+		MobaBuildValidator.validate(build, _ALLOCATION_POLICY),
+		&""
+	)
+
+
+## An unknown helm id is refused with the appearance validator's reason, verbatim.
+static func _test_appearance_with_unknown_helm_refused() -> bool:
+	var build := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	build.character_name = "ValidName"
+	var appearance := MobaAppearance.new()
+	appearance.helm_id = "nonexistent_helm"
+	build.appearance = appearance
+
+	return _expect(
+		"appearance with unknown helm_id",
+		MobaBuildValidator.validate(build, _ALLOCATION_POLICY),
+		MobaAppearanceValidator.FAILURE_UNKNOWN_HELM
+	)
+
+
+## An unknown chest id is refused with the appearance validator's reason, verbatim.
+static func _test_appearance_with_unknown_chest_refused() -> bool:
+	var build := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	build.character_name = "ValidName"
+	var appearance := MobaAppearance.new()
+	appearance.chest_id = "nonexistent_chest"
+	build.appearance = appearance
+
+	return _expect(
+		"appearance with unknown chest_id",
+		MobaBuildValidator.validate(build, _ALLOCATION_POLICY),
+		MobaAppearanceValidator.FAILURE_UNKNOWN_CHEST
+	)
+
+
+## An unknown colour scheme id is refused with the appearance validator's reason, verbatim.
+static func _test_appearance_with_unknown_color_scheme_refused() -> bool:
+	var build := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	build.character_name = "ValidName"
+	var appearance := MobaAppearance.new()
+	appearance.color_scheme_id = "nonexistent_scheme"
+	build.appearance = appearance
+
+	return _expect(
+		"appearance with unknown color_scheme_id",
+		MobaBuildValidator.validate(build, _ALLOCATION_POLICY),
+		MobaAppearanceValidator.FAILURE_UNKNOWN_COLOR_SCHEME
+	)
+
+
+## Changing appearance between two otherwise identical builds produces identical
+## get_effective_stat_block() output.
+##
+## The comparison is over a plain-value snapshot of every stat, not over the
+## MobaStatBlock resources themselves: var_to_bytes() does not serialize an
+## Object's contents, so comparing two resource instances directly compares
+## identity and would answer the same way whatever appearance did.
+static func _test_appearance_does_not_affect_stat_block() -> bool:
+	var appearance1 := MobaAppearance.new()
+	appearance1.helm_id = &"basic_helm"
+	appearance1.chest_id = &"basic_chest"
+	appearance1.color_scheme_id = &"crimson"
+
+	var appearance2 := MobaAppearance.new()
+	appearance2.helm_id = &"iron_helm"
+	appearance2.chest_id = &"leather_chest"
+	appearance2.color_scheme_id = &"azure"
+
+	var allocation: Dictionary[StringName, int] = {MobaStatBlock.ATTACK_DAMAGE: 5}
+	var build1 := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"], "", allocation)
+	build1.character_name = "TestChar"
+	build1.appearance = appearance1
+
+	var build2 := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"], "", allocation)
+	build2.character_name = "TestChar"
+	build2.appearance = appearance2
+
+	var baseline := MobaStatBlock.new()
+	var bytes1 := var_to_bytes(_stat_snapshot(build1.get_effective_stat_block(baseline)))
+	var bytes2 := var_to_bytes(_stat_snapshot(build2.get_effective_stat_block(baseline)))
+
+	if bytes1 != bytes2:
+		printerr("ERROR: appearance affects stat block; byte representations differ")
+		return false
+
+	# Both builds must still be legal, or the comparison proved nothing.
+	if MobaBuildValidator.validate(build1, _ALLOCATION_POLICY) != &"":
+		printerr("ERROR: appearance stat-block fixture build1 is not legal")
+		return false
+	if MobaBuildValidator.validate(build2, _ALLOCATION_POLICY) != &"":
+		printerr("ERROR: appearance stat-block fixture build2 is not legal")
+		return false
+
+	return true
+
+
+## Every stat value in declaration order, as plain floats.
+##
+## get_valid_stats() fixes the order, so the resulting array is a deterministic
+## value-only view of the block that var_to_bytes() can encode faithfully.
+static func _stat_snapshot(block: MobaStatBlock) -> Array[float]:
+	var snapshot: Array[float] = []
+	for stat_name in MobaStatBlock.get_valid_stats():
+		snapshot.append(block.get_stat_value(stat_name))
+	return snapshot
+
+
+## Changing appearance between two otherwise identical builds leaves loadout unchanged.
+##
+## Compared as a plain-value snapshot for the same reason as the stat block above.
+static func _test_appearance_does_not_affect_loadout() -> bool:
+	var appearance1 := MobaAppearance.new()
+	appearance1.helm_id = &"basic_helm"
+
+	var appearance2 := MobaAppearance.new()
+	appearance2.helm_id = &"iron_helm"
+
+	var build1 := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	build1.character_name = "TestChar"
+	build1.appearance = appearance1
+
+	var build2 := _make_build(_WARRIOR, _GUARDIAN, ["power_strike", "brace"])
+	build2.character_name = "TestChar"
+	build2.appearance = appearance2
+
+	var bytes1 := var_to_bytes(_loadout_snapshot(build1.loadout))
+	var bytes2 := var_to_bytes(_loadout_snapshot(build2.loadout))
+
+	if bytes1 != bytes2:
+		printerr("ERROR: appearance affects loadout; byte representations differ")
+		return false
+
+	return true
+
+
+## Every occupied slot id in slot order, as plain strings.
+static func _loadout_snapshot(loadout: MobaLoadout) -> Array[String]:
+	var snapshot: Array[String] = []
+	for i in range(1, 5):
+		snapshot.append(loadout.get_action_slot(i))
+	snapshot.append(loadout.get_passive_slot())
+	return snapshot
 
 
 ## Primary equal to secondary is refused with FAILURE_DISCIPLINES_NOT_DISTINCT.

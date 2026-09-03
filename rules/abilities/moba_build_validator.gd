@@ -7,9 +7,23 @@
 ## All methods are static, take plain resource arguments, and touch no node
 ## and no scene tree. The same "pure" bar MobaFormulas documents, enabling
 ## unit testing and deterministic validation.
+##
+## ## Duplicate Names and Offensive Content
+##
+## The validator does not check for duplicate character names or offensive content.
+## No cross-peer name registry exists to check duplicates against, and no third-party
+## moderation dependency is permitted in the rules module. These policies must be
+## enforced by the application layer (server submission, account system, or moderators)
+## rather than in the portable rules engine.
 class_name MobaBuildValidator
 
+## Maximum allowed character name length.
+const MAX_NAME_LENGTH: int = 32
+
 ## Failure reasons returned as StringName (mirroring MobaAbilityAction convention)
+const FAILURE_NAME_EMPTY = &"name_empty"
+const FAILURE_NAME_TOO_LONG = &"name_too_long"
+const FAILURE_NAME_INVALID_CHARACTERS = &"name_invalid_characters"
 const FAILURE_DISCIPLINES_NOT_DISTINCT = &"disciplines_not_distinct"
 const FAILURE_LOADOUT_INVALID = &"loadout_invalid"
 const FAILURE_UNKNOWN_ABILITY = &"unknown_ability"
@@ -25,9 +39,23 @@ const FAILURE_STAT_POOL_OVERSPENT = &"stat_pool_overspent"
 ## Returns &"" when legal, otherwise exactly one of the FAILURE_* constants.
 ## This is the authoritative legality gate both the creation UI and the
 ## server-side submission command must call.
+##
+## Validation order: character_name, appearance, disciplines, loadout,
+## abilities, then stat allocation. Character name is checked first so that
+## invalid names are rejected early regardless of build content.
 static func validate(
 	build: MobaCharacterBuild, allocation_policy: MobaStatAllocationPolicy
 ) -> StringName:
+	# Check character name first
+	var failure := _check_character_name(build.character_name)
+	if failure != &"":
+		return failure
+
+	# Check appearance
+	failure = MobaAppearanceValidator.validate(build.appearance)
+	if failure != &"":
+		return failure
+
 	# Check primary != secondary
 	if build.primary_discipline == build.secondary_discipline:
 		return FAILURE_DISCIPLINES_NOT_DISTINCT
@@ -37,7 +65,7 @@ static func validate(
 		return FAILURE_LOADOUT_INVALID
 
 	# Check all equipped abilities exist and belong to primary/secondary
-	var failure := _check_abilities(build)
+	failure = _check_abilities(build)
 	if failure != &"":
 		return failure
 
@@ -45,6 +73,33 @@ static func validate(
 	failure = _check_stat_allocation(build, allocation_policy)
 	if failure != &"":
 		return failure
+
+	return &""
+
+
+## Check that the character name is valid.
+## Returns empty StringName if legal, otherwise a FAILURE_* constant.
+## Accepts only characters that character_creation.gd's _sanitize_filename()
+## policy accepts unchanged: a-z, A-Z, 0-9, space, underscore, then stripped.
+static func _check_character_name(name: String) -> StringName:
+	# Empty names are rejected
+	if name.is_empty():
+		return FAILURE_NAME_EMPTY
+
+	# Check length (after any whitespace is not yet stripped, but compare as-is)
+	if name.length() > MAX_NAME_LENGTH:
+		return FAILURE_NAME_TOO_LONG
+
+	# Check character set: only letters, digits, spaces, and underscores allowed
+	for char in name:
+		if not (
+			(char >= "a" and char <= "z")
+			or (char >= "A" and char <= "Z")
+			or (char >= "0" and char <= "9")
+			or char == " "
+			or char == "_"
+		):
+			return FAILURE_NAME_INVALID_CHARACTERS
 
 	return &""
 
