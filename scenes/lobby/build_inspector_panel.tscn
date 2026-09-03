@@ -1,0 +1,122 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/lobby_build_inspector.gd" id="1"]
+
+; A full-rect transparent overlay that only positions the Panel; mouse_filter
+; ignore so it never eats a click meant for the lobby behind it.
+;
+; The panel itself is always on screen: it carries the selection affordance, so
+; hiding it would make the whole feature unreachable. Only DetailContainer --
+; the read-out for one inspected build -- is hidden until a reply arrives.
+[node name="BuildInspectorPanel" type="Control"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1")
+
+; The right-hand quarter of the screen, clear of StartMatchButton's top-left
+; corner in scenes/lobby/lobby.tscn.
+[node name="Panel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.75
+anchor_top = 0.05
+anchor_right = 0.99
+anchor_bottom = 0.95
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+; Always visible. This is the "select another visible lobby avatar" affordance,
+; and it is rebuilt whenever lobby presence changes.
+[node name="PeersContainer" type="VBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="PeersLabel" type="Label" parent="Panel/VBoxContainer/PeersContainer"]
+layout_mode = 2
+text = "Inspect a player:"
+
+[node name="DetailContainer" type="VBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+visible = false
+theme_override_constants/separation = 8
+
+[node name="CharacterNameLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer"]
+layout_mode = 2
+text = "Character Name"
+
+[node name="DisciplinesContainer" type="HBoxContainer" parent="Panel/VBoxContainer/DetailContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PrimaryDisciplineLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer/DisciplinesContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Primary: Warrior"
+
+[node name="SecondaryDisciplineLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer/DisciplinesContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Secondary: Guardian"
+
+[node name="WeaponLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer"]
+layout_mode = 2
+text = "Weapon: Long Sword"
+
+[node name="ActionsContainer" type="VBoxContainer" parent="Panel/VBoxContainer/DetailContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ActionsLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer/ActionsContainer"]
+layout_mode = 2
+text = "Actions:"
+
+[node name="Action1Label" type="Label" parent="Panel/VBoxContainer/DetailContainer/ActionsContainer"]
+layout_mode = 2
+text = "Action 1: Ability Name"
+
+[node name="Action2Label" type="Label" parent="Panel/VBoxContainer/DetailContainer/ActionsContainer"]
+layout_mode = 2
+text = "Action 2: Ability Name"
+
+[node name="Action3Label" type="Label" parent="Panel/VBoxContainer/DetailContainer/ActionsContainer"]
+layout_mode = 2
+text = "Action 3: Ability Name"
+
+[node name="Action4Label" type="Label" parent="Panel/VBoxContainer/DetailContainer/ActionsContainer"]
+layout_mode = 2
+text = "Action 4: Ability Name"
+
+[node name="PassiveLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer"]
+layout_mode = 2
+text = "Passive: Ability Name"
+
+[node name="StatsContainer" type="VBoxContainer" parent="Panel/VBoxContainer/DetailContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="StatsLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer/StatsContainer"]
+layout_mode = 2
+text = "Stats:"
+
+[node name="CloseButton" type="Button" parent="Panel/VBoxContainer/DetailContainer"]
+custom_minimum_size = Vector2(60, 60)
+layout_mode = 2
+focus_mode = 2
+text = "Close"

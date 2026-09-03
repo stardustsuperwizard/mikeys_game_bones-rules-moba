@@ -1,9 +1,10 @@
-[gd_scene load_steps=19 format=3]
+[gd_scene load_steps=20 format=3]
 
 [ext_resource type="Script" path="res://scripts/lobby.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/third_person_camera_3d.gd" id="2"]
 [ext_resource type="Script" path="res://scripts/lobby_manager.gd" id="3"]
 [ext_resource type="Resource" path="res://resources/lobby_player_spawn_point.tres" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/lobby/build_inspector_panel.tscn" id="5"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(20, 0.2, 20)
@@ -129,6 +130,9 @@ offset_top = 16.0
 offset_right = 216.0
 offset_bottom = 56.0
 text = "Start Match"
+
+; Build inspector panel for viewing another peer's character build
+[node name="BuildInspectorPanel" parent="CanvasLayer" instance=ExtResource("5")]
 
 ; Resolved in the camera's own _ready(), which runs after LobbyManager's --
 ; by then LobbyManager has spawned this peer's own avatar, and it is the only
