@@ -1300,8 +1300,21 @@ Which to reach for:
 `agent-06-claude.yml` is inert until someone completes the setup block at the
 top of the file: the Claude GitHub App installed, one of
 `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` added as a repository secret,
-and the four labels created. Without a secret it comments what is missing on
-the target and stops, rather than failing red with an authentication error.
+and the four labels created. Without a secret it comments on the target saying
+which one is missing and then fails the run deliberately — the comment so the
+cause is readable from a phone, the failure so a request that never ran is not
+sitting in the checks list looking like one that did. What it avoids is the
+bare authentication error that says neither.
+
+One further secret is optional, and only matters for the roles that push.
+Unset, the session acts as `GITHUB_TOKEN`, and GitHub starts no workflow run
+from a pull request authored by that identity — so `godot-ci-validation.yml`
+and `gdscript-lint.yml`, both of which trigger on `pull_request`, would never
+run on a `claude:execute` PR. `agent-02-execute.yml` pushes the same way and
+has the same gap, so this is a repository-wide condition rather than one this
+workflow introduces. Setting `AGENT_GITHUB_TOKEN` — a PAT or App installation
+token with `contents: write` and `pull-requests: write` — makes the session act
+as that identity instead, and its pull requests do start CI.
 
 It is one file where the Copilot side is five, because
 `anthropics/claude-code-action` performs the branch, commit, push, pull

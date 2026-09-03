@@ -45,8 +45,20 @@
 #   3. Create the four labels: claude:plan, claude:execute, claude:review,
 #      claude:fix
 #
-# Without a secret the guard below comments what is missing and stops, rather
-# than failing red with an authentication error.
+# Optional, and only for the roles that push:
+#
+#   4. AGENT_GITHUB_TOKEN -- a PAT or App installation token carrying
+#      `contents: write` and `pull-requests: write`. Unset, the session acts
+#      as GITHUB_TOKEN and the pull requests it opens start no CI, because
+#      GitHub does not trigger workflows from that identity. See the identity
+#      note on the session step for the full reasoning.
+#
+# Without one of the step-2 secrets, the guard below comments on the target
+# saying which one is missing, and then fails the run on purpose. Both halves
+# are the point: the comment is what makes it diagnosable from a phone, and
+# the red mark is what keeps a request that never ran from sitting in the
+# checks list looking like one that did. What it does not do is fail with a
+# bare authentication error that says nothing about the cause.
 
 name: Agent - AW06 Claude Code
 
@@ -117,6 +129,10 @@ jobs:
         with:
           # The session needs history to branch from and to diff against.
           fetch-depth: 0
+          # This is the credential actions/checkout persists into .git/config,
+          # so it is what the session's `git push` authenticates as. See the
+          # identity note on the session step below for why that matters.
+          token: ${{ secrets.AGENT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Resolve Role And Target
         id: route
@@ -228,7 +244,8 @@ jobs:
       # A guard failure that says nothing is the failure mode agent-04 called
       # out: the run goes red, the target looks untouched, and nobody knows
       # why. Say it on the target itself, where the person who added the
-      # label is looking.
+      # label is looking -- and then still fail, so the run is not green.
+      # Commenting and failing are complementary here, not alternatives.
       - name: Report Guard Failure
         if: steps.route.outputs.ok != 'true'
         env:
@@ -264,11 +281,29 @@ jobs:
            steps.route.outputs.role == 'fix')
         uses: ./.github/actions/setup-godot
 
-      # `github_token` is deliberately not passed. With it, the session's
-      # commits are authored by GITHUB_TOKEN, and GitHub does not trigger
-      # workflows on those -- the Godot validation and lint checks would never
-      # run on the branch this opens. Omitting it authenticates as the Claude
-      # GitHub App instead, whose pushes do trigger CI.
+      # WHICH IDENTITY THE SESSION ACTS AS
+      #
+      # `github_token` is deliberately not passed, and that much does what it
+      # says: with no override the action mints a Claude GitHub App token over
+      # OIDC for its own GitHub calls, with no fallback to GITHUB_TOKEN.
+      #
+      # It does not follow that the *session's* calls go out as the App. The
+      # prompt below puts the session on the LOCAL (`gh`) form of every call
+      # site; `gh` reads GH_TOKEN from this step's env, and `git push` uses the
+      # credential actions/checkout persisted. Both are settled here and in the
+      # checkout step, not by the action.
+      #
+      # Left at GITHUB_TOKEN, a pull request this session opens is authored by
+      # GITHUB_TOKEN, and GitHub does not start workflow runs from those. Every
+      # gate in this repository triggers on `pull_request`, so Godot validation
+      # and gdscript-lint would never run on a `claude:execute` PR -- the exact
+      # outcome an earlier version of this comment claimed to prevent.
+      # agent-02-execute.yml pushes the same way and has the same gap, so this
+      # is a repository-wide condition rather than something new here.
+      #
+      # Setting the optional AGENT_GITHUB_TOKEN secret closes it for this
+      # workflow: the session acts as that identity instead, and the pull
+      # requests it opens do start CI. Unset, behaviour is unchanged.
       - name: Run Claude Code Session
         if: steps.route.outputs.ok == 'true'
         uses: anthropics/claude-code-action@v1
@@ -289,4 +324,4 @@ jobs:
             --model ${{ steps.route.outputs.model }}
             --max-turns 60
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
