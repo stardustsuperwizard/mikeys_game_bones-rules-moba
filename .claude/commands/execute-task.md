@@ -48,9 +48,9 @@ gh pr view <pr> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
 The body must start with `Closes #$ARGUMENTS`, follow
 `.github/pull_request_template.md`, and leave the `VERDICT:` block empty —
 that is the reviewer's to fill. If the executor stopped short of a PR, open
-it yourself to the same contract. If it is a draft, mark it ready:
-`agent-04-review.yml` reviews on `ready_for_review`, and a draft under
-review produces a verdict against unfinished work.
+it yourself to the same contract. If it is a draft, mark it ready — a draft
+left in review produces a verdict against unfinished work. Marking it ready
+is itself the review trigger, which is what step 5 turns on.
 
 ## 4. File the out-of-scope work you found
 
@@ -84,16 +84,29 @@ not every passing thought. If you find nothing, write `None` and say so.
 
 ## 5. Send it to review
 
-A Claude Code PR is not on a `copilot/*` branch, so `agent-04-review.yml`
-will not review it automatically. Add the label by hand:
+`agent-04-review.yml` auto-fires on `ready_for_review` for `copilot/*` and
+`claude/*` branches alike — see its `if:` at `agent-04-review.yml:68-70`.
+So whether you need to do anything here depends on how the PR reached
+"ready":
+
+- **Step 3 marked a draft ready.** The review is already running. Do not
+  add the label on top of it. `ready_for_review` and `labeled` are separate
+  triggers sharing one `concurrency: cancel-in-progress` group, so a second
+  run cancels the first and spends another strong-model session reaching
+  the same verdict.
+- **The PR was opened ready** — the usual case, since the executor's
+  `gh pr create` carries no `--draft`. GitHub emits `ready_for_review` only
+  on a draft→ready transition, never on `opened`, so nothing has fired yet
+  and the label is what starts the first review:
 
 ```bash
 gh pr edit <pr> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
   --add-label agent:review
 ```
 
-The workflow consumes the label when it runs, which is what makes re-adding
-it a clean retry later.
+Either way the workflow removes `agent:review` when it runs
+(`agent-04-review.yml:222`), which is what makes re-adding it a clean
+request for another review — how step 7 asks for one.
 
 ## 6. Subscribe for updates
 
