@@ -174,13 +174,22 @@ func _resolve_inspect_build(target_peer_id: int) -> Dictionary:
 ## stat_allocation is duplicated rather than passed by reference. Inspection is a
 ## read: the reply must not hand the caller a live alias of the registry's own
 ## stored allocation, or rendering a panel could edit authoritative state.
+##
+## The appearance travels as its three plain String ids for the same "no Resource
+## crosses the wire" reason, and reading them off the build is already a copy:
+## a String read out of a StringName field is a new value, not an alias of the
+## stored MobaAppearance.
 func _encode_build_for_inspection(build: MobaCharacterBuild) -> Dictionary:
+	var appearance := build.appearance
 	var loadout := build.loadout
 	return {
 		"character_name": build.character_name,
 		"primary_discipline": int(build.primary_discipline),
 		"secondary_discipline": int(build.secondary_discipline),
 		"stat_allocation": build.stat_allocation.duplicate(),
+		"helm_id": "" if appearance == null else String(appearance.helm_id),
+		"chest_id": "" if appearance == null else String(appearance.chest_id),
+		"color_scheme_id": "" if appearance == null else String(appearance.color_scheme_id),
 		"weapon_path":
 		"" if loadout == null or loadout.weapon == null else loadout.weapon.resource_path,
 		"action_slots":
@@ -247,6 +256,14 @@ func spawn_avatar_for_peer(peer_id: int) -> void:
 
 # Spawn through the MultiplayerSpawner or directly if none exists.
 func spawn(spawn_point: SpawnPoint, authority_id: int) -> Actor:
+	# The peer's registered appearance, as three plain String ids and never as the
+	# MobaAppearance itself -- object decoding is off, so a Resource in spawn data
+	# is dropped on the wire and every remote peer would see the lobby's default
+	# instead of the character standing there. The same discipline
+	# WorldManager._encode_build() keeps, read here the way character_name already
+	# is: the lobby carries a peer's identity, not a whole build.
+	var appearance_ids := _peer_appearance_ids(authority_id)
+
 	var data := {
 		"scene_path": spawn_point.actor_scene.resource_path,
 		"character_sheet_path": spawn_point.character_sheet.resource_path,
@@ -255,6 +272,9 @@ func spawn(spawn_point: SpawnPoint, authority_id: int) -> Actor:
 		"authority_id": authority_id,
 		"team": spawn_point.team,
 		"character_name": _get_peer_name(authority_id),
+		"helm_id": appearance_ids["helm_id"],
+		"chest_id": appearance_ids["chest_id"],
+		"color_scheme_id": appearance_ids["color_scheme_id"],
 	}
 
 	if _spawner:
@@ -271,6 +291,10 @@ func _spawn_avatar(data: Dictionary) -> Actor:
 	(actor.get_node("Body") as Node3D).transform = data["transform"]
 	actor.owner_id = data["authority_id"]
 	actor.team = data["team"]
+
+	# The same assignment WorldManager._spawn_actor() makes for a match actor, so
+	# the character in the lobby is the character that walks into the arena.
+	actor.appearance = _decode_appearance(data)
 
 	# Update the name display label
 	var name_display := actor.get_node_or_null("Body/NameDisplay") as Label3D
@@ -314,6 +338,44 @@ func _get_peer_name(peer_id: int) -> String:
 		return "Peer %d" % peer_id
 
 	return build.character_name
+
+
+# The peer's registered appearance, flattened into the three plain String ids the
+# spawn payload carries. A peer with no accepted build, or no appearance on the
+# build it did have, gets three empty ids -- the same "none" value
+# MobaAppearanceCatalog treats as legal in every category.
+func _peer_appearance_ids(peer_id: int) -> Dictionary:
+	var ids := {"helm_id": "", "chest_id": "", "color_scheme_id": ""}
+
+	var registry := _identity_registry()
+	if registry == null:
+		return ids
+
+	var build: MobaCharacterBuild = registry.get_peer_build(peer_id)
+	if build == null or build.appearance == null:
+		return ids
+
+	ids["helm_id"] = String(build.appearance.helm_id)
+	ids["chest_id"] = String(build.appearance.chest_id)
+	ids["color_scheme_id"] = String(build.appearance.color_scheme_id)
+	return ids
+
+
+# Rebuild a MobaAppearance from a spawn payload's ids, or null when it carries
+# none -- the same rule, and the same reasoning, as
+# WorldManager._decode_appearance().
+func _decode_appearance(data: Dictionary) -> MobaAppearance:
+	var helm_id: String = data.get("helm_id", "")
+	var chest_id: String = data.get("chest_id", "")
+	var color_scheme_id: String = data.get("color_scheme_id", "")
+	if helm_id == "" and chest_id == "" and color_scheme_id == "":
+		return null
+
+	var appearance := MobaAppearance.new()
+	appearance.helm_id = StringName(helm_id)
+	appearance.chest_id = StringName(chest_id)
+	appearance.color_scheme_id = StringName(color_scheme_id)
+	return appearance
 
 
 # Source the avatar's color. For now, returns a fixed default for every peer.

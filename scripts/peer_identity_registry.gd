@@ -83,15 +83,21 @@ func clear_peer(peer_id: int) -> void:
 # became illegal after the only check. Cheap insurance now, and the submission
 # path gains a real remote caller in #335.
 #
-# stat_allocation and loadout are copied explicitly: Resource.duplicate()
-# without deep copying carries a Dictionary and a sub-Resource across as
-# references, so the two mutable parts of a build would still be shared. The
-# weapon inside the loadout stays shared on purpose -- MobaLoadout.weapon
-# documents why that is safe, and MobaCombatant's own loadout setter makes the
-# same shallow copy for the same reason.
+# stat_allocation, loadout and appearance are copied explicitly:
+# Resource.duplicate() without deep copying carries a Dictionary and a
+# sub-Resource across as references, so the mutable parts of a build would still
+# be shared. The weapon inside the loadout stays shared on purpose --
+# MobaLoadout.weapon documents why that is safe, and MobaCombatant's own loadout
+# setter makes the same shallow copy for the same reason.
+#
+# The appearance is a sub-Resource on exactly those terms: MobaAppearance holds
+# three writable ids, so a caller that kept its reference could swap the helm the
+# server accepted for one it never checked.
 func _copy_accepted(build: MobaCharacterBuild) -> MobaCharacterBuild:
 	var copy := build.duplicate() as MobaCharacterBuild
 	copy.stat_allocation = build.stat_allocation.duplicate()
 	if build.loadout != null:
 		copy.loadout = build.loadout.duplicate() as MobaLoadout
+	if build.appearance != null:
+		copy.appearance = build.appearance.duplicate() as MobaAppearance
 	return copy
