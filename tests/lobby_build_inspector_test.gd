@@ -44,6 +44,7 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"selection is reachable before any inspection",
 	"peer list follows presence changes after ready",
 	"a zero-valued stat is rendered, not dropped",
+	"authored panel layout actually applies",
 ]
 
 var _failures: Array[String] = []
@@ -66,6 +67,7 @@ func _run() -> void:
 	await _test_selection_is_reachable_before_any_inspection()
 	await _test_peer_list_follows_presence()
 	await _test_zero_stat_is_rendered()
+	await _test_authored_layout_applies()
 
 	_finish()
 
@@ -441,6 +443,51 @@ func _test_zero_stat_is_rendered() -> void:
 		return
 
 	_pass("a zero-valued stat is rendered, not dropped")
+	panel.queue_free()
+
+
+## The scene's authored placement is real, not silently discarded.
+##
+## Regression guard for a whole class of defect this panel has now hit twice:
+## a property spelled almost-correctly in the .tscn is ignored by Godot without
+## an error, so the harness asserts structure that is true of the node and false
+## of what a player sees. `anchors_left` instead of `anchor_left` left the panel
+## a zero-size rect in the top-left corner while every other check still passed,
+## and a bare `separation` never reached the theme.
+func _test_authored_layout_applies() -> void:
+	var panel := _PANEL_SCENE.instantiate() as LobbyBuildInspector
+	root.add_child(panel)
+	await process_frame
+
+	if (
+		not is_equal_approx(panel.anchor_right, 1.0)
+		or not is_equal_approx(panel.anchor_bottom, 1.0)
+	):
+		_fail_cleanup("the panel root is not a full-rect overlay", [panel])
+		return
+
+	var body := panel.get_node_or_null(^"Panel") as Control
+	if body == null:
+		_fail_cleanup("panel scene has no Panel node", [panel])
+		return
+
+	# Authored to the right-hand quarter, clear of StartMatchButton's corner.
+	if body.anchor_left < 0.5 or not is_equal_approx(body.anchor_right, 0.99):
+		_fail_cleanup(
+			(
+				"Panel anchors did not apply (left %f, right %f)"
+				% [body.anchor_left, body.anchor_right]
+			),
+			[panel]
+		)
+		return
+
+	var box := body.get_node_or_null(^"VBoxContainer") as VBoxContainer
+	if box == null or not box.has_theme_constant_override(&"separation"):
+		_fail_cleanup("VBoxContainer separation never reached the theme", [panel])
+		return
+
+	_pass("authored panel layout actually applies")
 	panel.queue_free()
 
 
