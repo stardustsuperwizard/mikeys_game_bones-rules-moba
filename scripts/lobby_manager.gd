@@ -1,11 +1,36 @@
 class_name LobbyManager
 extends Node3D
 
+## Emitted when match_starting is assigned a value different from its current one.
+signal match_starting_changed(value: bool)
+
+## Where a started match sends every present peer. The same scene
+## scripts/match_controller.gd returns from in the other direction.
+const ARENA_SCENE_PATH := "res://scenes/main.tscn"
+
 @export var avatar_spawn_point: SpawnPoint
+
+## True once the server has decided the present peers are entering a match.
+##
+## The same settable / on-change / signal-emitting shape MobaMatchState's
+## round_in_progress keeps, and for the same reason: a MultiplayerSynchronizer
+## replicating this on-change assigns the property on each client, which runs
+## this setter there and emits locally. A one-shot RPC broadcast would carry the
+## event but leave late arrivals with no state to read.
+var match_starting: bool:
+	get:
+		return _match_starting
+	set(value):
+		if value == _match_starting:
+			return
+		_match_starting = value
+		match_starting_changed.emit(value)
 
 # Map of peer_id -> the avatar actor spawned for it, so a disconnect can find
 # and free the right one.
 var _peer_avatars: Dictionary[int, Actor] = {}
+
+var _match_starting: bool = false
 
 @onready var _spawner: MultiplayerSpawner = get_node_or_null("MultiplayerSpawner")
 
@@ -13,6 +38,9 @@ var _peer_avatars: Dictionary[int, Actor] = {}
 func _ready() -> void:
 	if _spawner:
 		_spawner.spawn_function = _spawn_avatar
+
+	# Every peer observes match_starting to know when to transition to the arena.
+	match_starting_changed.connect(_on_match_starting_changed)
 
 	# A pure client (connected, not the server) gets avatars from
 	# replication instead -- spawning them locally too would double them up.
@@ -26,6 +54,59 @@ func _ready() -> void:
 	# Spawn the local player's avatar if offline or as the server.
 	if not _is_dedicated_server():
 		spawn_avatar_for_peer(multiplayer.get_unique_id())
+
+
+## Request to start a match. Any peer in the lobby can call this; the server
+## validates that the requester has a spawned avatar before starting the match.
+##
+## Matches the try_*() / request_*() / _resolve_*() pattern from Actor:
+## - For offline or server, resolves locally.
+## - For client, sends an RPC to the server.
+func try_start_match() -> void:
+	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+		request_start_match.rpc_id(1)
+		return
+
+	_resolve_start_match(multiplayer.get_unique_id())
+
+
+## The server's inbox for a client's match-start request.
+@rpc("any_peer", "call_remote", "reliable")
+func request_start_match() -> void:
+	var requester_id := multiplayer.get_remote_sender_id()
+	_resolve_start_match(requester_id)
+
+
+## Resolve a match-start request from a peer. Validates that the peer has
+## a spawned avatar in the lobby, then sets match_starting = true.
+func _resolve_start_match(peer_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+
+	var avatar: Actor = _peer_avatars.get(peer_id)
+	if avatar == null or not is_instance_valid(avatar):
+		return
+
+	match_starting = true
+
+
+## Every peer reacts to the start by entering the arena together: the server
+## because it set the property, each client because replication assigned it and
+## the setter emitted there too.
+##
+## The awaited frame is the same one scripts/match_controller.gd waits for in
+## _on_match_ended, and for the same reason -- on the server, match_starting has
+## to leave through LobbyStateSynchronizer before the scene holding that
+## synchronizer is torn down. Changing the scene in the same frame the property
+## is set destroys the synchronizer with the change still unsent, and no client
+## ever learns the match began. The wait is harmless on a client, which is
+## already reacting to the replicated value.
+func _on_match_starting_changed(value: bool) -> void:
+	if not value:
+		return
+
+	await get_tree().process_frame
+	get_tree().change_scene_to_file(ARENA_SCENE_PATH)
 
 
 # Check if this is a dedicated server (no local player).

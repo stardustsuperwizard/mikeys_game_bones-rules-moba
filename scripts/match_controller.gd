@@ -12,7 +12,7 @@ extends Node
 
 ## Where a decided match returns to. The same scene scripts/main_menu.gd
 ## leaves in the other direction.
-const LOBBY_SCENE_PATH := "res://scenes/ui/main_menu.tscn"
+const LOBBY_SCENE_PATH := "res://scenes/lobby/lobby.tscn"
 
 ## The lifecycle state, authored as a child in scenes/main.tscn so its four
 ## replicated properties exist under a stable node path before
