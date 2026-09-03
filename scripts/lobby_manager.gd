@@ -4,6 +4,15 @@ extends Node3D
 ## Emitted when match_starting is assigned a value different from its current one.
 signal match_starting_changed(value: bool)
 
+## Emitted on the requesting peer when an inspected build arrives. Carries
+## _encode_build_for_inspection()'s payload, or an empty Dictionary when the
+## target peer has no spawned lobby avatar.
+##
+## The one delivery point for both routes: a client emits it on the server's
+## reply, and the host emits it on its own local resolve. A panel connects here
+## and never has to know which of the two it is running on.
+signal build_inspection_received(encoded_build: Dictionary)
+
 ## Where a started match sends every present peer. The same scene
 ## scripts/match_controller.gd returns from in the other direction.
 const ARENA_SCENE_PATH := "res://scenes/main.tscn"
@@ -88,6 +97,114 @@ func _resolve_start_match(peer_id: int) -> void:
 		return
 
 	match_starting = true
+
+
+## Request to inspect another peer's build. Any peer present in the lobby can
+## call this for any other present peer; the answer arrives on
+## build_inspection_received rather than as a return value, because a client
+## cannot know it synchronously.
+##
+## Matches the try_*() / request_*() / _resolve_*() pattern from Actor:
+## - For offline or server, resolves locally.
+## - For client, sends an RPC to the server.
+func try_inspect_build(target_peer_id: int) -> void:
+	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+		request_inspect_build.rpc_id(1, target_peer_id)
+		return
+
+	# Offline or host: there is no reply RPC to wait for, because a peer does not
+	# send itself one. Emitting the resolved payload here is what keeps the host's
+	# own panel from waiting forever for a message that is never addressed to it.
+	build_inspection_received.emit(_resolve_inspect_build(target_peer_id))
+
+
+## The server's inbox for a client's build-inspection request.
+##
+## The target arrives as a peer id and is re-checked against the server's own
+## presence tracking, never trusted as a claim about who is present.
+@rpc("any_peer", "call_remote", "reliable")
+func request_inspect_build(target_peer_id: int) -> void:
+	var requester_id := multiplayer.get_remote_sender_id()
+
+	# Addressed with rpc_id to the one peer that asked, never broadcast with
+	# rpc(). A build breakdown is pull, not push: no other present peer learns
+	# anything from this exchange, which is the constraint that keeps build data
+	# off the continuous replication path entirely.
+	_reply_inspect_build.rpc_id(requester_id, _resolve_inspect_build(target_peer_id))
+
+
+## Resolve a build-inspection request, returning the encoded build for a peer
+## that currently has a spawned lobby avatar.
+##
+## An absent target -- disconnected, or never connected -- resolves to an empty
+## Dictionary rather than an error or a silent drop, so the requester always gets
+## an answer it can render as "not present" instead of waiting on one forever.
+##
+## Takes no requester id: this is a read query with nothing to gate. Any present
+## peer may inspect any other present peer, so there is no ownership question and
+## no reason to route it through Authority.can_perform(). Keeping it separate from
+## request_inspect_build() is also what makes the reply's addressing checkable:
+## the payload is computed here, and the single rpc_id() above is the only thing
+## that decides who receives it.
+func _resolve_inspect_build(target_peer_id: int) -> Dictionary:
+	if not multiplayer.is_server():
+		return {}
+
+	var avatar: Actor = _peer_avatars.get(target_peer_id)
+	if avatar == null or not is_instance_valid(avatar):
+		return {}
+
+	var registry := _identity_registry()
+	if registry == null:
+		return {}
+
+	var build: MobaCharacterBuild = registry.get_peer_build(target_peer_id)
+	if build == null:
+		return {}
+
+	return _encode_build_for_inspection(build)
+
+
+## Encode a build's display-relevant fields into plain Variant data, following
+## the same "no Resource crosses the wire" discipline WorldManager._encode_build()
+## already establishes: the weapon travels as its authored resource path, and the
+## disciplines as their enum ints, because a Resource put in an RPC payload is
+## dropped on the wire and silently arrives as null.
+##
+## stat_allocation is duplicated rather than passed by reference. Inspection is a
+## read: the reply must not hand the caller a live alias of the registry's own
+## stored allocation, or rendering a panel could edit authoritative state.
+func _encode_build_for_inspection(build: MobaCharacterBuild) -> Dictionary:
+	var loadout := build.loadout
+	return {
+		"character_name": build.character_name,
+		"primary_discipline": int(build.primary_discipline),
+		"secondary_discipline": int(build.secondary_discipline),
+		"stat_allocation": build.stat_allocation.duplicate(),
+		"weapon_path":
+		"" if loadout == null or loadout.weapon == null else loadout.weapon.resource_path,
+		"action_slots":
+		PackedStringArray(
+			(
+				[]
+				if loadout == null
+				else [
+					loadout.action_slot_1,
+					loadout.action_slot_2,
+					loadout.action_slot_3,
+					loadout.action_slot_4,
+				]
+			)
+		),
+		"passive_slot": "" if loadout == null else loadout.passive_slot,
+	}
+
+
+## The requesting client's inbox for the server's reply. Reached only through the
+## rpc_id() above, so it runs on the one peer that asked and on no other.
+@rpc("authority", "call_remote", "reliable")
+func _reply_inspect_build(encoded_build: Dictionary) -> void:
+	build_inspection_received.emit(encoded_build)
 
 
 ## Every peer reacts to the start by entering the arena together: the server
