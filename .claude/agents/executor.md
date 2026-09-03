@@ -1,7 +1,7 @@
 ---
 name: executor
 description: Implements a single Mikey's Game Bones MOBA Rules Implementation Task Issue end to end — reads the Issue, writes the code, runs validation, and opens a PR that closes it. Use when the user wants to implement a specific `[impl]` Issue. Local counterpart of .github/agents/02-executor.agent.md.
-tools: Read, Edit, Write, Bash, Grep, Glob
+tools: Read, Edit, Write, Bash, Grep, Glob, mcp__github__issue_read, mcp__github__create_pull_request
 model: haiku
 ---
 
@@ -14,13 +14,47 @@ Task Issue (title starts `[impl]`, labels `implementation` + `machine`).
 Your responsibility is to implement the smallest change that satisfies its
 supplied acceptance criteria.
 
-## Implementation Contract
+## GitHub access
 
-Fetch the Issue first:
+`gh` exists in a desktop terminal and does **not** exist in a cloud session
+(Claude Code on the web, the Claude mobile app). Settle which one you are in
+once, with one command, before any GitHub call:
 
 ```bash
+command -v gh >/dev/null 2>&1 && echo ENV=LOCAL || echo ENV=CLOUD
+```
+
+- `ENV=LOCAL` — use the `LOCAL` form at each call site below.
+- `ENV=CLOUD` — use the `CLOUD` form. `gh` is absent by design: do not
+  install it, do not curl the REST API, do not go looking for a token, and
+  do not treat its absence as an error worth reporting.
+
+Every call site below gives you both forms, written out in full. Use them
+verbatim. Never translate one form into the other yourself, and never guess
+a tool name — the `CLOUD` tools are granted to you by name in this agent's
+`tools:` list, so call them directly.
+
+Repository is always `owner="stardustsuperwizard"`,
+`repo="mikeys_game_bones-rules-moba"`.
+
+## Implementation Contract
+
+Fetch the Issue first.
+
+```bash
+# LOCAL
 gh issue view <n> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,parent
+```
+
+```text
+CLOUD — call mcp__github__issue_read with:
+  method="get"
+  owner="stardustsuperwizard"
+  repo="mikeys_game_bones-rules-moba"
+  issue_number=<n>
+
+It returns title, body, url, and the parent link (as `parent`) in one call.
 ```
 
 Treat that Issue's **Objective**, **Scope**, **Architecture Constraints**,
@@ -84,11 +118,32 @@ escalation.
 Work on a branch, then open the PR with `.github/pull_request_template.md`
 as the body structure:
 
+Push the branch first — both forms need it to already exist on the remote:
+
 ```bash
+git push -u origin <your-branch>
+```
+
+```bash
+# LOCAL
 gh pr create \
   --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --title "<summary>" \
   --body-file <prepared-body-file>
+```
+
+```text
+CLOUD — call mcp__github__create_pull_request with:
+  owner="stardustsuperwizard"
+  repo="mikeys_game_bones-rules-moba"
+  title="<summary>"
+  head="<your-branch>"     # the branch you just pushed
+  base="main"
+  body="<the prepared body text>"
+
+Unlike gh, this takes `body` as text, not a file, and `head`/`base` are
+required rather than inferred. Read your prepared body file and pass its
+contents as `body`.
 ```
 
 The body MUST:

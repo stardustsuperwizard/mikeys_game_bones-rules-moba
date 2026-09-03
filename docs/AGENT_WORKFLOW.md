@@ -1201,6 +1201,32 @@ counterparts of the four roles, invoked as `/plan-feature`, `/execute-task`,
 | Review | `agent-04-review.yml` / `.github/agents/03-reviewer.agent.md` | `.claude/commands/review-task.md` / `.claude/agents/reviewer.md` |
 | Fix | `agent-05-fix.yml` / `.github/agents/05-fixer.agent.md` | `.claude/commands/fix-review.md` / `.claude/agents/fixer.md` |
 
+Each of those eight files opens with a **GitHub access** section, because the
+two Claude Code surfaces do not agree on how to reach GitHub. A desktop
+terminal has `gh`; a cloud session — Claude Code on the web, and therefore the
+Claude mobile app, which is a client for one — does not, and reaches GitHub
+through the `mcp__github__*` tools instead. Every GitHub call site in those
+files is written out twice, once per surface, and the section opens with a
+one-line probe (`command -v gh`) that settles which to use before any call.
+
+Spelling both forms out is the same reasoning that spelled the `gh` commands
+out in the first place. `executor` runs on Haiku; a cheap model given "fetch
+the Issue" will spend its budget discovering an API instead of implementing
+the task, and a cheap model that cannot find `gh` will try to install it. So
+the files say *use this exact call*, and say it for both surfaces, rather than
+describing the goal and leaving the route to be worked out. The subagents also
+name their `mcp__github__*` tools in `tools:`, which is what actually grants
+them — the prose alone would not.
+
+Two operations have no cloud form, and the files say so rather than
+improvising one: `--add-blocked-by` (the MCP tools cover parent/child
+hierarchy but not dependency edges, so the planner reports the pairs it could
+not wire) and the `closingIssuesReferences` GraphQL query (unnecessary, since
+this repository requires `Closes #<n>` on every PR body). One differs in
+semantics and is flagged where it is used: setting labels through
+`issue_write` replaces the whole set, where `gh pr edit --add-label` adds to
+it, so the reviewer reads the current labels first.
+
 The two sides share the Issue and PR graph, not a runtime. A PR opened by
 Claude Code doesn't land on a `copilot/*` branch, so it won't trigger
 `agent-04-review.yml`'s automatic `ready_for_review` review — add
@@ -1323,7 +1349,7 @@ Re-check these with the commands rather than trusting this table.
 | --- | --- |
 | `AgentAssignmentInput` has no model field | `gh api graphql -f query='{__type(name:"AgentAssignmentInput"){inputFields{name}}}'` |
 | `customAgent` exists on that input | same command |
-| Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"sword-and-planet"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
+| Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"mikeys_game_bones-rules-moba"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
 | `gh agent-task create` has no `--model` | `gh agent-task create --help` |
 | The `plan` queue is not stale | `gh issue list --label plan --json number,title,labels` — nothing here should also carry `planned` |
 | Derived state matches reality | `.github/scripts/render-dashboard.py --json` |
