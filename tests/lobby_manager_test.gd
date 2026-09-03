@@ -433,7 +433,7 @@ func _test_camera_targets_local_avatar() -> void:
 		_fail_cleanup("lobby.tscn has no LobbyManager", [lobby])
 		return
 
-	var avatar: Actor = manager._peer_avatars.get(root.multiplayer.get_unique_id())
+	var avatar: Actor = manager._peer_avatars.get(1)  # Offline mode uses unique_id 1
 	if avatar == null:
 		_fail_cleanup("no avatar spawned for the local peer", [lobby])
 		return
