@@ -79,14 +79,19 @@ static func validate(
 
 ## Check that the character name is valid.
 ## Returns empty StringName if legal, otherwise a FAILURE_* constant.
-## Accepts only characters that character_creation.gd's _sanitize_filename()
-## policy accepts unchanged: a-z, A-Z, 0-9, space, underscore, then stripped.
+##
+## The accepted character set is the one character_creation.gd's
+## _sanitize_filename() leaves untouched -- a-z, A-Z, 0-9, space, underscore --
+## so every name that policy already accepts unchanged is accepted here too.
+## Surrounding whitespace is not stripped before the checks: this function
+## decides legality, it does not rewrite the name, so a name is measured and
+## judged exactly as submitted.
 static func _check_character_name(name: String) -> StringName:
 	# Empty names are rejected
 	if name.is_empty():
 		return FAILURE_NAME_EMPTY
 
-	# Check length (after any whitespace is not yet stripped, but compare as-is)
+	# Measured as submitted, without stripping -- see the note above.
 	if name.length() > MAX_NAME_LENGTH:
 		return FAILURE_NAME_TOO_LONG
 

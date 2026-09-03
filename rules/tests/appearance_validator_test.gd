@@ -24,6 +24,7 @@ static func run() -> bool:
 	results.append(_test_unknown_chest_refused())
 	results.append(_test_unknown_color_scheme_refused())
 	results.append(_test_mixed_valid_invalid_refused_on_helm())
+	results.append(_test_malformed_catalog_is_reported_and_recovers())
 
 	return results.all(func(result: bool) -> bool: return result)
 
@@ -165,3 +166,56 @@ static func _test_mixed_valid_invalid_refused_on_helm() -> bool:
 		MobaAppearanceValidator.validate(appearance),
 		MobaAppearanceValidator.FAILURE_UNKNOWN_HELM
 	)
+
+
+## A malformed catalog is reported and left detectable, and the catalog recovers.
+##
+## The class advertises safe-by-construction loading, so the failure path is
+## worth holding to the same bar as the success path: bad data must set
+## load_failed rather than crash or quietly answer "legal", and every legality
+## query must refuse while the catalog is unusable rather than guess.
+##
+## The test restores the real catalog before returning, and asserts the restore
+## worked, so it cannot leave later suites reading a poisoned static cache.
+static func _test_malformed_catalog_is_reported_and_recovers() -> bool:
+	var passed := true
+
+	# A root missing the required category keys.
+	MobaAppearanceCatalog.reset_for_testing()
+	if MobaAppearanceCatalog._parse_catalog({"helms": ["basic_helm"]}):
+		printerr("ERROR: catalog missing 'chests'/'color_schemes' was accepted")
+		passed = false
+	if not MobaAppearanceCatalog.load_failed:
+		printerr("ERROR: malformed catalog did not set load_failed")
+		passed = false
+
+	# Reproduce the state a corrupt catalog.json on disk actually leaves behind:
+	# the load ran (_loaded) and failed (load_failed). _parse_catalog() alone does
+	# not set _loaded, so without this the next query would simply reload the good
+	# file from disk and never see the failed state at all.
+	#
+	# This asserts the outcome -- an unusable catalog never calls an id legal --
+	# not any one mechanism enforcing it. Two do: the explicit load_failed guard,
+	# whose real job is the diagnostic it pushes, and the emptied cache behind it.
+	# Removing either alone still refuses, which is the point of having both.
+	MobaAppearanceCatalog._loaded = true
+	if MobaAppearanceCatalog.is_helm_legal(&"basic_helm"):
+		printerr("ERROR: helm reported legal while the catalog was unusable")
+		passed = false
+
+	# A root that is not a dictionary at all.
+	MobaAppearanceCatalog.reset_for_testing()
+	if MobaAppearanceCatalog._parse_catalog([]):
+		printerr("ERROR: non-dictionary catalog root was accepted")
+		passed = false
+
+	# The real catalog reloads cleanly afterwards.
+	MobaAppearanceCatalog.reset_for_testing()
+	if MobaAppearanceCatalog.load_failed:
+		printerr("ERROR: reset_for_testing() left load_failed set")
+		passed = false
+	if not MobaAppearanceCatalog.is_helm_legal(&"basic_helm"):
+		printerr("ERROR: catalog did not recover after reset_for_testing()")
+		passed = false
+
+	return passed
