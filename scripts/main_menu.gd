@@ -23,7 +23,7 @@
 ## host's player through a second, later path for no reason.
 extends Control
 
-const _WORLD_SCENE := "res://scenes/main.tscn"
+const _LOBBY_SCENE := "res://scenes/lobby/lobby.tscn"
 const _CHARACTER_CREATION_SCENE := "res://scenes/ui/character_creation.tscn"
 
 ## Highest port number a peer can bind. Ports are 16-bit and 0 means
@@ -128,7 +128,7 @@ func _on_join() -> void:
 
 
 func _enter_world() -> void:
-	get_tree().change_scene_to_file(_WORLD_SCENE)
+	get_tree().change_scene_to_file(_LOBBY_SCENE)
 
 
 ## Parse and range-check a port field. Returns -1 (and reports) when invalid,
