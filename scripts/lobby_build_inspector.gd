@@ -109,8 +109,8 @@ func refresh_peer_list() -> void:
 			_peers_container.remove_child(child)
 			child.queue_free()
 
-	for peer_id in _visible_peer_ids():
-		_peers_container.add_child(_make_peer_button(peer_id))
+	for avatar in _inspectable_avatars():
+		_peers_container.add_child(_make_peer_button(avatar))
 
 
 ## Ask the server for a peer's build. The answer arrives asynchronously on
@@ -122,36 +122,51 @@ func inspect_peer(peer_id: int) -> void:
 	_lobby_manager.try_inspect_build(peer_id)
 
 
-# The peers this panel offers to inspect: every lobby avatar present except this
+# The lobby avatars this panel offers to inspect: every one present except this
 # peer's own. Read off the avatars themselves rather than from a replicated
 # roster, for the reason refresh_peer_list() gives.
-func _visible_peer_ids() -> Array[int]:
-	var ids: Array[int] = []
+func _inspectable_avatars() -> Array[Actor]:
+	var avatars: Array[Actor] = []
 	if _lobby_manager == null:
-		return ids
+		return avatars
 
 	var local_id := 1
 	if _lobby_manager.multiplayer != null:
 		local_id = _lobby_manager.multiplayer.get_unique_id()
 
+	var seen: Array[int] = []
 	for child in _lobby_manager.get_children():
 		var actor := child as Actor
-		if actor != null and actor.owner_id != local_id and actor.owner_id not in ids:
-			ids.append(actor.owner_id)
+		if actor != null and actor.owner_id != local_id and actor.owner_id not in seen:
+			seen.append(actor.owner_id)
+			avatars.append(actor)
 
-	return ids
+	return avatars
 
 
 # One focusable, touch-sized button per inspectable peer. A Button is used
 # precisely because it is operable by focus plus ui_accept on a gamepad, by
 # Enter on a keyboard, and by a tap -- none of which is a hover.
-func _make_peer_button(peer_id: int) -> Button:
+func _make_peer_button(avatar: Actor) -> Button:
 	var button := Button.new()
-	button.text = "Inspect peer %d" % peer_id
+	button.text = _avatar_display_name(avatar)
 	button.focus_mode = Control.FOCUS_ALL
 	button.custom_minimum_size = TOUCH_TARGET_SIZE
-	button.pressed.connect(inspect_peer.bind(peer_id))
+	button.pressed.connect(inspect_peer.bind(avatar.owner_id))
 	return button
+
+
+# The name the avatar already displays above itself in the lobby, so the roster
+# and the world agree on who a player is. The peer id is a fallback for an
+# avatar with no sheet applied, not the normal case: a character here is the
+# player's own, named and kept, and identifying them by connection number is a
+# worse answer whenever a real name exists.
+func _avatar_display_name(avatar: Actor) -> String:
+	var sheet := avatar.character_sheet
+	if sheet != null and sheet.character_name != "":
+		return sheet.character_name
+
+	return "Peer %d" % avatar.owner_id
 
 
 # Resolve the authored controls once, and enforce the focus/touch standard in

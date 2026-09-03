@@ -33,6 +33,7 @@ const _PEER_ABSENT := 32
 const _PEER_IDEMPOTENT := 33
 const _PEER_LIST_A := 34
 const _PEER_LIST_B := 35
+const _PEER_NAMED := 36
 
 const _EXPECTED_CHECKS: Array[String] = [
 	"submitted build round-trips with every display field",
@@ -45,6 +46,7 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"peer list follows presence changes after ready",
 	"a zero-valued stat is rendered, not dropped",
 	"authored panel layout actually applies",
+	"peer buttons are labelled with the character name",
 ]
 
 var _failures: Array[String] = []
@@ -68,6 +70,7 @@ func _run() -> void:
 	await _test_peer_list_follows_presence()
 	await _test_zero_stat_is_rendered()
 	await _test_authored_layout_applies()
+	await _test_peer_buttons_show_character_names()
 
 	_finish()
 
@@ -329,12 +332,7 @@ func _test_panel_lists_present_peers() -> void:
 	# CanvasLayer beside LobbyManager, so point it at this one directly.
 	panel.bind_lobby(manager)
 
-	var buttons := _find_buttons(panel)
-	var peer_buttons: Array[Button] = []
-	for button in buttons:
-		if button.text.begins_with("Inspect peer"):
-			peer_buttons.append(button)
-
+	var peer_buttons := _peer_buttons(panel)
 	if peer_buttons.size() != 2:
 		_fail_cleanup("expected 2 peer buttons, got %d" % peer_buttons.size(), [manager])
 		return
@@ -366,8 +364,8 @@ func _test_selection_is_reachable_before_any_inspection() -> void:
 	await process_frame
 
 	var reachable: Array[Button] = []
-	for button in _find_buttons(panel):
-		if button.text.begins_with("Inspect peer") and button.is_visible_in_tree():
+	for button in _peer_buttons(panel):
+		if button.is_visible_in_tree():
 			reachable.append(button)
 
 	if reachable.is_empty():
@@ -491,13 +489,63 @@ func _test_authored_layout_applies() -> void:
 	panel.queue_free()
 
 
-## Visible peer buttons currently offered by the panel.
+## A player is identified in the roster by their character's name.
+##
+## The lobby avatar already displays that name above itself, and the whole point
+## of the character system is that the character is the player\'s own -- a roster
+## reading "Inspect peer 12" beside an avatar labelled "Roundtrip Rowan" names
+## the same player two different ways, and the worse one.
+func _test_peer_buttons_show_character_names() -> void:
+	var registry := _registry()
+	if registry == null:
+		_fail("setup: PeerIdentityRegistry autoload not found")
+		return
+
+	var manager := _make_lobby_manager()
+	var problem := _submit_and_encode(
+		manager, registry, _PEER_NAMED, _make_legal_build("Roster Rosalind")
+	)
+	if problem != "":
+		_fail_cleanup(problem, [manager])
+		return
+
+	var panel := _PANEL_SCENE.instantiate() as LobbyBuildInspector
+	manager.add_child(panel)
+	await process_frame
+
+	panel.bind_lobby(manager)
+
+	var buttons := _peer_buttons(panel)
+	if buttons.size() != 1:
+		_fail_cleanup("expected 1 peer button, got %d" % buttons.size(), [manager])
+		return
+
+	if buttons[0].text.begins_with("Peer "):
+		_fail_cleanup("roster fell back to the peer id: %s" % buttons[0].text, [manager])
+		return
+
+	_pass("peer buttons are labelled with the character name")
+	manager.queue_free()
+
+
+## The peer-selection buttons currently offered, identified by living in the
+## peers container rather than by their label -- the label is the character's
+## name, which is exactly what a check should be free to assert about.
+func _peer_buttons(panel: LobbyBuildInspector) -> Array[Button]:
+	var buttons: Array[Button] = []
+	if panel._peers_container == null:
+		return buttons
+
+	for child in panel._peers_container.get_children():
+		var button := child as Button
+		if button != null:
+			buttons.append(button)
+
+	return buttons
+
+
 func _count_peer_buttons(panel: LobbyBuildInspector) -> int:
-	var count := 0
-	for button in _find_buttons(panel):
-		if button.text.begins_with("Inspect peer"):
-			count += 1
-	return count
+	return _peer_buttons(panel).size()
 
 
 ## Every Button in a subtree, so a check covers controls added at runtime too.
