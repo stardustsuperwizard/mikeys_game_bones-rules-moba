@@ -1,0 +1,115 @@
+[gd_scene load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scripts/third_person_camera_3d.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/lobby_manager.gd" id="2"]
+[ext_resource type="Resource" path="res://resources/lobby_player_spawn_point.tres" id="3"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(20, 0.2, 20)
+
+[sub_resource type="StandardMaterial3D" id="Mat_floor"]
+albedo_color = Color(0.5, 0.5, 0.5, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+size = Vector3(20, 0.2, 20)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_north"]
+size = Vector3(20, 4, 0.2)
+
+[sub_resource type="StandardMaterial3D" id="Mat_wall"]
+albedo_color = Color(0.96, 0.9, 0.78, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_north"]
+size = Vector3(20, 4, 0.2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_south"]
+size = Vector3(20, 4, 0.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_south"]
+size = Vector3(20, 4, 0.2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_west"]
+size = Vector3(0.2, 4, 20)
+
+[sub_resource type="BoxMesh" id="BoxMesh_west"]
+size = Vector3(0.2, 4, 20)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_east"]
+size = Vector3(0.2, 4, 20)
+
+[sub_resource type="BoxMesh" id="BoxMesh_east"]
+size = Vector3(0.2, 4, 20)
+
+[node name="Lobby" type="Node"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.5, -0.866025, 0, 0.866025, 0.5, 0, 0, 0)
+
+[node name="Floor" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+shape = SubResource("BoxShape3D_floor")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+material_override = SubResource("Mat_floor")
+mesh = SubResource("BoxMesh_floor")
+
+[node name="WallNorth" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallNorth"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -10)
+shape = SubResource("BoxShape3D_north")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallNorth"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -10)
+material_override = SubResource("Mat_wall")
+mesh = SubResource("BoxMesh_north")
+
+[node name="WallSouth" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallSouth"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 10)
+shape = SubResource("BoxShape3D_south")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallSouth"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 10)
+material_override = SubResource("Mat_wall")
+mesh = SubResource("BoxMesh_south")
+
+[node name="WallWest" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallWest"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, 0)
+shape = SubResource("BoxShape3D_west")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallWest"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, 0)
+material_override = SubResource("Mat_wall")
+mesh = SubResource("BoxMesh_west")
+
+[node name="WallEast" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallEast"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 2, 0)
+shape = SubResource("BoxShape3D_east")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallEast"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 2, 0)
+material_override = SubResource("Mat_wall")
+mesh = SubResource("BoxMesh_east")
+
+[node name="LobbyManager" type="Node3D" parent="."]
+script = ExtResource("2")
+avatar_spawn_point = ExtResource("3")
+
+[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="LobbyManager"]
+spawn_path = NodePath("..")
+
+; Resolved in the camera's own _ready(), which runs after LobbyManager's --
+; by then LobbyManager has spawned this peer's own avatar, and it is the only
+; one present. Exactly how scenes/main.tscn points at ../WorldManager/Player/Body.
+[node name="ThirdPersonCamera" type="Camera3D" parent="."]
+script = ExtResource("1")
+target_path = NodePath("../LobbyManager/LobbyAvatar/Body")
