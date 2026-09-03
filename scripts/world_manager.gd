@@ -134,6 +134,12 @@ func _spawn_actor(data: Dictionary) -> Actor:
 		var build := _decode_build(data["build"])
 		_apply_build_name(actor, build)
 
+		# The appearance the peer chose, rebuilt on every peer from the same three
+		# ids. Assigned rather than duplicated: _decode_build() constructs a fresh
+		# MobaAppearance per spawn, so there is no shared instance to alias here --
+		# unlike character_sheet, whose duplicate() _apply_build_name() explains.
+		actor.appearance = build.appearance
+
 		# stat_block is assigned before the actor enters the tree, which is what
 		# makes it stick: MobaCombatant seeds its runtime stat block from this
 		# property, so an effective block set here is the one health and resource
@@ -178,14 +184,18 @@ func _spawn_actor(data: Dictionary) -> Actor:
 #
 # LobbyManager._spawn_avatar() duplicates before assigning for the same reason.
 #
-# An empty name is left alone rather than written through, and that guard is
-# load-bearing rather than defensive: the non-empty check lives in
-# scripts/character_creation.gd's save path, on the client, while
-# MobaBuildValidator -- the one the server re-runs on submission -- does not
-# look at character_name at all. So an empty name is a shape the server can
-# legitimately accept, and writing it through would blank the sheet and send
-# the target frame to its node-name fallback ("Player" the node, rather than
-# "Player" the sheet -- no better, and now unauthored).
+# An empty name is left alone rather than written through. That guard was
+# load-bearing when MobaBuildValidator did not look at character_name at all, so
+# an empty name was a shape the server could legitimately accept. #374 closed
+# that: validate() now refuses an empty name with FAILURE_NAME_EMPTY, and a
+# submitted build can no longer reach here without one.
+#
+# The guard stays because it is not only submissions that reach here. Every
+# actor spawned from a build goes through this function, including one built
+# from _FALLBACK_BUILD or from a .tres nobody re-validated, and writing an empty
+# name through would blank the sheet and send the target frame to its node-name
+# fallback ("Player" the node, rather than "Player" the sheet -- no better, and
+# now unauthored).
 func _apply_build_name(actor: Actor, build: MobaCharacterBuild) -> void:
 	if build.character_name.is_empty():
 		return
@@ -278,13 +288,24 @@ func _identity_registry() -> Node:
 # The weapon travels as a resource path for the same reason. Weapons are authored
 # files picked in the creation screen, never built at runtime, so a path always
 # resolves on the far side.
+#
+# The appearance travels as its three plain String ids rather than as the
+# MobaAppearance itself, for exactly the reason above -- and it is the cheapest
+# case of the rule, because MobaAppearance holds nothing but those three ids.
+# String(), not the StringName the resource stores: var_to_bytes carries a
+# StringName as a String anyway, so converting here makes the payload's declared
+# type and its wire type the same thing.
 func _encode_build(build: MobaCharacterBuild) -> Dictionary:
+	var appearance := build.appearance
 	var loadout := build.loadout
 	return {
 		"character_name": build.character_name,
 		"primary_discipline": int(build.primary_discipline),
 		"secondary_discipline": int(build.secondary_discipline),
 		"stat_allocation": build.stat_allocation.duplicate(),
+		"helm_id": "" if appearance == null else String(appearance.helm_id),
+		"chest_id": "" if appearance == null else String(appearance.chest_id),
+		"color_scheme_id": "" if appearance == null else String(appearance.color_scheme_id),
 		"weapon_path":
 		"" if loadout == null or loadout.weapon == null else loadout.weapon.resource_path,
 		"action_slots":
@@ -325,5 +346,31 @@ func _decode_build(data: Dictionary) -> MobaCharacterBuild:
 	build.secondary_discipline = data["secondary_discipline"]
 	build.stat_allocation.assign(data["stat_allocation"])
 	build.loadout = loadout
+	build.appearance = _decode_appearance(
+		data["helm_id"], data["chest_id"], data["color_scheme_id"]
+	)
 
 	return build
+
+
+# Rebuild a MobaAppearance from the three ids _encode_build() sent, or null when
+# all three are empty.
+#
+# Null rather than an all-empty MobaAppearance, because null is the value
+# MobaCharacterBuild.appearance and MobaAppearanceValidator both already read as
+# "no appearance set", and manufacturing an object here would hand every build
+# that never chose one an appearance it did not have. Nothing is lost either way:
+# an authored MobaAppearance whose three ids are all empty means precisely the
+# same thing as no appearance at all -- MobaAppearanceCatalog treats an empty id
+# as the legal "none" value in every category.
+func _decode_appearance(
+	helm_id: String, chest_id: String, color_scheme_id: String
+) -> MobaAppearance:
+	if helm_id == "" and chest_id == "" and color_scheme_id == "":
+		return null
+
+	var appearance := MobaAppearance.new()
+	appearance.helm_id = StringName(helm_id)
+	appearance.chest_id = StringName(chest_id)
+	appearance.color_scheme_id = StringName(color_scheme_id)
+	return appearance

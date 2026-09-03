@@ -21,6 +21,17 @@ const _DENIABLE_FAILURES: Array[StringName] = [
 @export var character_sheet: CharacterSheet
 @export var color: Color = Color.WHITE
 
+# The appearance the spawning build chose: helmet, chest piece, colour scheme,
+# each a catalog id rather than geometry. Assigned at spawn initialization by
+# WorldManager._spawn_actor() and LobbyManager._spawn_avatar(), from the plain
+# String ids their spawn payloads carry.
+#
+# Null is the default and the correct value for an actor that has no build --
+# world and bot content -- exactly as color and loadout are left alone for those
+# actors. Nothing renders this yet (#377 owns that); it is the replicated
+# reference a renderer will read.
+@export var appearance: MobaAppearance = null
+
 # Whether player input may target this actor for attack. Defaults to true so
 # existing hostile content (the Goblin) needs no data change; a friendly
 # NPC sets this false. Deliberately just a flag, not a faction/relationship

@@ -1,6 +1,7 @@
 ## A read-only panel showing another present player's submitted character build:
-## Disciplines, weapon, the four action slots, the passive slot, and the stat
-## allocation, as the server reported them.
+## Disciplines, weapon, the four action slots, the passive slot, the appearance
+## (helm, chest, colour scheme), and the stat allocation, as the server reported
+## them.
 ##
 ## Read-only in the strict sense. Nothing here writes to a build, and nothing
 ## here reaches a MobaCombatant: the panel renders one Dictionary the server
@@ -35,6 +36,9 @@ var _secondary_discipline_label: Label
 var _weapon_label: Label
 var _action_slot_labels: Array[Label] = []
 var _passive_slot_label: Label
+var _helm_label: Label
+var _chest_label: Label
+var _color_scheme_label: Label
 var _stats_container: VBoxContainer
 var _detail_container: VBoxContainer
 var _peers_container: VBoxContainer
@@ -193,6 +197,12 @@ func _resolve_controls() -> void:
 		_primary_discipline_label = disciplines.get_node_or_null(^"PrimaryDisciplineLabel")
 		_secondary_discipline_label = disciplines.get_node_or_null(^"SecondaryDisciplineLabel")
 
+	var appearance := _detail_container.get_node_or_null(^"AppearanceContainer")
+	if appearance != null:
+		_helm_label = appearance.get_node_or_null(^"HelmLabel")
+		_chest_label = appearance.get_node_or_null(^"ChestLabel")
+		_color_scheme_label = appearance.get_node_or_null(^"ColorSchemeLabel")
+
 	var actions := _detail_container.get_node_or_null(^"ActionsContainer")
 	if actions != null:
 		for i in range(4):
@@ -249,6 +259,14 @@ func _display_build(encoded_build: Dictionary) -> void:
 		var passive_id: String = encoded_build.get("passive_slot", "")
 		_passive_slot_label.text = "Passive: %s" % _ability_name(passive_id)
 
+	if _helm_label != null:
+		_helm_label.text = "Helm: %s" % _appearance_name(encoded_build.get("helm_id", ""))
+	if _chest_label != null:
+		_chest_label.text = "Chest: %s" % _appearance_name(encoded_build.get("chest_id", ""))
+	if _color_scheme_label != null:
+		var scheme_id: String = encoded_build.get("color_scheme_id", "")
+		_color_scheme_label.text = "Colour Scheme: %s" % _appearance_name(scheme_id)
+
 	_display_stat_allocation(encoded_build.get("stat_allocation", {}))
 
 
@@ -282,6 +300,18 @@ func _ability_name(ability_id: String) -> String:
 		return ability.name
 
 	return ability_id.capitalize()
+
+
+# Appearance id -> display name. The id itself is all the panel has: the
+# appearance catalog is a list of ids (rules/data/appearance/catalog.json), with
+# no display-name field to read, and the encoded payload carries the id for the
+# same reason it carries a weapon path -- it is the only naming information that
+# survives the wire. Empty is the catalog's legal "none" value and reads as such
+# rather than as a blank line.
+func _appearance_name(appearance_id: String) -> String:
+	if appearance_id == "":
+		return "None"
+	return appearance_id.capitalize()
 
 
 func _display_stat_allocation(stat_allocation: Dictionary) -> void:
@@ -330,6 +360,12 @@ func _show_not_present() -> void:
 		_weapon_label.text = ""
 	if _passive_slot_label != null:
 		_passive_slot_label.text = ""
+	if _helm_label != null:
+		_helm_label.text = ""
+	if _chest_label != null:
+		_chest_label.text = ""
+	if _color_scheme_label != null:
+		_color_scheme_label.text = ""
 
 	_display_stat_allocation({})
 
