@@ -2,7 +2,7 @@
 
 This document is retained as a record of the former Mikey's Game Bones MOBA Rules RPG
 backlog, reviewed on 2026-08-19. It is not the roadmap for
-`mikeys_gamebones-rules-moba` and does not authorize work in this repository.
+`mikeys_game_bones-rules-moba` and does not authorize work in this repository.
 
 The active MOBA rules-engine roadmap is
 [`rules/README.md`](rules/README.md). Design authority and the repository scope

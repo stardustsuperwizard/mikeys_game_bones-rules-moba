@@ -2,7 +2,7 @@
 
 ## Project Context
 
-This repo (`mikeys_gamebones-rules-moba`) is a Godot 4 **MOBA**. Its combat ruleset lives
+This repo (`mikeys_game_bones-rules-moba`) is a Godot 4 **MOBA**. Its combat ruleset lives
 as a self-contained module in `rules/`, with a Python balance harness in `sim/` and the
 playable game in `scenes/` and `scripts/`. Game content, scenes, and game-flow UI that serve
 this game are **in scope**.

@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Decomposes a Mikey's Game Bones MOBA Rules Intake Issue of any type (Feature, Task, Bug, Infrastructure, Dependency) into bounded Implementation Task GitHub sub-issues. Use when the user wants to plan or decompose an intake Issue into executable work. Local counterpart of .github/agents/01-planner.agent.md / agent-01-planner.yml.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, mcp__github__issue_read, mcp__github__issue_write
 # Opus, matching agent-01-planner.yml's PLANNER_MODELS rather than sitting a
 # tier below its own GitHub twin. Planning is where the expensive mistakes are
 # made -- a task scoped wrong is paid for by every session that touches it
@@ -162,15 +162,48 @@ candidate in a preference list that still escalates when a model is
 unavailable, and an operator who sets the `EXECUTOR_MODELS` repository
 variable outranks it entirely.
 
+## GitHub access
+
+`gh` exists in a desktop terminal and does **not** exist in a cloud session
+(Claude Code on the web, the Claude mobile app). Settle which one you are in
+once, with one command, before any GitHub call:
+
+```bash
+command -v gh >/dev/null 2>&1 && echo ENV=LOCAL || echo ENV=CLOUD
+```
+
+- `ENV=LOCAL` — use the `LOCAL` form at each call site below.
+- `ENV=CLOUD` — use the `CLOUD` form. `gh` is absent by design: do not
+  install it, do not curl the REST API, do not go looking for a token, and
+  do not treat its absence as an error worth reporting.
+
+Every call site below gives you both forms, written out in full. Use them
+verbatim. Never translate one form into the other yourself, and never guess
+a tool name — the `CLOUD` tools are granted to you by name in this agent's
+`tools:` list, so call them directly.
+
+Repository is always `owner="stardustsuperwizard"`,
+`repo="mikeys_game_bones-rules-moba"`.
+
 ## Procedure
 
 1. Fetch the Intake Issue and its comments. The `labels` field carries the
    type label; note it before reading the body:
 
    ```bash
-   gh issue view <n> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+   # LOCAL
+   gh issue view <n> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
      --json number,title,body,milestone,url,labels
-   gh api --paginate repos/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/<n>/comments
+   gh api --paginate repos/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/<n>/comments
+   ```
+
+   ```text
+   CLOUD — two calls to mcp__github__issue_read, same owner/repo/issue_number:
+     method="get"           -> title, body, milestone, url, labels
+     method="get_comments"  -> the comments (paginate with page/perPage)
+     owner="stardustsuperwizard"
+     repo="mikeys_game_bones-rules-moba"
+     issue_number=<n>
    ```
 
    Comments amend the Issue body — a later comment wins over the original
@@ -233,21 +266,79 @@ body.
 Use `.github/ISSUE_TEMPLATE/99-execute_task.md` as the body structure.
 
 ```bash
+# LOCAL
 gh issue create \
-  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+  --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --title "[impl] <task title>" \
   --body-file <prepared-body-file> \
   --label "implementation,machine" \
   --parent <parent-feature-number>
 ```
 
+```text
+CLOUD — call mcp__github__issue_write with:
+  method="create"
+  owner="stardustsuperwizard"
+  repo="mikeys_game_bones-rules-moba"
+  title="[impl] <task title>"
+  body="<the prepared body text>"
+  labels=["implementation", "machine"]
+  parent_issue_number=<parent-feature-number>
+
+`body` is text, not a file. `parent_issue_number` attaches the sub-issue in
+the same call, so no follow-up is needed for the hierarchy.
+```
+
+Then apply the task's model tier as a **second** call, once the Issue exists:
+
+```bash
+# LOCAL
+gh issue edit <new-issue-number> \
+  --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
+  --add-label "model:<haiku|sonnet|opus>"
+```
+
+```text
+CLOUD — call mcp__github__issue_write with:
+  method="update"
+  owner="stardustsuperwizard"
+  repo="mikeys_game_bones-rules-moba"
+  issue_number=<new-issue-number>
+  labels=["implementation", "machine", "model:<haiku|sonnet|opus>"]
+
+`labels` REPLACES the whole set here, where `gh issue edit --add-label` adds
+to it. List all three, or you will strip the two the create call just set.
+```
+
+Separately, and not on the create call, for one reason: `gh issue create`
+fails outright on a label that does not exist in the repository. Folding the
+tier in there would turn "the three `model:*` labels were never created" into
+"planning is broken", and lose the whole plan rather than one hint. As a
+follow-up, the worst case is an Issue with no tier label — which the executor
+already handles by falling back to its configured default.
+
+So if the edit fails, say so and carry on. Never abandon a filed task over it.
+
 When a task depends on another, wire it with a native dependency rather than
 a textual "Depends On" field:
 
 ```bash
+# LOCAL only
 gh issue edit <child-number> \
-  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+  --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --add-blocked-by <dependency-issue-number>
+```
+
+```text
+CLOUD — no equivalent exists. The GitHub MCP tools cover parent/child
+hierarchy but not blocked-by dependencies, so this step cannot be performed
+from a cloud session.
+
+Do NOT substitute a textual "Depends On" field, and do NOT skip it silently.
+Create the Issues as normal, then report at the end of the plan which
+dependency edges still need wiring, as a list of
+  <child-number> blocked-by <dependency-issue-number>
+pairs, so a human (or a later desktop session) can apply them.
 ```
 
 Copy the parent Feature's milestone when one exists. Apply only

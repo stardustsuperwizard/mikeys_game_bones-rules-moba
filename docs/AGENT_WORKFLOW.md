@@ -98,6 +98,19 @@ warns elsewhere against copying one spelling into the other. An Issue that
 named an id would bind the task to whichever pipeline used that namespace. A
 tier is meaningful to both, and each workflow maps it to its own ids.
 
+Both pipelines do. `agent-02-execute.yml` maps the tier to Copilot CLI ids;
+`agent-06-claude.yml`'s *Apply Per-Task Model Tier* step maps the same label
+to Claude Code ids for `claude:execute` and `claude:fix`. One decision, made
+once by the planner, read by whichever executor the label happens to summon.
+`claude:plan` and `claude:review` keep their configured models — planning and
+review are repository-wide judgements, not per-task ones.
+
+The Claude side escalates too, on the same signal: `claude:fix` counts the
+same `<!-- agent-fix-applied -->` comments `agent-05-fix.yml` counts, and
+climbs a tier per round past `CLAUDE_FIXER_ESCALATE_AFTER` (default `1`). A
+pull request fixed once by one pipeline therefore escalates on the other,
+which is the point of sharing a marker rather than each keeping its own tally.
+
 Four rules bound what the recommendation can do:
 
 - **It prepends, it does not replace.** `run-copilot-session` advances through
@@ -184,7 +197,7 @@ Error: Model "claude-opus-5" from --model flag is not available.
 ```
 
 which is what killed the first planner run
-([run 32452540331](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/actions/runs/32452540331)).
+([run 32452540331](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/actions/runs/32452540331)).
 The id was right — `claude-opus-5` is a documented Copilot CLI model — and the
 `copilot-requests: write` permission was present. It was an entitlement
 resolution, and there is a live history of those going wrong:
@@ -401,12 +414,16 @@ and their review verdicts.
 
 ## The workflow
 
-Six workflows in `.github/workflows/`, `agent-00` through `agent-05`. The
+Seven workflows in `.github/workflows/`, `agent-00` through `agent-06`. The
 number no longer maps to file purpose one-to-one — `agent-03-rollup.yml` and
 `agent-04-review.yml` swapped which number carries which role after
 `agent-05-fix.yml` was added — so treat the filename, not the number, as
 authoritative. Four spend AI credits (planner, execute, review, fix); two are
-plumbing and cost nothing (dashboard, rollup). `agent-00-dashboard.yml` no
+plumbing and cost nothing (dashboard, rollup). The seventh,
+`agent-06-claude.yml`, is the Claude Code side of the same four roles and
+spends a Claude subscription or Claude API tokens rather than AI credits; the
+diagram below covers the Copilot path only, and *Two executors* covers that
+one. `agent-00-dashboard.yml` no
 longer runs on every event — it renders on demand now. See *Issue views* and
 *The control plane* below.
 
@@ -608,7 +625,7 @@ keeping a mirror in sync. The board is gone and so is the secret. **Delete
 it** if it is still set:
 
 ```bash
-gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/mikeys_gamebones-rules-moba
+gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/mikeys_game_bones-rules-moba
 ```
 
 ### Step 1 — Planning
@@ -1306,6 +1323,32 @@ counterparts of the four roles, invoked as `/plan-feature`, `/execute-task`,
 | Review | `agent-04-review.yml` / `.github/agents/03-reviewer.agent.md` | `.claude/commands/review-task.md` / `.claude/agents/reviewer.md` |
 | Fix | `agent-05-fix.yml` / `.github/agents/05-fixer.agent.md` | `.claude/commands/fix-review.md` / `.claude/agents/fixer.md` |
 
+Each of those eight files opens with a **GitHub access** section, because the
+two Claude Code surfaces do not agree on how to reach GitHub. A desktop
+terminal has `gh`; a cloud session — Claude Code on the web, and therefore the
+Claude mobile app, which is a client for one — does not, and reaches GitHub
+through the `mcp__github__*` tools instead. Every GitHub call site in those
+files is written out twice, once per surface, and the section opens with a
+one-line probe (`command -v gh`) that settles which to use before any call.
+
+Spelling both forms out is the same reasoning that spelled the `gh` commands
+out in the first place. `executor` runs on Haiku; a cheap model given "fetch
+the Issue" will spend its budget discovering an API instead of implementing
+the task, and a cheap model that cannot find `gh` will try to install it. So
+the files say *use this exact call*, and say it for both surfaces, rather than
+describing the goal and leaving the route to be worked out. The subagents also
+name their `mcp__github__*` tools in `tools:`, which is what actually grants
+them — the prose alone would not.
+
+Two operations have no cloud form, and the files say so rather than
+improvising one: `--add-blocked-by` (the MCP tools cover parent/child
+hierarchy but not dependency edges, so the planner reports the pairs it could
+not wire) and the `closingIssuesReferences` GraphQL query (unnecessary, since
+this repository requires `Closes #<n>` on every PR body). One differs in
+semantics and is flagged where it is used: setting labels through
+`issue_write` replaces the whole set, where `gh pr edit --add-label` adds to
+it, so the reviewer reads the current labels first.
+
 ### `/feature-status` — where does this feature stand?
 
 The four roles above are four separate invocations, and between them someone
@@ -1373,6 +1416,82 @@ honored. Everything else — labels, the control plane, rollup, the
 dashboard — reads the Issue graph the same way regardless of which tool
 produced the diff, so switching tools mid-Feature, or per task, doesn't
 require picking one system and discarding the other.
+
+### Two executors
+
+`agent-06-claude.yml` gives the Claude Code roles the same label-driven entry
+point the Copilot roles have, for the reason *Mostly label-driven, on purpose*
+gives: adding a label is something every GitHub client can do, a phone
+included. Four labels, one per role:
+
+| Label | Target | Prompt | Model |
+| --- | --- | --- | --- |
+| `claude:plan` | intake Issue | `.claude/commands/plan-feature.md` | `vars.CLAUDE_PLANNER_MODEL`, default Opus 5 |
+| `claude:execute` | `[impl]` Issue | `.claude/commands/execute-task.md` | `vars.CLAUDE_EXECUTOR_MODEL`, default Haiku 4.5 |
+| `claude:review` | pull request | `.claude/commands/review-task.md` | `vars.CLAUDE_REVIEWER_MODEL`, default Opus 5 |
+| `claude:fix` | pull request | `.claude/commands/fix-review.md` | `vars.CLAUDE_FIXER_MODEL`, default Sonnet 5 |
+
+The tiers mirror the Copilot routing table above, for the same reason. The ids
+do not: these are Claude Code model ids (`claude-opus-5`,
+`claude-haiku-4-5-20251001`), not the Copilot CLI ids the other workflows pass
+to `--model`. The `CLAUDE_*` variable names keep the two namespaces from being
+confused, which *`model:` in an agent file takes a display name* warns about
+in the other direction.
+
+So the repository now has two executors, and the label namespaces are separate
+so that a choice between them is always explicit. `agent:execute` and
+`claude:execute` do the same job through different products, and **nothing
+stops both being added to one Issue.** They would race: two sessions, two
+branches, two pull requests closing the same task. Nothing in either workflow
+detects the other, deliberately — a cross-check would couple them and give
+each a way to suppress the other. Adding one label at a time is the contract.
+
+Which to reach for:
+
+- **`agent:*`** — the default. Copilot AI credits, a mature pipeline, and the
+  reviewer and rollup wired to it already.
+- **`claude:*`** — when the work wants a Claude Code session specifically:
+  a Claude subscription rather than AI credits, the `.claude/` subagents, or
+  a model the Copilot CLI will not resolve for the Actions identity. Also the
+  path that keeps working when a Copilot catalogue regression takes every
+  Anthropic model off the CLI, as it did in August 2026.
+
+`agent-06-claude.yml` is inert until someone completes the setup block at the
+top of the file: the Claude GitHub App installed, one of
+`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` added as a repository secret,
+and the four labels created. Without a secret it comments on the target saying
+which one is missing and then fails the run deliberately — the comment so the
+cause is readable from a phone, the failure so a request that never ran is not
+sitting in the checks list looking like one that did. What it avoids is the
+bare authentication error that says neither.
+
+One further secret is optional, and only matters for the roles that push.
+Unset, the session acts as `GITHUB_TOKEN`, and GitHub starts no workflow run
+from a pull request authored by that identity — so `godot-ci-validation.yml`
+and `gdscript-lint.yml`, both of which trigger on `pull_request`, would never
+run on a `claude:execute` PR. `agent-02-execute.yml` pushes the same way and
+has the same gap, so this is a repository-wide condition rather than one this
+workflow introduces. Setting `AGENT_GITHUB_TOKEN` — a PAT or App installation
+token with `contents: write` and `pull-requests: write` — makes the session act
+as that identity instead, and its pull requests do start CI.
+
+It is one file where the Copilot side is five, because
+`anthropics/claude-code-action` performs the branch, commit, push, pull
+request and comment plumbing that those five hand-roll. What remains per role
+is a prompt path and a model, so the roles are a `case` statement rather than
+four files sharing one guard to keep in sync.
+
+Its prompts are the same `.claude/commands/*.md` files a human invokes as
+`/execute-task` — one contract per role, not a workflow copy that drifts from
+the interactive one. It addresses them by path rather than as slash commands,
+because a slash command resolving inside the action is an assumption the
+workflow does not need to make; reading a checked-out file is not.
+
+**What has not been proven.** This workflow has never run. It was written and
+reviewed but not executed, because it needs a secret only the repository owner
+can add. The first run should be a `claude:review` on a pull request that is
+already reviewed by other means, where a wrong verdict costs nothing — not a
+`claude:execute` on real work.
 
 ## Running in VS Code
 
@@ -1469,7 +1588,7 @@ Re-check these with the commands rather than trusting this table.
 | --- | --- |
 | `AgentAssignmentInput` has no model field | `gh api graphql -f query='{__type(name:"AgentAssignmentInput"){inputFields{name}}}'` |
 | `customAgent` exists on that input | same command |
-| Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"sword-and-planet"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
+| Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"mikeys_game_bones-rules-moba"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
 | `gh agent-task create` has no `--model` | `gh agent-task create --help` |
 | The `plan` queue is not stale | `gh issue list --label plan --json number,title,labels` — nothing here should also carry `planned` |
 | Derived state matches reality | `.github/scripts/render-dashboard.py --json` |

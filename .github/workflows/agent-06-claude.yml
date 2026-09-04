@@ -1,0 +1,446 @@
+# Runs the Claude Code side of the pipeline from a label, so that every role
+# has an entry point reachable from a phone.
+#
+# WHY THIS IS ONE FILE AND NOT FOUR
+#
+# `agent-01` through `agent-05` are one workflow per role because each one
+# hand-rolls the plumbing around its Copilot CLI session: resolve the target,
+# create a branch, commit, push, open or update a pull request, post a
+# comment, swap labels. That is where their 200-2100 lines go, and it is why
+# splitting them was right.
+#
+# `anthropics/claude-code-action` does all of that itself. What is left of a
+# role here is which prompt it gets and which model runs it -- two table rows.
+# Four files differing by two rows each would be four copies of the same
+# guard, secret check and label teardown to keep in sync, so this is a routing
+# table instead. If a role ever needs real per-role plumbing, split it out
+# then; nothing here depends on the roles sharing a file.
+#
+# WHY IT REUSES `.claude/commands/*.md`
+#
+# The prompt for each role is the same file a human invokes as `/execute-task`
+# in a terminal or from the Claude mobile app. There is one contract per role,
+# not a workflow copy that drifts from the interactive one -- the same
+# reasoning `CLAUDE.md` gives for pointing at `AGENTS.md` rather than copying
+# it.
+#
+# Those files are addressed by path rather than invoked as `/execute-task`,
+# because a slash command resolving inside the action is an assumption this
+# workflow does not need to make. Reading a checked-out file is not.
+#
+# LABEL DISCIPLINE
+#
+# Same as every other workflow here: the label is a button, not a state. The
+# run removes the label it consumed, so re-adding it is a clean retry and no
+# workflow fires on its own output. `claude:*` is a separate namespace from
+# `agent:*` on purpose -- see *Two executors* in docs/AGENT_WORKFLOW.md.
+#
+# SETUP -- required once, and this workflow is inert until it is done
+#
+#   1. Install the Claude GitHub App: https://github.com/apps/claude
+#   2. Add ONE of these repository secrets:
+#        CLAUDE_CODE_OAUTH_TOKEN -- from `claude setup-token`, billed to a
+#                                   Claude subscription rather than AI credits
+#        ANTHROPIC_API_KEY       -- a Claude API key, billed per token
+#   3. Create the four labels: claude:plan, claude:execute, claude:review,
+#      claude:fix
+#
+# Optional, and only for the roles that push:
+#
+#   4. AGENT_GITHUB_TOKEN -- a PAT or App installation token carrying
+#      `contents: write` and `pull-requests: write`. Unset, the session acts
+#      as GITHUB_TOKEN and the pull requests it opens start no CI, because
+#      GitHub does not trigger workflows from that identity. See the identity
+#      note on the session step for the full reasoning.
+#
+# Without one of the step-2 secrets, the guard below comments on the target
+# saying which one is missing, and then fails the run on purpose. Both halves
+# are the point: the comment is what makes it diagnosable from a phone, and
+# the red mark is what keeps a request that never ran from sitting in the
+# checks list looking like one that did. What it does not do is fail with a
+# bare authentication error that says nothing about the cause.
+
+name: Agent - AW06 Claude Code
+
+on:
+  issues:
+    types:
+      - labeled
+
+  # `pull_request`, not `pull_request_target`: every pull request in this
+  # repository comes from a branch in this repository, so the token is
+  # writable already and `_target`'s fork-token hazard buys nothing. This is
+  # the same call agent-00-dashboard.yml documents for the same reason.
+  pull_request:
+    types:
+      - labeled
+
+  workflow_dispatch:
+    inputs:
+      role:
+        description: "Which role to run"
+        required: true
+        type: choice
+        options:
+          - plan
+          - execute
+          - review
+          - fix
+      number:
+        description: "Issue number (plan, execute) or PR number (review, fix)"
+        required: true
+        type: number
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  # Required by claude-code-action for its default GitHub App authentication.
+  id-token: write
+  # Lets the session read CI results on a pull request.
+  actions: read
+
+concurrency:
+  # One run per target, not per role: two roles racing on the same Issue or
+  # pull request would fight over the same branch.
+  group: agent-claude-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude:
+    name: Agent - AW06 Claude Code
+    runs-on: ubuntu-latest
+
+    # Terminate every unrelated label event before a runner is allocated.
+    # This workflow subscribes to `labeled` on every Issue and pull request in
+    # the repository; all but four label names stop here, costing nothing.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' &&
+       (github.event.label.name == 'claude:plan' ||
+        github.event.label.name == 'claude:execute')) ||
+      (github.event_name == 'pull_request' &&
+       (github.event.label.name == 'claude:review' ||
+        github.event.label.name == 'claude:fix'))
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # The session needs history to branch from and to diff against.
+          fetch-depth: 0
+          # This is the credential actions/checkout persists into .git/config,
+          # so it is what the session's `git push` authenticates as. See the
+          # identity note on the session step below for why that matters.
+          token: ${{ secrets.AGENT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Resolve Role And Target
+        id: route
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Booleans, never the values. Interpolating a secret into a shell
+          # script puts it on the runner's command line; comparing in the
+          # expression context and passing the result does not.
+          HAS_OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          HAS_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ROLE="${{ inputs.role }}"
+            NUMBER="${{ inputs.number }}"
+            LABEL=""
+          else
+            LABEL="${{ github.event.label.name }}"
+            ROLE="${LABEL#claude:}"
+            NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+          fi
+
+          # The routing table. Prompt file, model tier, and whether the target
+          # is an Issue or a pull request.
+          #
+          # The model tiers mirror the Copilot routing table in
+          # docs/AGENT_WORKFLOW.md for the same reason it gives: reasoning is
+          # worth paying for where decisions are made, not where they are
+          # executed. Planning and review read a lot and write little; the
+          # executor's work is bounded by a contract someone else wrote.
+          #
+          # These are Claude Code model ids, NOT the Copilot CLI ids the other
+          # workflows pass to `--model`. AGENT_WORKFLOW.md warns against
+          # copying one spelling into the other; the separate `CLAUDE_*`
+          # variable names keep the two namespaces from being confused.
+          case "$ROLE" in
+            plan)
+              PROMPT_FILE=".claude/commands/plan-feature.md"
+              MODEL="${{ vars.CLAUDE_PLANNER_MODEL || 'claude-opus-5' }}"
+              TARGET="issue"
+              ;;
+            execute)
+              PROMPT_FILE=".claude/commands/execute-task.md"
+              MODEL="${{ vars.CLAUDE_EXECUTOR_MODEL || 'claude-haiku-4-5-20251001' }}"
+              TARGET="issue"
+              ;;
+            review)
+              PROMPT_FILE=".claude/commands/review-task.md"
+              MODEL="${{ vars.CLAUDE_REVIEWER_MODEL || 'claude-opus-5' }}"
+              TARGET="pr"
+              ;;
+            fix)
+              PROMPT_FILE=".claude/commands/fix-review.md"
+              MODEL="${{ vars.CLAUDE_FIXER_MODEL || 'claude-sonnet-5' }}"
+              TARGET="pr"
+              ;;
+            *)
+              echo "Unroutable role: $ROLE" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ ! -f "$PROMPT_FILE" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=missing-prompt" >> "$GITHUB_OUTPUT"
+            echo "detail=$PROMPT_FILE" >> "$GITHUB_OUTPUT"
+          elif [ "$HAS_OAUTH" != "true" ] && [ "$HAS_API_KEY" != "true" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=no-secret" >> "$GITHUB_OUTPUT"
+            echo "detail=" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "reason=" >> "$GITHUB_OUTPUT"
+            echo "detail=" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "role=$ROLE"
+            echo "number=$NUMBER"
+            echo "label=$LABEL"
+            echo "model=$MODEL"
+            echo "prompt_file=$PROMPT_FILE"
+            echo "target=$TARGET"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Routing $ROLE -> $PROMPT_FILE on $MODEL, target #$NUMBER"
+
+      # The same per-task tier agent-02-execute.yml reads, mapped into Claude
+      # Code model ids instead of Copilot CLI ones. The Issue carries a tier
+      # (`model:haiku` / `model:sonnet` / `model:opus`), never an id, exactly
+      # so both pipelines can honour one decision without sharing a spelling.
+      #
+      # Only the two roles that act on a task care. Planning and review are
+      # repository-wide judgements and keep their configured models.
+      - name: Apply Per-Task Model Tier
+        id: tier
+        if: >-
+          steps.route.outputs.ok == 'true' &&
+          (steps.route.outputs.role == 'execute' ||
+           steps.route.outputs.role == 'fix')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROLE: ${{ steps.route.outputs.role }}
+          NUMBER: ${{ steps.route.outputs.number }}
+          DEFAULT_MODEL: ${{ steps.route.outputs.model }}
+          ESCALATE_AFTER: ${{ vars.CLAUDE_FIXER_ESCALATE_AFTER || '1' }}
+        run: |
+          set -euo pipefail
+
+          rank() {
+            case "$1" in
+              haiku) echo 1 ;; sonnet) echo 2 ;; opus) echo 3 ;; *) echo 0 ;;
+            esac
+          }
+
+          id_for() {
+            case "$1" in
+              1) echo "claude-haiku-4-5-20251001" ;;
+              2) echo "claude-sonnet-5" ;;
+              3) echo "claude-opus-5" ;;
+            esac
+          }
+
+          # `execute` is labelled on the Issue it targets. `fix` targets a
+          # pull request, so the tier comes from the Issue that pull request
+          # closes -- this repository requires `Closes #<n>` in every body.
+          if [ "$ROLE" = "execute" ]; then
+            ISSUE="$NUMBER"
+            PRIOR=0
+          else
+            ISSUE="$(
+              gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
+                --json closingIssuesReferences \
+                --jq '.closingIssuesReferences[0].number // empty'
+            )"
+
+            # Completed fix rounds, from the marker agent-05-fix.yml posts
+            # when a fix was actually pushed. Same signal, same meaning, so a
+            # pull request fixed by either pipeline escalates on the other.
+            PRIOR="$(
+              gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
+                --json comments \
+                --jq '[.comments[]
+                       | select(.body | contains("<!-- agent-fix-applied -->"))]
+                      | length'
+            )"
+          fi
+
+          TIER_RANK=0
+
+          if [ -n "$ISSUE" ]; then
+            while read -r label; do
+              case "$label" in
+                model:*) CANDIDATE="$(rank "${label#model:}")" ;;
+                *) continue ;;
+              esac
+
+              if [ "$CANDIDATE" -gt "$TIER_RANK" ]; then
+                TIER_RANK="$CANDIDATE"
+              fi
+            done < <(
+              gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+                --json labels --jq '.labels[].name' 2>/dev/null || true
+            )
+          fi
+
+          # The fixer never goes below where it already runs -- it answers a
+          # reviewer who has read the code, and a cheap executor's tier is a
+          # bet placed before the code existed. It does climb: one step per
+          # round past ESCALATE_AFTER, capped at opus. Same rule
+          # FIXER_ESCALATE_AFTER applies on the Copilot side.
+          if [ "$ROLE" = "fix" ]; then
+            if [ "$TIER_RANK" -lt 2 ]; then
+              TIER_RANK=2
+            fi
+
+            STEPS_UP=$(( PRIOR - ESCALATE_AFTER + 1 ))
+
+            if [ "$STEPS_UP" -lt 0 ]; then
+              STEPS_UP=0
+            fi
+
+            TIER_RANK=$(( TIER_RANK + STEPS_UP ))
+
+            if [ "$TIER_RANK" -gt 3 ]; then
+              TIER_RANK=3
+            fi
+          fi
+
+          if [ "$TIER_RANK" -eq 0 ]; then
+            echo "model=$DEFAULT_MODEL" >> "$GITHUB_OUTPUT"
+            echo "No model:* tier for #${ISSUE:-$NUMBER};" \
+                 "using the configured default $DEFAULT_MODEL."
+            exit 0
+          fi
+
+          RESOLVED="$(id_for "$TIER_RANK")"
+          echo "model=$RESOLVED" >> "$GITHUB_OUTPUT"
+
+          if [ "$ROLE" = "fix" ]; then
+            echo "Fix round $(( PRIOR + 1 )) ($PRIOR completed);" \
+                 "escalating after $ESCALATE_AFTER."
+          fi
+
+          echo "Resolved model for $ROLE on #$NUMBER: $RESOLVED"
+
+      # Consume the label before the session runs, not after. A run that
+      # crashes mid-session must still leave the label removed, or re-adding
+      # it -- the retry gesture every other workflow here relies on -- cannot
+      # retrigger anything.
+      - name: Consume The Label
+        if: steps.route.outputs.label != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.route.outputs.target }}" = "issue" ]; then
+            gh issue edit "${{ steps.route.outputs.number }}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "${{ steps.route.outputs.label }}" || true
+          else
+            gh pr edit "${{ steps.route.outputs.number }}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "${{ steps.route.outputs.label }}" || true
+          fi
+
+      # A guard failure that says nothing is the failure mode agent-04 called
+      # out: the run goes red, the target looks untouched, and nobody knows
+      # why. Say it on the target itself, where the person who added the
+      # label is looking -- and then still fail, so the run is not green.
+      # Commenting and failing are complementary here, not alternatives.
+      - name: Report Guard Failure
+        if: steps.route.outputs.ok != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "${{ steps.route.outputs.reason }}" in
+            no-secret)
+              MSG=$'`claude:${{ steps.route.outputs.role }}` did not run: this repository has neither `CLAUDE_CODE_OAUTH_TOKEN` nor `ANTHROPIC_API_KEY` set as a secret.\n\nAdd one of them under Settings > Secrets and variables > Actions, then re-add the label. `CLAUDE_CODE_OAUTH_TOKEN` comes from `claude setup-token` and bills to a Claude subscription; `ANTHROPIC_API_KEY` bills per token. See the setup block at the top of `.github/workflows/agent-06-claude.yml`.'
+              ;;
+            missing-prompt)
+              MSG="\`claude:${{ steps.route.outputs.role }}\` did not run: its prompt file \`${{ steps.route.outputs.detail }}\` is missing from this branch."
+              ;;
+            *)
+              MSG="\`claude:${{ steps.route.outputs.role }}\` did not run: ${{ steps.route.outputs.reason }}."
+              ;;
+          esac
+
+          gh issue comment "${{ steps.route.outputs.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$MSG"
+
+          echo "::error::${{ steps.route.outputs.reason }}"
+          exit 1
+
+      # Only the roles that run validate-godot.sh need the engine. The
+      # planner writes no files and the reviewer is read-only against code,
+      # so installing it for them is pure runner time.
+      - name: Setup Godot
+        if: >-
+          steps.route.outputs.ok == 'true' &&
+          (steps.route.outputs.role == 'execute' ||
+           steps.route.outputs.role == 'fix')
+        uses: ./.github/actions/setup-godot
+
+      # WHICH IDENTITY THE SESSION ACTS AS
+      #
+      # `github_token` is deliberately not passed, and that much does what it
+      # says: with no override the action mints a Claude GitHub App token over
+      # OIDC for its own GitHub calls, with no fallback to GITHUB_TOKEN.
+      #
+      # It does not follow that the *session's* calls go out as the App. The
+      # prompt below puts the session on the LOCAL (`gh`) form of every call
+      # site; `gh` reads GH_TOKEN from this step's env, and `git push` uses the
+      # credential actions/checkout persisted. Both are settled here and in the
+      # checkout step, not by the action.
+      #
+      # Left at GITHUB_TOKEN, a pull request this session opens is authored by
+      # GITHUB_TOKEN, and GitHub does not start workflow runs from those. Every
+      # gate in this repository triggers on `pull_request`, so Godot validation
+      # and gdscript-lint would never run on a `claude:execute` PR -- the exact
+      # outcome an earlier version of this comment claimed to prevent.
+      # agent-02-execute.yml pushes the same way and has the same gap, so this
+      # is a repository-wide condition rather than something new here.
+      #
+      # Setting the optional AGENT_GITHUB_TOKEN secret closes it for this
+      # workflow: the session acts as that identity instead, and the pull
+      # requests it opens do start CI. Unset, behaviour is unchanged.
+      - name: Run Claude Code Session
+        if: steps.route.outputs.ok == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: >-
+            Read ${{ steps.route.outputs.prompt_file }} and follow it exactly,
+            treating its $ARGUMENTS placeholder as
+            ${{ steps.route.outputs.number }}.
+
+            You are running in GitHub Actions, not an interactive session. The
+            `gh` CLI is available here, so the LOCAL form of every call site in
+            that file applies. Nobody is watching this run: where the file says
+            to confirm with the user before proceeding, stop instead and say
+            why on the target, rather than proceeding unconfirmed.
+          claude_args: >-
+            --model ${{ steps.tier.outputs.model || steps.route.outputs.model }}
+            --max-turns 60
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
