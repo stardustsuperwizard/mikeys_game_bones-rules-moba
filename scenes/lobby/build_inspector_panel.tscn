@@ -107,6 +107,28 @@ text = "Action 4: Ability Name"
 layout_mode = 2
 text = "Passive: Ability Name"
 
+; Helm, chest and colour scheme, the three ids MobaAppearance carries. Labels
+; only: this panel reads a build, it never renders a character.
+[node name="AppearanceContainer" type="VBoxContainer" parent="Panel/VBoxContainer/DetailContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="AppearanceLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer/AppearanceContainer"]
+layout_mode = 2
+text = "Appearance:"
+
+[node name="HelmLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer/AppearanceContainer"]
+layout_mode = 2
+text = "Helm: Basic Helm"
+
+[node name="ChestLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer/AppearanceContainer"]
+layout_mode = 2
+text = "Chest: Basic Chest"
+
+[node name="ColorSchemeLabel" type="Label" parent="Panel/VBoxContainer/DetailContainer/AppearanceContainer"]
+layout_mode = 2
+text = "Colour Scheme: Crimson"
+
 [node name="StatsContainer" type="VBoxContainer" parent="Panel/VBoxContainer/DetailContainer"]
 layout_mode = 2
 theme_override_constants/separation = 4
