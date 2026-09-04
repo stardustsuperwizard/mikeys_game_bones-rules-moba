@@ -55,3 +55,10 @@ criteria that aren't finished yet produces a misleading verdict.
 
 Otherwise, delegate the review to the `reviewer` subagent, giving it the PR
 number and the fetched content above as context.
+
+If the invoker passed a CI outcome — `/execute-task` does, having just
+watched the checks settle — pass it through verbatim: green, red with the
+failing job's output, "no checks applied", or "CI suppressed". A reviewer
+that is not told CI is red reviews around it and hands back a `PASS` on a PR
+that cannot merge. If nobody passed one, say in the report that the verdict
+was reached without a CI result rather than implying the checks were green.

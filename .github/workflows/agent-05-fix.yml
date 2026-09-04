@@ -3,7 +3,7 @@ name: Agent - PR Fix
 # Applies a bounded correction to a pull request in response to its most
 # recent `VERDICT: FIX` review comment, on the same branch.
 #
-# This is the automated counterpart of running `/fix-review <pr-number>`
+# This is the automated counterpart of running `/fixer <pr-number>`
 # locally, or commenting `@copilot` on a `review:fix` pull request.
 #
 # The gathering and prompt-building work is shared with
@@ -319,7 +319,7 @@ jobs:
               MSG="The most recent review verdict is \`PASS\`. There is nothing to fix."
               ;;
             PLANNING*)
-              MSG="The most recent review verdict is \`PLANNING FAILURE\`. This is not a bounded implementation defect -- it needs to go back through planning (re-run \`/plan-feature\` on the parent Feature), not an automated fix."
+              MSG="The most recent review verdict is \`PLANNING FAILURE\`. This is not a bounded implementation defect -- it needs to go back through planning (re-run \`/planner\` on the parent Feature), not an automated fix."
               ;;
             DESIGN*)
               MSG="The most recent review verdict is \`DESIGN AMBIGUITY\`. Only a human can resolve this -- the fixer does not guess at design intent."
