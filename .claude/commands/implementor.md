@@ -1,6 +1,5 @@
 ---
-description: Implement one Implementation Task Issue and open the PR that
-closes it (local counterpart of the agent:implementor:copilot label)
+description: Implement one Implementation Task Issue and open the PR that closes it (local counterpart of the agent:implementor:copilot label)
 argument-hint: <task-issue-number>
 ---
 
@@ -29,8 +28,8 @@ command -v gh >/dev/null 2>&1 && echo ENV=LOCAL || echo ENV=CLOUD
 Every call site below gives you both forms, written out in full. Use them
 verbatim. Never translate one form into the other yourself, and never guess
 a tool name. The `CLOUD` tools may need their schema loaded first — if one
-is not already callable, run `ToolSearch` once with `select:<tool-name>`,
-then call it.
+is not already callable, run `ToolSearch` once with `select:<tool-name>`, then
+call it.
 
 Repository is always `owner="stardustsuperwizard"`,
 `repo="mikeys_game_bones-rules-moba"`.
@@ -45,11 +44,9 @@ gh issue view $ARGUMENTS --repo stardustsuperwizard/mikeys_game_bones-rules-moba
 ```
 
 ```text
-CLOUD — call mcp__github__issue_read with:
-  method="get"
+CLOUD — call mcp__github__issue_read with: method="get"
   owner="stardustsuperwizard"
-  repo="mikeys_game_bones-rules-moba"
-  issue_number=$ARGUMENTS
+  repo="mikeys_game_bones-rules-moba" issue_number=$ARGUMENTS
 
 Returns title, body, url, state, labels and the parent link in one call.
 ```
@@ -110,8 +107,8 @@ reports no PR — it stopped on an ambiguity, or validation failed for a
 reason inside the task's scope — report that. There is no PR to point at,
 and saying so is the whole result.
 
-If the report is unclear about which PR it opened, resolve it from the
-branch rather than guessing:
+If the report is unclear about which PR it opened, resolve it from the branch
+rather than guessing:
 
 ```bash
 # LOCAL
@@ -120,8 +117,7 @@ gh pr list --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
 ```
 
 ```text
-CLOUD — call mcp__github__list_pull_requests with:
-  owner="stardustsuperwizard"
+CLOUD — call mcp__github__list_pull_requests with: owner="stardustsuperwizard"
   repo="mikeys_game_bones-rules-moba"
   head="stardustsuperwizard:<the-branch>"
 ```

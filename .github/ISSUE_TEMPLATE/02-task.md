@@ -47,8 +47,7 @@ Add the `blocker` label to any Issue with a `Blocks` row.
 `.github/workflows/issue-dependencies.yml` reads this table and creates
 GitHub's native blocked-by relationship from it, which is what the control
 plane orders by and what `agent:implementor:copilot` refuses to run past.
-Write the row;
-do not wire the relationship by hand.
+Write the row; do not wire the relationship by hand.
 
 Leave the `None` row exactly as it is when there are no dependencies.
 -->

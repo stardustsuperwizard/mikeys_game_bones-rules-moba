@@ -227,7 +227,9 @@ def classify_feature(issue: dict) -> tuple[str, dict]:
     if issue["state"] == "CLOSED":
         return DONE, detail
 
-    if "agent:plan" in label_names(issue):
+    # Matches either vendor form. The pre-vendor `agent:plan` is gone, so
+    # testing for it here would report every in-flight plan as "awaiting".
+    if any(n.startswith("agent:planner:") for n in label_names(issue)):
         return PLANNING, detail
 
     children = (issue.get("subIssues") or {}).get("nodes") or []
@@ -341,7 +343,7 @@ def render(model: dict, repo: str | None) -> str:
                 "🔑 means the task expects to touch `.github/workflows/` or "
                 "`.github/actions/`, which `GITHUB_TOKEN` cannot push — so "
                 "the paste-into-Copilot instruction above does not apply to "
-                "it, and `agent:execute` is refused. Run it from a "
+                "it, and `agent:implementor:*` is refused. Run it from a "
                 "human-credentialed session (Claude Code) instead; the "
                 "task's own **Run This Task** block says so too.",
             ]
@@ -439,14 +441,15 @@ def render(model: dict, repo: str | None) -> str:
             f"| {row['state']} | {tally} |"
         )
 
-    # The queue for `agent:plan`. Long enough to collapse, but leaving it off
+    # The queue for `agent:planner:*`. Long enough to collapse, but leaving it off
     # entirely is how a backlog becomes invisible.
     waiting = sorted([f for f in features if f["state"] == UNPLANNED],
                      key=lambda r: r["issue"]["number"])
     out += ["", f"## Awaiting planning ({len(waiting)})", ""]
     if waiting:
         out += [
-            "Add **`agent:plan`** to one of these when it is genuinely ready "
+            "Add **`agent:planner:copilot`** or **`agent:planner:claude`** to "
+            "one of these when it is genuinely ready "
             "to be decomposed — not when it was filed.",
             "",
             "<details><summary>Show all</summary>",

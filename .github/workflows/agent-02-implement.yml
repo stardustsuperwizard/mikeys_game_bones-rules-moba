@@ -1054,7 +1054,7 @@ jobs:
 
           subprocess.run(
               ["gh", "issue", "edit", issue_number, "--repo", repo,
-               "--remove-label", os.environ.get("TRIGGER_LABEL") or "agent:implementor:copilot"],
+               "--remove-label", os.environ.get("TRIGGER_LABEL") or ""],
               check=False,
           )
 

@@ -142,9 +142,7 @@ jobs:
           set -euo pipefail
 
           # A `ready_for_review` run and a workflow_dispatch have no label to
-          # read, and the legacy `agent:reviewer:copilot` label has no vendor segment. All
-          # three mean copilot, which is what they have always meant. Stage 4
-          # retires the legacy label.
+          # read; both mean copilot, which is the surface they came from.
           case "$LABEL" in
             agent:reviewer:claude)  VENDOR=claude ;;
             agent:reviewer:copilot) VENDOR=copilot ;;
@@ -469,19 +467,28 @@ jobs:
           # Removed last: if the comment call fails, the label is still there
           # and the pull request still looks like it is awaiting review, which
           # is the truthful state.
-          subprocess.run(
-              [
-                  "gh",
-                  "pr",
-                  "edit",
-                  pr_number,
-                  "--repo",
-                  repo,
-                  "--remove-label",
-                  "agent:reviewer:copilot",
-              ],
-              check=False,
-          )
+          #
+          # The label that was pressed, not a hardcoded one -- otherwise an
+          # `agent:reviewer:claude` run leaves the claude label attached and
+          # re-adding it cannot retrigger, which is exactly what the message
+          # above promises it can. Empty on a dispatch or ready_for_review run,
+          # which pressed no button.
+          trigger_label = os.environ.get("TRIGGER_LABEL") or ""
+
+          if trigger_label:
+              subprocess.run(
+                  [
+                      "gh",
+                      "pr",
+                      "edit",
+                      pr_number,
+                      "--repo",
+                      repo,
+                      "--remove-label",
+                      trigger_label,
+                  ],
+                  check=False,
+              )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("\n" + body + "\n")

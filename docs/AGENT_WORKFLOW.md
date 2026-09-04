@@ -373,13 +373,12 @@ assignee screen offers a model and no agent anywhere.
 **For the three cloud-agent entry points: take the model, every time.** The
 `implementor` profile is worth nothing to a cloud session: its `tools:` list is
 ignored because the cloud agent's toolset is fixed, its `model:` line is
-ignored because you just picked one, and its prose is mirrored into
-*Executing an Implementation Task* in `.github/copilot-instructions.md`,
-which **every** cloud session reads no matter how it started. If you'd
-rather not be at a picker at all, that's what `agent:implementor:copilot` is
-for — it
-gives up the live choice on purpose, in exchange for full automation. See
-*Step 2 — Execution* below.
+ignored because you just picked one, and its prose is mirrored into *Executing
+an Implementation Task* in `.github/copilot-instructions.md`, which **every**
+cloud session reads no matter how it started. If you'd rather not be at a
+picker at all, that's what `agent:implementor:copilot` is for — it gives up
+the live choice on purpose, in exchange for full automation. See *Step 2 —
+Execution* below.
 
 What a pasted session does not give you for free is a link back to the Issue,
 because it takes a free-text task description instead. That gap is closed by

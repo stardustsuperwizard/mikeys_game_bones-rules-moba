@@ -1,7 +1,5 @@
 ---
-description: Review a pull request against its Implementation Task Issue's
-acceptance criteria and publish a verdict (local counterpart of the
-agent:reviewer:copilot label)
+description: Review a pull request against its Implementation Task Issue's acceptance criteria and publish a verdict (local counterpart of the agent:reviewer:copilot label)
 argument-hint: <pr-number>
 ---
 
@@ -25,14 +23,14 @@ command -v gh >/dev/null 2>&1 && echo ENV=LOCAL || echo ENV=CLOUD
 Every call site below gives you both forms, written out in full. Use them
 verbatim. Never translate one form into the other yourself, and never guess
 a tool name. The `CLOUD` tools may need their schema loaded first — if one
-is not already callable, run `ToolSearch` once with `select:<tool-name>`,
-then call it.
+is not already callable, run `ToolSearch` once with `select:<tool-name>`, then
+call it.
 
 Repository is always `owner="stardustsuperwizard"`,
 `repo="mikeys_game_bones-rules-moba"`.
 
-First fetch it and the Issue it closes so you have real content to hand
-off, not a guess:
+First fetch it and the Issue it closes so you have real content to hand off,
+not a guess:
 
 ```bash
 # LOCAL
@@ -45,10 +43,8 @@ gh pr diff $ARGUMENTS --repo stardustsuperwizard/mikeys_game_bones-rules-moba
 CLOUD — two calls to mcp__github__pull_request_read, same arguments except
 `method`:
   method="get"       -> number, title, body, url, head.ref, draft
-  method="get_diff"  -> the diff
-  owner="stardustsuperwizard"
-  repo="mikeys_game_bones-rules-moba"
-  pullNumber=$ARGUMENTS
+  method="get_diff"  -> the diff owner="stardustsuperwizard"
+  repo="mikeys_game_bones-rules-moba" pullNumber=$ARGUMENTS
 ```
 
 If the PR doesn't exist or is still a draft, say so and confirm with the

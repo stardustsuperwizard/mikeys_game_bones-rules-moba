@@ -46,10 +46,8 @@ jobs:
     name: Agent - AW01 Plan Tasks
     runs-on: ubuntu-latest
 
-    # Three ways in. `agent:planner:{vendor}` is the standard form -- one
-    # role, one vendor, one label. `agent:planner:copilot` is the legacy trigger, kept
-    # working here and retired in Stage 4 rather than broken mid-migration:
-    # it means copilot, which is what it has always meant.
+    # Two ways in: the label, or a manual dispatch. One role, one vendor,
+    # one label -- the vendor segment is the whole difference between them.
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event.label.name == 'agent:planner:copilot' ||
@@ -755,9 +753,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # workflow_dispatch has no label, so it takes the input; the legacy
-          # `agent:planner:copilot` label has no vendor segment and means copilot, which
-          # is what it has always meant. Stage 4 retires it.
+          # workflow_dispatch has no label, so it takes the input.
           case "$LABEL" in
             agent:planner:claude)  VENDOR=claude ;;
             agent:planner:copilot) VENDOR=copilot ;;
