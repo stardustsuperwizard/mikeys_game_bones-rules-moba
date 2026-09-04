@@ -406,6 +406,10 @@ jobs:
           echo "model=$RESOLVED" >> "$GITHUB_OUTPUT"
           echo "Resolved model for $ROLE on #$NUMBER: $RESOLVED"
 
+      # Consume the label before the session runs, not after. A run that
+      # crashes mid-session must still leave the label removed, or re-adding
+      # it -- the retry gesture every other workflow here relies on -- cannot
+      # retrigger anything.
       - name: Consume The Label
         if: steps.route.outputs.label != ''
         env:
