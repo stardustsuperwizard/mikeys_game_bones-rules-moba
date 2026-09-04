@@ -241,6 +241,14 @@ jobs:
           DEFAULT_MODEL: ${{ steps.route.outputs.model }}
           ESCALATE_AFTER: ${{ vars.CLAUDE_FIXER_ESCALATE_AFTER || '1' }}
 
+          # Lower bound on what a planner may ask for on this pipeline, so
+          # the cheap tier can be taken out of circulation repository-wide
+          # without editing the planner's rubric or relabelling any Issue.
+          # The Copilot counterpart is EXECUTOR_TIER_FLOOR; like it, this
+          # binds `execute` only -- `fix` already has a floor in the model
+          # it is configured with.
+          TIER_FLOOR: ${{ vars.CLAUDE_EXECUTOR_TIER_FLOOR || 'haiku' }}
+
           # Whether an operator named the model for this role. Captured before
           # the `||` default in the route step, because once that expression
           # has collapsed to a value there is no way to tell a deliberate
@@ -268,6 +276,12 @@ jobs:
           # The inverse, so the configured default can be compared against a
           # tier. An id this does not recognise ranks 0 and is treated as
           # "leave it alone unless escalation genuinely climbs past it".
+          name_for() {
+            case "$1" in
+              1) echo haiku ;; 2) echo sonnet ;; 3) echo opus ;;
+            esac
+          }
+
           rank_of_id() {
             case "$1" in
               claude-haiku-4-5-20251001) echo 1 ;;
@@ -355,6 +369,24 @@ jobs:
               echo "No model:* tier on #$ISSUE;" \
                    "using the configured default $DEFAULT_MODEL."
               exit 0
+            fi
+
+            FLOOR_RANK="$(rank "$TIER_FLOOR")"
+
+            if [ "$FLOOR_RANK" -eq 0 ]; then
+              echo "::warning::CLAUDE_EXECUTOR_TIER_FLOOR is" \
+                   "'$TIER_FLOOR', which is not a tier. Ignoring it."
+              FLOOR_RANK=0
+            fi
+
+            # Only a tier the planner actually set is raised. An unlabelled
+            # Issue took the configured default two branches up and never
+            # reaches here, which is what agent-02-execute.yml does too: the
+            # floor bounds a recommendation, it does not invent one.
+            if [ "$TIER_RANK" -lt "$FLOOR_RANK" ]; then
+              echo "Raising model:$(name_for "$TIER_RANK") to the repository" \
+                   "floor '$TIER_FLOOR'."
+              TIER_RANK="$FLOOR_RANK"
             fi
 
             EFFECTIVE="$TIER_RANK"

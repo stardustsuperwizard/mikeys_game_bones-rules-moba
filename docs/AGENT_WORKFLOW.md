@@ -137,6 +137,11 @@ Four rules bound what the recommendation can do:
   deliberate decision about this repository; a planner's guess about one task
   does not overrule it. `vars.EXECUTOR_TIER_FLOOR` (default `haiku`) raises
   the lower bound instead, without editing the rubric or relabelling anything.
+  `vars.CLAUDE_EXECUTOR_TIER_FLOOR` is its counterpart on the Claude
+  pipeline. Both bind the executor only: the fixers already have a floor in
+  the model they are configured with, and a floor bounds a recommendation
+  rather than inventing one, so an Issue carrying no tier at all is not
+  raised to it — it takes the configured default as before.
 - **No label means no change.** An Issue without a `model:*` label runs on the
   default list exactly as it did before this existed, which is also what
   happens if the three labels are never created — the planner applies the
