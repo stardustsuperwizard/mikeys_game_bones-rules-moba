@@ -45,6 +45,18 @@ on:
         required: true
         type: number
 
+      vendor:
+        description: >
+          Which company answers. A labelled run takes this from the label's
+          third segment instead; this input exists because workflow_dispatch
+          has no label to read.
+        required: false
+        type: choice
+        options:
+          - copilot
+          - claude
+        default: copilot
+
 permissions:
   contents: write
   issues: write
@@ -73,7 +85,9 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
-       github.event.label.name == 'agent:fix')
+       (github.event.label.name == 'agent:fixer:copilot' ||
+        github.event.label.name == 'agent:fixer:claude' ||
+        github.event.label.name == 'agent:fix'))
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -93,15 +107,35 @@ jobs:
       #
       # Overridable via the FIXER_MODELS repository variable
       # (comma-separated).
-      FIXER_MODELS: >-
-        ${{ vars.FIXER_MODELS
+      # One list per vendor, selected by the label's vendor segment. The ids
+      # are NOT interchangeable between vendors -- see the note in
+      # agent-01-planner.yml.
+      # The original default is preserved exactly, including
+      # `claude-sonnet-4.5` -- the intermediate id the comment on the tier
+      # step says is deliberately kept, because a tier list does not contain
+      # it and dropping it would narrow the fallback walk for no reason.
+      # `FIXER_MODELS` is the pre-vendor name, read as a copilot fallback for
+      # the reason given in agent-01-planner.yml.
+      COPILOT_FIXER_MODELS: >-
+        ${{ vars.COPILOT_FIXER_MODELS
+        || vars.FIXER_MODELS
         || 'claude-sonnet-5,claude-sonnet-4.5,claude-opus-5' }}
 
-      # An operator who sets FIXER_MODELS has named the list they want; the
-      # escalation below does not overrule it. Captured before the `||`
-      # because the expression above cannot tell a set variable from its
-      # own default once it has collapsed to a value.
-      FIXER_MODELS_PINNED: ${{ vars.FIXER_MODELS != '' }}
+      CLAUDE_FIXER_MODELS: >-
+        ${{ vars.CLAUDE_FIXER_MODELS
+        || 'claude-sonnet-5,claude-opus-5,claude-opus-4-8' }}
+
+      # Captured per vendor, before the `||` collapses "unset" and "set to
+      # the default" into the same value.
+      COPILOT_FIXER_PINNED: ${{ vars.COPILOT_FIXER_MODELS != '' }}
+      CLAUDE_FIXER_PINNED: ${{ vars.CLAUDE_FIXER_MODELS != '' }}
+
+      # The label that triggered this run, or empty. Consumed at the end, so
+      # it must be readable from every step.
+      TRIGGER_LABEL: ${{ github.event.label.name }}
+
+      FIXER_MAX_TURNS: "60"
+
 
       # "Resolve Fixer Model Tier" below buys a stronger model when a pull
       # request keeps coming back. A task the planner called cheap and the
@@ -138,6 +172,29 @@ jobs:
       MAX_DIFF_CHARS: "150000"
 
     steps:
+      # The vendor comes from the label's third segment. Everything after
+      # this step reads one outcome file and one text file and never learns
+      # which company answered.
+      - name: Route Vendor
+        id: route
+        shell: bash
+        env:
+          LABEL: ${{ github.event.label.name }}
+          DISPATCH_VENDOR: ${{ inputs.vendor }}
+        run: |
+          set -euo pipefail
+
+          # workflow_dispatch has no label, and the legacy label has no vendor
+          # segment. Both mean copilot, which is what they have always meant.
+          case "$LABEL" in
+            agent:fixer:claude)  VENDOR=claude ;;
+            agent:fixer:copilot) VENDOR=copilot ;;
+            *)                  VENDOR="${DISPATCH_VENDOR:-copilot}" ;;
+          esac
+
+          echo "vendor=$VENDOR" >> "$GITHUB_OUTPUT"
+          echo "Running as $VENDOR"
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -274,7 +331,7 @@ jobs:
 
           gh pr edit "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:fix" || true
+            --remove-label "${TRIGGER_LABEL:-agent:fix}" || true
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -343,7 +400,7 @@ jobs:
 
           gh pr edit "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:fix" || true
+            --remove-label "${TRIGGER_LABEL:-agent:fix}" || true
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -364,9 +421,29 @@ jobs:
       - name: Resolve Fixer Model Tier
         id: tier
         if: steps.build.outputs.verdict == 'FIX'
+        env:
+          VENDOR: ${{ steps.route.outputs.vendor }}
         shell: bash
         run: |
           set -euo pipefail
+
+          # Resolved first, because the pinned branch below reads both. The
+          # operator's list is per-vendor: pinning the Copilot list says
+          # nothing about what Claude should run.
+          case "$VENDOR" in
+            copilot)
+              FIXER_MODELS="$COPILOT_FIXER_MODELS"
+              FIXER_MODELS_PINNED="$COPILOT_FIXER_PINNED"
+              ;;
+            claude)
+              FIXER_MODELS="$CLAUDE_FIXER_MODELS"
+              FIXER_MODELS_PINNED="$CLAUDE_FIXER_PINNED"
+              ;;
+            *)
+              echo "::error::Unknown vendor '$VENDOR'."
+              exit 1
+              ;;
+          esac
 
           rank() {
             case "$1" in
@@ -387,7 +464,7 @@ jobs:
 
           if [ "$FIXER_MODELS_PINNED" = "true" ]; then
             echo "models=$FIXER_MODELS" >> "$GITHUB_OUTPUT"
-            echo "FIXER_MODELS is set for this repository; using it as-is." \
+            echo "The $VENDOR fixer list is set for this repository; using it as-is." \
                  "Per-task tier and escalation are both skipped."
             echo "Fixer model preference list: $FIXER_MODELS"
             exit 0
@@ -494,16 +571,28 @@ jobs:
           # configured list untouched -- it carries intermediate ids (such as
           # claude-sonnet-4.5) that a tier list does not, and dropping them
           # here would narrow the fallback walk for no reason.
+          # A tier names a capability level; each vendor spells it its own
+          # way. Copilot CLI: `claude-haiku-4.5`. Claude Code: the same model
+          # is `claude-haiku-4-5`. Resolving the spelling here keeps the
+          # escalation logic above vendor-blind, and keeps a `:claude` run
+          # from walking a list of Copilot ids and then reporting that every
+          # model was unavailable.
+          tier_models() {
+            case "$1:$VENDOR" in
+              haiku:copilot)  echo "claude-haiku-4.5,claude-sonnet-5,claude-opus-5" ;;
+              haiku:claude)   echo "claude-haiku-4-5,claude-sonnet-5,claude-opus-5" ;;
+              sonnet:copilot) echo "claude-sonnet-5,claude-opus-5" ;;
+              sonnet:claude)  echo "claude-sonnet-5,claude-opus-5" ;;
+              opus:copilot)   echo "claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5" ;;
+              opus:claude)    echo "claude-opus-5,claude-opus-4-8,claude-sonnet-5" ;;
+              *)              echo "" ;;
+            esac
+          }
+
           if [ "$EFFECTIVE" -le "$BASE_RANK" ]; then
             MODELS="$FIXER_MODELS"
           else
-            case "$TIER" in
-              haiku) MODELS="claude-haiku-4.5,claude-sonnet-5,claude-opus-5" ;;
-              sonnet) MODELS="claude-sonnet-5,claude-opus-5" ;;
-              opus)
-                MODELS="claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5"
-                ;;
-            esac
+            MODELS="$(tier_models "$TIER")"
           fi
 
           echo "models=$MODELS" >> "$GITHUB_OUTPUT"
@@ -550,9 +639,9 @@ jobs:
         id: session
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
-          vendor: copilot
+          vendor: ${{ steps.route.outputs.vendor }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          max-turns: ${{ env.FIXER_MAX_TURNS }}
           prompt-file: ${{ steps.build.outputs.prompt-file }}
           models: ${{ steps.tier.outputs.models }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
@@ -642,7 +731,7 @@ jobs:
 
           gh pr edit "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:fix" || true
+            --remove-label "${TRIGGER_LABEL:-agent:fix}" || true
 
           cat fix-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -674,7 +763,7 @@ jobs:
 
           gh pr edit "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:fix" || true
+            --remove-label "${TRIGGER_LABEL:-agent:fix}" || true
 
       # Deliberately just `failure()`, not also gated on the verdict check
       # having passed: a hard crash in "Resolve Pull Request" itself (bad

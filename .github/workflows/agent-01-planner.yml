@@ -20,6 +20,18 @@ on:
         type: boolean
         default: false
 
+      vendor:
+        description: >
+          Which company answers. A labelled run takes this from the label's
+          third segment instead; this input exists because workflow_dispatch
+          has no label to read.
+        required: false
+        type: choice
+        options:
+          - copilot
+          - claude
+        default: copilot
+
 permissions:
   contents: read
   issues: write
@@ -34,8 +46,14 @@ jobs:
     name: Agent - AW01 Plan Tasks
     runs-on: ubuntu-latest
 
+    # Three ways in. `agent:planner:{vendor}` is the standard form -- one
+    # role, one vendor, one label. `agent:plan` is the legacy trigger, kept
+    # working here and retired in Stage 4 rather than broken mid-migration:
+    # it means copilot, which is what it has always meant.
     if: >
       github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'agent:planner:copilot' ||
+      github.event.label.name == 'agent:planner:claude' ||
       github.event.label.name == 'agent:plan'
 
     env:
@@ -43,6 +61,11 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
 
       ISSUE_NUMBER: ${{ inputs.issue_number || github.event.issue.number }}
+
+      # The label that triggered this run, or empty on workflow_dispatch.
+      # Both the success and failure paths consume it, so it has to be
+      # readable from every step rather than resolved twice.
+      TRIGGER_LABEL: ${{ github.event.label.name }}
 
 
       # Planning is where the decisions are made, so it gets the strong
@@ -58,28 +81,37 @@ jobs:
       # Overridable without a commit via the PLANNER_MODELS repository
       # variable (comma-separated). The older single-valued PLANNER_MODEL is
       # still honoured and, if set, is tried first.
-      PLANNER_MODELS: >-
-        ${{ vars.PLANNER_MODELS
+      # One list per vendor, selected by the label's vendor segment. They are
+      # NOT interchangeable: Copilot CLI spells Opus 4.8 `claude-opus-4.8`,
+      # Claude Code spells the same model `claude-opus-4-8`. Copying one list
+      # into the other variable produces a model-unavailable walk through
+      # every candidate and then a failure that blames availability.
+      # `PLANNER_MODELS` / `PLANNER_MODEL` are the pre-vendor names. Read
+      # as a copilot fallback rather than dropped: legacy labels were kept
+      # working through the migration, and an operator's pinned list going
+      # silently back to the default is a worse surprise than a stale name.
+      COPILOT_PLANNER_MODELS: >-
+        ${{ vars.COPILOT_PLANNER_MODELS
+        || vars.PLANNER_MODELS
         || vars.PLANNER_MODEL
         || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
 
-      # Soft cap for this planning session.
+      CLAUDE_PLANNER_MODELS: >-
+        ${{ vars.CLAUDE_PLANNER_MODELS
+        || 'claude-opus-5,claude-opus-4-8,claude-sonnet-5' }}
+
+      # Soft cap for this planning session (copilot).
       PLANNER_MAX_AI_CREDITS: "75"
+
+      # The claude equivalent. Not a conversion of the above -- credits price
+      # what a session spent, turns count how many times it acted. Planning
+      # reads a lot and writes one JSON object, so it needs few turns and a
+      # lot of room inside them.
+      PLANNER_MAX_TURNS: "40"
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Install GitHub Copilot CLI
-        run: npm install -g @github/copilot
-
-      - name: Show Copilot CLI version
-        run: copilot --version
 
       - name: Resolve Intake Issue
         id: issue
@@ -709,200 +741,61 @@ jobs:
                   f" {len(inventory)} tracked files inventoried.\n"
               )
 
-      # Copilot CLI model ids are not published as a stable list; they are
-      # shown in the --model help text. Dumping them costs nothing and means
-      # a rejected id is self-diagnosing instead of a mystery failure.
-      #
-      # The help text lists what the CLI *supports*, which is a superset of
-      # what this workflow's identity is *entitled* to. Goes to the log as
-      # well as the summary, because the summary is not where anyone looks
-      # first when a job fails.
-      - name: Show Available Models
-        continue-on-error: true
-        shell: bash
-        run: |
-          set +e
-
-          copilot --version
-          copilot --help 2>&1 | sed -n '/--model/,/^[[:space:]]*$/p' \
-            > model-help.txt
-
-          echo "Candidate models for this run: $PLANNER_MODELS"
-          cat model-help.txt
-
-          {
-            echo "<details><summary>Copilot CLI model ids</summary>"
-            echo ""
-            echo "Candidates tried in order: \`$PLANNER_MODELS\`"
-            echo ""
-            echo '```'
-            cat model-help.txt
-            echo '```'
-            echo "</details>"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Generate Implementation Plan with Copilot CLI
+      # The vendor comes from the label. `agent:planner:copilot` and
+      # `agent:planner:claude` name the same role and differ only in which
+      # company answers, so the routing below is the whole difference between
+      # them -- everything downstream reads one outcome file and one text file
+      # and never learns which CLI produced them.
+      - name: Route Vendor
+        id: route
         if: steps.duplicate_check.outputs.already_planned != 'true'
         shell: bash
+        env:
+          LABEL: ${{ github.event.label.name }}
+          DISPATCH_VENDOR: ${{ inputs.vendor }}
         run: |
           set -euo pipefail
 
-          # Programmatic mode requires pre-authorized tools.
-          #
-          # We allow Copilot to inspect the checkout but explicitly remove
-          # tools capable of implementation or shell execution. The read and
-          # search tools that survive that filter are the ones the prompt
-          # tells the planner to use: the prompt ships a map of the repository
-          # and expects the planner to fetch the files it actually needs.
-          #
-          # --output-format json emits JSONL events, which we parse in the
-          # following step rather than trusting terminal-formatted output.
-          #
-          # PLANNER_MODELS is a preference list. An unavailable model is
-          # rejected at startup, before any token is billed, so retrying the
-          # real prompt on the next candidate is free -- cheaper than probing
-          # each id first. Only the availability error is retried; every other
-          # ending means the model ran, and re-running it on another model
-          # would burn credits reproducing the same failure.
-          #
-          # Which ending it was is not something this loop guesses. Every
-          # attempt is handed to classify-copilot-outcome.py, which reads the
-          # exit status, stderr, and the event stream and names the reason.
-          # That distinction is the whole point: a session that ran out of
-          # credits mid-answer and a model that emitted garbage produce the
-          # same unparsable output here, and need opposite responses.
-          #
-          # The prompt is fed on stdin, not via -p "$(cat ...)". Linux caps a
-          # single argv element at MAX_ARG_STRLEN (32 pages = 128 KiB), which
-          # is a separate, much smaller limit than the ~2 MB total ARG_MAX.
-          # Copilot CLI reads the prompt from stdin by default.
+          # workflow_dispatch has no label, so it takes the input; the legacy
+          # `agent:plan` label has no vendor segment and means copilot, which
+          # is what it has always meant. Stage 4 retires it.
+          case "$LABEL" in
+            agent:planner:claude)  VENDOR=claude ;;
+            agent:planner:copilot) VENDOR=copilot ;;
+            agent:plan)            VENDOR=copilot ;;
+            *)                     VENDOR="${DISPATCH_VENDOR:-copilot}" ;;
+          esac
 
-          if [ ! -f planner-prompt.txt ]; then
-            echo "::error::planner-prompt.txt was not produced by the" \
-                 "Build Planner Request step."
-            exit 1
-          fi
+          case "$VENDOR" in
+            copilot) MODELS="$COPILOT_PLANNER_MODELS" ;;
+            claude)  MODELS="$CLAUDE_PLANNER_MODELS" ;;
+            *)
+              echo "::error::Unknown vendor '$VENDOR'."
+              exit 1
+              ;;
+          esac
 
-          echo "Planner prompt: $(wc -c < planner-prompt.txt) bytes"
+          echo "vendor=$VENDOR" >> "$GITHUB_OUTPUT"
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          echo "Planning with $VENDOR; candidates: $MODELS"
 
-          resolved=""
-          last_reason=""
+      - name: Generate Implementation Plan
+        id: session
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        uses: ./.github/actions/run-agent-session
+        with:
+          vendor: ${{ steps.route.outputs.vendor }}
+          prompt-file: planner-prompt.txt
+          models: ${{ steps.route.outputs.models }}
+          max-ai-credits: ${{ env.PLANNER_MAX_AI_CREDITS }}
+          max-turns: ${{ env.PLANNER_MAX_TURNS }}
+          # The planner reads the checkout and writes GitHub Issues. It holds
+          # no tool that can change a file, which is the same posture it had
+          # when this workflow ran the CLI itself.
+          capability: read-only
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          step-label: "Planning"
 
-          IFS=',' read -r -a candidates <<< "$PLANNER_MODELS"
-
-          for candidate in "${candidates[@]}"; do
-            model="$(echo "$candidate" | tr -d '[:space:]')"
-            [ -n "$model" ] || continue
-
-            echo "::group::Planning with $model"
-
-            status=0
-
-            copilot \
-              --model "$model" \
-              --output-format json \
-              --no-ask-user \
-              --max-ai-credits "$PLANNER_MAX_AI_CREDITS" \
-              --allow-all-tools \
-              --excluded-tools "bash,powershell,apply_patch,create,edit,task,write_agent" \
-              < planner-prompt.txt \
-              > copilot-output.jsonl 2> copilot-error.txt || status=$?
-
-            echo "copilot exited $status"
-            echo "output: $(wc -c < copilot-output.jsonl) bytes of JSONL"
-
-            python3 .github/scripts/classify-copilot-outcome.py \
-              --jsonl copilot-output.jsonl \
-              --stderr copilot-error.txt \
-              --exit-status "$status" \
-              --model "$model" \
-              --credit-limit "$PLANNER_MAX_AI_CREDITS" \
-              --out copilot-outcome.json
-
-            reason="$(jq -r '.reason' copilot-outcome.json)"
-            headline="$(jq -r '.headline' copilot-outcome.json)"
-            guidance="$(jq -r '.guidance' copilot-outcome.json)"
-
-            echo "::endgroup::"
-
-            last_reason="$reason"
-
-            if [ "$reason" = "model_unavailable" ]; then
-              echo "::warning::$headline. Trying the next candidate."
-              continue
-            fi
-
-            chars="$(jq -r '.assistant_text_chars' copilot-outcome.json)"
-
-            # Anything that produced text goes forward, even a session that
-            # ended badly. The credit cap is soft -- an in-flight response
-            # finishes -- so a run can trip its budget and still hand back a
-            # whole plan, and failing here would throw that plan away. Whether
-            # what came back is usable is the validator's question, and it is
-            # asked in exactly one place.
-            if [ "$reason" = "completed" ] || [ "$chars" -gt 0 ]; then
-              resolved="$model"
-
-              if [ "$reason" != "completed" ]; then
-                echo "::warning::$headline, but it produced $chars characters" \
-                     "of output. Passing them to the validator, which will" \
-                     "report whether a usable plan survived."
-              fi
-
-              break
-            fi
-
-            # No text at all. Now the reason is the whole story.
-
-            # Everything else is terminal, and each kind gets its own error
-            # so the log says what to do rather than "copilot failed".
-            echo "::error::$headline"
-            echo "$guidance"
-
-            {
-              echo "### Planning failed: $reason"
-              echo ""
-              echo "$headline"
-              echo ""
-              echo "$guidance"
-              echo ""
-              echo "<details><summary>Session evidence</summary>"
-              echo ""
-              echo '```json'
-              jq '{reason, exit_status, assistant_text_chars, event_counts,
-                   unfinished_turn, unparsable_jsonl_lines, budget_signals,
-                   rate_limit_signals, error_events}' copilot-outcome.json
-              echo '```'
-              echo ""
-              echo '```'
-              jq -r '.stderr_excerpt' copilot-outcome.json
-              echo '```'
-              echo "</details>"
-            } >> "$GITHUB_STEP_SUMMARY"
-
-            cp copilot-outcome.json planner-failure.json
-
-            exit 1
-          done
-
-          if [ -z "$resolved" ]; then
-            echo '{"reason":"model_unavailable",' \
-                 '"headline":"No candidate model was available",' \
-                 '"guidance":"Availability is resolved per identity."}' \
-              > planner-failure.json
-
-            echo "::error::None of these models were available to the Actions" \
-                 "GITHUB_TOKEN identity: $PLANNER_MODELS. Availability is" \
-                 "resolved per identity, so a model offered in your own picker" \
-                 "can still be refused here. Check the Copilot model policy at" \
-                 "https://github.com/settings/copilot/features, then set the" \
-                 "PLANNER_MODELS repository variable. (last reason:" \
-                 "$last_reason)"
-            exit 1
-          fi
-
-          echo "PLANNER_MODEL_USED=$resolved" >> "$GITHUB_ENV"
-          echo "Planned on $resolved." >> "$GITHUB_STEP_SUMMARY"
 
       # Every way this step can fail is a different message to the human, and
       # the differences matter more than the failure. "Copilot ran out of
@@ -912,6 +805,23 @@ jobs:
       # arrive here as `plan.json is missing`, so this step names which one it
       # was, records it in planner-failure.json, and lets the failure reporter
       # say it on the Issue.
+      # `run-agent-session` writes agent-session-failure.json when no model
+      # produced usable output. The reporter below reads planner-failure.json,
+      # which the extraction step writes for parse and schema failures -- but
+      # a session that never returned text never reaches that step. Without
+      # this bridge, that whole class of failure reaches the reporter with no
+      # evidence and it says nothing useful on the Issue.
+      - name: Record Session Failure
+        if: failure() && steps.duplicate_check.outputs.already_planned != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f agent-session-failure.json ] && [ ! -f planner-failure.json ]; then
+            cp agent-session-failure.json planner-failure.json
+            echo "Bridged agent-session-failure.json to planner-failure.json."
+          fi
+
       - name: Extract and Validate Planner JSON
         if: steps.duplicate_check.outputs.already_planned != 'true'
         shell: python
@@ -925,9 +835,14 @@ jobs:
           # the transcript.
           EVIDENCE_CHARS = 1500
 
-          jsonl = pathlib.Path("copilot-output.jsonl")
+          # The session's answer, whichever vendor produced it.
+          # run-agent-session has already joined the assistant messages (or
+          # lifted `.result`, for claude) into this file, so this step no
+          # longer walks an event stream and no longer knows what a Copilot
+          # JSONL event looks like.
+          answer = pathlib.Path("agent-assistant-text.txt")
 
-          outcome_path = pathlib.Path("copilot-outcome.json")
+          outcome_path = pathlib.Path("agent-outcome.json")
 
           outcome = (
               json.loads(outcome_path.read_text())
@@ -1010,55 +925,26 @@ jobs:
               return None
 
 
-          if not jsonl.exists():
+          if not answer.exists():
               fail(
                   "no_output",
-                  "Copilot produced no output file",
-                  "The CLI did not write copilot-output.jsonl at all. This is"
+                  "The session produced no output file",
+                  "run-agent-session did not write agent-assistant-text.txt at"
+                  " all. That step writes it even on a failed run, so this is"
                   " a harness fault rather than a model or budget failure.",
               )
 
-          assistant_parts = []
-          event_types = {}
+          text = answer.read_text(errors="replace").strip()
+          assistant_parts = [text] if text else []
 
-          for raw_line in jsonl.read_text(errors="replace").splitlines():
-              raw_line = raw_line.strip()
-
-              if not raw_line:
-                  continue
-
-              try:
-                  event = json.loads(raw_line)
-              except json.JSONDecodeError:
-                  # A single unparsable line is almost always the last one, cut
-                  # off mid-write. The classifier already counted these.
-                  continue
-
-              event_type = event.get("type")
-              event_types[event_type] = event_types.get(event_type, 0) + 1
-
-              if event_type != "assistant.message":
-                  continue
-
-              data = event.get("data") or {}
-              content = data.get("content")
-
-              # Copilot CLI has shipped both a bare string and a list of typed
-              # content blocks in this field.
-              if isinstance(content, str):
-                  assistant_parts.append(content)
-              elif isinstance(content, list):
-                  for block in content:
-                      if isinstance(block, dict) and block.get("type") == "text":
-                          assistant_parts.append(block.get("text", ""))
-
-          print(f"Event types: {json.dumps(event_types)}")
-          print(f"Assistant message parts: {len(assistant_parts)}")
+          print(f"Session reason: {outcome.get('reason')}")
+          print(f"Assistant text: {len(text)} chars")
 
           # The credit cap is a soft one: Copilot lets an in-flight response
           # finish, so a run can hit its budget and still hand back a complete
-          # plan. The session verdict therefore never vetoes output that
-          # arrived intact -- it only explains output that did not.
+          # plan. Claude's turn cap behaves the same way. The session verdict
+          # therefore never vetoes output that arrived intact -- it only
+          # explains output that did not.
           stopped_short = outcome.get("reason") == "budget_exhausted" or (
               outcome.get("unfinished_turn")
               and outcome.get("reason")
@@ -1071,23 +957,19 @@ jobs:
                       "budget_exhausted",
                       outcome.get(
                           "headline",
-                          "Copilot stopped on its AI credit limit before"
-                          " saying anything",
+                          "The session stopped on its budget before saying"
+                          " anything",
                       ),
                       outcome.get("guidance", ""),
                   )
 
               fail(
                   "no_assistant_output",
-                  "Copilot returned no assistant message",
+                  "The session returned no assistant message",
                   outcome.get("guidance")
                   or "The session ended without the model saying anything."
-                  " Check the event counts in the job log.",
+                  " Check the outcome file in the job log.",
               )
-
-          text = "\n".join(assistant_parts).strip()
-
-          print(f"Assistant text: {len(text)} chars")
 
           # Be tolerant if the model ignored the no-fence instruction.
           if text.startswith("```"):
@@ -2110,9 +1992,16 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --add-label "planned"
 
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:plan" || true
+          # Consume whichever label triggered this run, not a hardcoded one.
+          # A label is a button: leaving `agent:planner:claude` on the Issue
+          # after a claude run would leave the button pressed, and re-adding
+          # it -- the documented way to retry -- would then be a no-op.
+          # Empty on workflow_dispatch, which pressed no button.
+          if [ -n "$TRIGGER_LABEL" ]; then
+            gh issue edit "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$TRIGGER_LABEL" || true
+          fi
 
           # `plan` is the intake marker every Issue template applies. It means
           # "filed, not yet decomposed", which is what the awaiting-planning
@@ -2204,7 +2093,8 @@ jobs:
                   "No candidate model was available to the Actions"
                   " `GITHUB_TOKEN` identity. Check"
                   " https://github.com/settings/copilot/features, then set"
-                  " the `PLANNER_MODELS` repository variable."
+                  " the `COPILOT_PLANNER_MODELS` or `CLAUDE_PLANNER_MODELS`"
+                  " repository variable, whichever vendor this run used."
               ),
               "harness_error": (
                   "This is a workflow fault, not a model or budget fault."
@@ -2289,19 +2179,25 @@ jobs:
 
           body = "\n".join(lines)
 
-          subprocess.run(
-              [
-                  "gh",
-                  "issue",
-                  "edit",
-                  issue_number,
-                  "--repo",
-                  repo,
-                  "--remove-label",
-                  "agent:plan",
-              ],
-              check=False,
-          )
+          # Same reasoning as the success path: the label that triggered
+          # this run is the one to give back, so a retry re-runs the vendor
+          # the human asked for rather than silently falling back to copilot.
+          trigger_label = os.environ.get("TRIGGER_LABEL") or ""
+
+          if trigger_label:
+              subprocess.run(
+                  [
+                      "gh",
+                      "issue",
+                      "edit",
+                      issue_number,
+                      "--repo",
+                      repo,
+                      "--remove-label",
+                      trigger_label,
+                  ],
+                  check=False,
+              )
 
           subprocess.run(
               [

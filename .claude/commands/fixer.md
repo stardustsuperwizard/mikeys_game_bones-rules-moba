@@ -18,8 +18,8 @@ Split it before the first GitHub call and use the two parts separately:
   has a reason: `/execute-task` passes the tier the implementor built the code
   at, then escalates to `opus` from the second cycle on.
 
-With no tier given — a bare `/fixer 390`, or the headless `claude:fix` path
-— the subagent runs at its frontmatter default and you say so in the report.
+With no tier given — a bare `/fixer 390` — the subagent runs at its
+frontmatter default and you say so in the report.
 Do not invent a tier to fill the gap.
 
 ## GitHub access

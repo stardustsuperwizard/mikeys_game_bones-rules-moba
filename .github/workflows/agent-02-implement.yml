@@ -96,9 +96,21 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Implementation Task Issue number to execute"
+        description: "Implementation Task Issue number to implement"
         required: true
         type: number
+
+      vendor:
+        description: >
+          Which company answers. A labelled run takes this from the label's
+          third segment instead; this input exists because workflow_dispatch
+          has no label to read.
+        required: false
+        type: choice
+        options:
+          - copilot
+          - claude
+        default: copilot
 
 permissions:
   contents: write
@@ -128,7 +140,9 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
-       github.event.label.name == 'agent:execute')
+       (github.event.label.name == 'agent:implementor:copilot' ||
+        github.event.label.name == 'agent:implementor:claude' ||
+        github.event.label.name == 'agent:execute'))
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -143,10 +157,21 @@ jobs:
       # agent-01-planner.yml): the next candidate is only tried when a
       # model is unavailable to this identity, never after a real failure,
       # the same rule every other workflow here follows.
-      IMPLEMENTOR_MODELS: >-
-        ${{ vars.IMPLEMENTOR_MODELS
+      # One list per vendor. The ids do not transfer between them, so these
+      # are separate variables rather than one list reinterpreted.
+      COPILOT_IMPLEMENTOR_MODELS: >-
+        ${{ vars.COPILOT_IMPLEMENTOR_MODELS
         || 'claude-opus-5,claude-sonnet-5,claude-haiku-4.5' }}
+      CLAUDE_IMPLEMENTOR_MODELS: >-
+        ${{ vars.CLAUDE_IMPLEMENTOR_MODELS
+        || 'claude-opus-5,claude-sonnet-5,claude-haiku-4-5' }}
       IMPLEMENTOR_MAX_AI_CREDITS: "150"
+      IMPLEMENTOR_MAX_TURNS: "60"
+
+      # The label that triggered this run, or empty on workflow_dispatch.
+      # Every path that releases the label reads it, so it is defined once
+      # here rather than resolved at each site.
+      TRIGGER_LABEL: ${{ github.event.label.name }}
 
       # "Resolve Implementor Model Tier" below can put a planner's per-task
       # recommendation in front of that list. These two bound it.
@@ -156,7 +181,10 @@ jobs:
       # quietly overrule it. The expression above cannot tell the two cases
       # apart once it has collapsed to a value, so the emptiness of the
       # variable is captured separately here, before the `||`.
-      IMPLEMENTOR_MODELS_PINNED: ${{ vars.IMPLEMENTOR_MODELS != '' }}
+      # Captured per vendor, before the `||` above collapses "unset" and
+      # "set to the default" into the same value.
+      COPILOT_IMPLEMENTOR_PINNED: ${{ vars.COPILOT_IMPLEMENTOR_MODELS != '' }}
+      CLAUDE_IMPLEMENTOR_PINNED: ${{ vars.CLAUDE_IMPLEMENTOR_MODELS != '' }}
 
       # Lower bound on what a planner may ask for, so the cheap tier can be
       # taken out of circulation repository-wide without editing the
@@ -165,16 +193,32 @@ jobs:
 
       # Same variables and defaults as agent-04-review.yml / agent-05-fix.yml
       # -- deliberately, so tuning one repository variable affects the
-      # standalone workflow and this pre-PR pass identically.
-      REVIEWER_MODELS: >-
-        ${{ vars.REVIEWER_MODELS
+      # standalone workflow and this pre-PR pass identically. That property
+      # only holds while the names match, so these moved to the per-vendor
+      # form when those two did.
+      #
+      # The pre-PR review and fix run at the vendor the *implementor* label
+      # named. They are steps of implementing the task, not separately
+      # labelled roles, so there is one vendor for the whole run.
+      COPILOT_REVIEWER_MODELS: >-
+        ${{ vars.COPILOT_REVIEWER_MODELS
+        || vars.REVIEWER_MODELS
         || vars.REVIEWER_MODEL
         || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
+      CLAUDE_REVIEWER_MODELS: >-
+        ${{ vars.CLAUDE_REVIEWER_MODELS
+        || 'claude-opus-5,claude-opus-4-8,claude-sonnet-5' }}
       REVIEWER_MAX_AI_CREDITS: "75"
+      REVIEWER_MAX_TURNS: "40"
 
-      FIXER_MODELS: >-
-        ${{ vars.FIXER_MODELS
+      COPILOT_FIXER_MODELS: >-
+        ${{ vars.COPILOT_FIXER_MODELS
+        || vars.FIXER_MODELS
         || 'claude-sonnet-5,claude-sonnet-4.5,claude-opus-5' }}
+      CLAUDE_FIXER_MODELS: >-
+        ${{ vars.CLAUDE_FIXER_MODELS
+        || 'claude-sonnet-5,claude-opus-5,claude-opus-4-8' }}
+      FIXER_MAX_TURNS: "60"
       # 150, not the reviewer's 75: this session edits files and re-runs
       # validation rather than only reading, and 100 was not enough --
       # the pre-PR fix pass on #165 stopped mid-task with
@@ -187,6 +231,45 @@ jobs:
       BRANCH: agent-exec/${{ inputs.issue_number || github.event.issue.number }}
 
     steps:
+      # The vendor comes from the label's third segment. Everything after
+      # this step reads one outcome file and one text file and never learns
+      # which company answered.
+      - name: Route Vendor
+        id: route
+        shell: bash
+        env:
+          LABEL: ${{ github.event.label.name }}
+          DISPATCH_VENDOR: ${{ inputs.vendor }}
+        run: |
+          set -euo pipefail
+
+          # workflow_dispatch has no label, and the legacy label has no vendor
+          # segment. Both mean copilot, which is what they have always meant.
+          case "$LABEL" in
+            agent:implementor:claude)  VENDOR=claude ;;
+            agent:implementor:copilot) VENDOR=copilot ;;
+            *)                  VENDOR="${DISPATCH_VENDOR:-copilot}" ;;
+          esac
+
+          # The pre-PR review and fix sessions need the vendor's spellings
+          # too. Resolved here so both call sites read one output instead of
+          # an env var that is only correct for copilot.
+          case "$VENDOR" in
+            copilot)
+              REVIEWER_MODELS="$COPILOT_REVIEWER_MODELS"
+              FIXER_MODELS="$COPILOT_FIXER_MODELS"
+              ;;
+            claude)
+              REVIEWER_MODELS="$CLAUDE_REVIEWER_MODELS"
+              FIXER_MODELS="$CLAUDE_FIXER_MODELS"
+              ;;
+          esac
+
+          echo "vendor=$VENDOR" >> "$GITHUB_OUTPUT"
+          echo "reviewer_models=$REVIEWER_MODELS" >> "$GITHUB_OUTPUT"
+          echo "fixer_models=$FIXER_MODELS" >> "$GITHUB_OUTPUT"
+          echo "Running as $VENDOR"
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -396,7 +479,7 @@ jobs:
 
           gh issue edit "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:execute" || true
+            --remove-label "${TRIGGER_LABEL:-agent:execute}" || true
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -503,6 +586,8 @@ jobs:
       - name: Resolve Implementor Model Tier
         id: tier
         if: steps.context.outputs.ok == 'true'
+        env:
+          VENDOR: ${{ steps.route.outputs.vendor }}
         shell: bash
         run: |
           set -euo pipefail
@@ -556,24 +641,46 @@ jobs:
             TIER="$IMPLEMENTOR_TIER_FLOOR"
           fi
 
-          if [ "$IMPLEMENTOR_MODELS_PINNED" = "true" ]; then
-            MODELS="$IMPLEMENTOR_MODELS"
-            REASON="IMPLEMENTOR_MODELS is set for this repository; the operator list wins over any per-task tier."
+          # A tier names a capability level; each vendor spells it its own
+          # way. Copilot CLI: `claude-haiku-4.5`. Claude Code: the same model
+          # is `claude-haiku-4-5`. Resolving the spelling here keeps the
+          # escalation logic above vendor-blind, and keeps a `:claude` run
+          # from walking a list of Copilot ids and then reporting that every
+          # model was unavailable.
+          tier_models() {
+            case "$1:$VENDOR" in
+              haiku:copilot)  echo "claude-haiku-4.5,claude-sonnet-5,claude-opus-5" ;;
+              haiku:claude)   echo "claude-haiku-4-5,claude-sonnet-5,claude-opus-5" ;;
+              sonnet:copilot) echo "claude-sonnet-5,claude-opus-5" ;;
+              sonnet:claude)  echo "claude-sonnet-5,claude-opus-5" ;;
+              opus:copilot)   echo "claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5" ;;
+              opus:claude)    echo "claude-opus-5,claude-opus-4-8,claude-sonnet-5" ;;
+              *)              echo "" ;;
+            esac
+          }
+
+          # The operator's list for the vendor that is answering, and whether
+          # they actually set it. Both are per-vendor: an operator who pinned
+          # the Copilot list has said nothing about Claude.
+          case "$VENDOR" in
+            copilot)
+              OPERATOR_MODELS="$COPILOT_IMPLEMENTOR_MODELS"
+              PINNED="$COPILOT_IMPLEMENTOR_PINNED"
+              ;;
+            claude)
+              OPERATOR_MODELS="$CLAUDE_IMPLEMENTOR_MODELS"
+              PINNED="$CLAUDE_IMPLEMENTOR_PINNED"
+              ;;
+          esac
+
+          if [ "$PINNED" = "true" ]; then
+            MODELS="$OPERATOR_MODELS"
+            REASON="The $VENDOR implementor list is set for this repository; the operator list wins over any per-task tier."
           elif [ -z "$TIER" ]; then
-            MODELS="$IMPLEMENTOR_MODELS"
+            MODELS="$OPERATOR_MODELS"
             REASON="No model:* label on this Issue; using the default list."
           else
-            case "$TIER" in
-              haiku)
-                MODELS="claude-haiku-4.5,claude-sonnet-5,claude-opus-5"
-                ;;
-              sonnet)
-                MODELS="claude-sonnet-5,claude-opus-5"
-                ;;
-              opus)
-                MODELS="claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5"
-                ;;
-            esac
+            MODELS="$(tier_models "$TIER")"
             REASON="Planner recommended model:$TIER for this task."
           fi
 
@@ -667,9 +774,8 @@ jobs:
         id: exec-session
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
-          vendor: copilot
+          vendor: ${{ steps.route.outputs.vendor }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: implementor-prompt.txt
           models: ${{ steps.tier.outputs.models }}
           max-ai-credits: ${{ env.IMPLEMENTOR_MAX_AI_CREDITS }}
@@ -945,7 +1051,7 @@ jobs:
 
           subprocess.run(
               ["gh", "issue", "edit", issue_number, "--repo", repo,
-               "--remove-label", "agent:execute"],
+               "--remove-label", os.environ.get("TRIGGER_LABEL") or "agent:execute"],
               check=False,
           )
 
@@ -1094,11 +1200,11 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
-          vendor: copilot
+          vendor: ${{ steps.route.outputs.vendor }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: ${{ steps.review-build.outputs.prompt-file }}
-          models: ${{ env.REVIEWER_MODELS }}
+          models: ${{ steps.route.outputs.reviewer_models }}
+          max-turns: ${{ env.REVIEWER_MAX_TURNS }}
           max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
           capability: read-only
           step-label: "Reviewing (pre-PR)"
@@ -1162,11 +1268,11 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
-          vendor: copilot
+          vendor: ${{ steps.route.outputs.vendor }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: ${{ steps.fix-build.outputs.prompt-file }}
-          models: ${{ env.FIXER_MODELS }}
+          models: ${{ steps.route.outputs.fixer_models }}
+          max-turns: ${{ env.FIXER_MAX_TURNS }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
           capability: write
           step-label: "Fixing (pre-PR)"
@@ -1701,7 +1807,7 @@ jobs:
 
           gh issue edit "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:execute" || true
+            --remove-label "${TRIGGER_LABEL:-agent:execute}" || true
 
       # The pull request already exists by this point (opened right after
       # the implementor's commit, before validation ever ran), so this posts
