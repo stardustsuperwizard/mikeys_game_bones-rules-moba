@@ -148,6 +148,21 @@ jobs:
         || 'claude-opus-5,claude-sonnet-5,claude-haiku-4.5' }}
       EXECUTOR_MAX_AI_CREDITS: "150"
 
+      # "Resolve Executor Model Tier" below can put a planner's per-task
+      # recommendation in front of that list. These two bound it.
+      #
+      # An operator who sets EXECUTOR_MODELS has made a deliberate choice
+      # about this repository; a planner's guess about one task must not
+      # quietly overrule it. The expression above cannot tell the two cases
+      # apart once it has collapsed to a value, so the emptiness of the
+      # variable is captured separately here, before the `||`.
+      EXECUTOR_MODELS_PINNED: ${{ vars.EXECUTOR_MODELS != '' }}
+
+      # Lower bound on what a planner may ask for, so the cheap tier can be
+      # taken out of circulation repository-wide without editing the
+      # planner's rubric or relabelling any Issue.
+      EXECUTOR_TIER_FLOOR: ${{ vars.EXECUTOR_TIER_FLOOR || 'haiku' }}
+
       # Same variables and defaults as agent-04-review.yml / agent-05-fix.yml
       # -- deliberately, so tuning one repository variable affects the
       # standalone workflow and this pre-PR pass identically.
@@ -436,6 +451,104 @@ jobs:
         with:
           godot-version: 4.7.1-stable
 
+      # The planner recommends a tier per task; this turns that into the
+      # model preference list the session actually walks.
+      #
+      # It PREPENDS rather than replaces. `run-copilot-session` advances
+      # through the list only when a model is unavailable to the calling
+      # identity -- never after a real failure -- so a list is what keeps an
+      # unavailable model from ending the run. A single id here would turn
+      # every availability gap into a dead job.
+      #
+      # Each list also ascends from its starting tier, where the unlabelled
+      # default descends. That asymmetry is deliberate: the default starts
+      # at the top and has nowhere to go but down, while a tier is a floor
+      # someone chose, and falling below it would silently run a task on
+      # less model than was asked for. Unavailability should cost money,
+      # not correctness.
+      - name: Resolve Executor Model Tier
+        id: tier
+        if: steps.context.outputs.ok == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rank() {
+            case "$1" in
+              haiku) echo 1 ;;
+              sonnet) echo 2 ;;
+              opus) echo 3 ;;
+              *) echo 0 ;;
+            esac
+          }
+
+          # Highest wins when an Issue carries more than one. Hand-relabelling
+          # usually means adding the intended label and leaving the old one,
+          # and reading that as "the cheaper of the two" would do the opposite
+          # of what the person meant.
+          TIER=""
+          BEST=0
+
+          while read -r label; do
+            case "$label" in
+              model:*) CANDIDATE="${label#model:}" ;;
+              *) continue ;;
+            esac
+
+            CANDIDATE_RANK="$(rank "$CANDIDATE")"
+
+            if [ "$CANDIDATE_RANK" -eq 0 ]; then
+              echo "Ignoring unrecognised tier label: $label"
+              continue
+            fi
+
+            if [ "$CANDIDATE_RANK" -gt "$BEST" ]; then
+              BEST="$CANDIDATE_RANK"
+              TIER="$CANDIDATE"
+            fi
+          done < <(jq -r '.labels[].name' issue.json)
+
+          FLOOR_RANK="$(rank "$EXECUTOR_TIER_FLOOR")"
+
+          if [ "$FLOOR_RANK" -eq 0 ]; then
+            echo "::warning::EXECUTOR_TIER_FLOOR is" \
+                 "'$EXECUTOR_TIER_FLOOR', which is not a tier. Ignoring it."
+            FLOOR_RANK=0
+          fi
+
+          if [ -n "$TIER" ] && [ "$BEST" -lt "$FLOOR_RANK" ]; then
+            echo "Raising model:$TIER to the repository floor" \
+                 "'$EXECUTOR_TIER_FLOOR'."
+            TIER="$EXECUTOR_TIER_FLOOR"
+          fi
+
+          if [ "$EXECUTOR_MODELS_PINNED" = "true" ]; then
+            MODELS="$EXECUTOR_MODELS"
+            REASON="EXECUTOR_MODELS is set for this repository; the operator list wins over any per-task tier."
+          elif [ -z "$TIER" ]; then
+            MODELS="$EXECUTOR_MODELS"
+            REASON="No model:* label on this Issue; using the default list."
+          else
+            case "$TIER" in
+              haiku)
+                MODELS="claude-haiku-4.5,claude-sonnet-5,claude-opus-5"
+                ;;
+              sonnet)
+                MODELS="claude-sonnet-5,claude-opus-5"
+                ;;
+              opus)
+                MODELS="claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5"
+                ;;
+            esac
+            REASON="Planner recommended model:$TIER for this task."
+          fi
+
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          echo "tier=$TIER" >> "$GITHUB_OUTPUT"
+
+          echo "$REASON"
+          echo "Executor model preference list: $MODELS"
+
       - name: Build Executor Request
         if: >-
           steps.context.outputs.ok == 'true' &&
@@ -521,7 +634,7 @@ jobs:
         uses: ./.github/actions/run-copilot-session
         with:
           prompt-file: executor-prompt.txt
-          models: ${{ env.EXECUTOR_MODELS }}
+          models: ${{ steps.tier.outputs.models }}
           max-ai-credits: ${{ env.EXECUTOR_MAX_AI_CREDITS }}
           # Needs to edit, run shell commands, and commit -- same tool set
           # as the fixer. Only sub-agent spawning stays excluded.

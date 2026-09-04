@@ -32,7 +32,7 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 | --- | --- | --- |
 | Planner | Claude Opus 5, then fallbacks | `PLANNER_MODELS` env / `vars.PLANNER_MODELS` in `agent-01-planner.yml` |
 | Executor — native cloud agent | Claude Haiku 4.5 | The picker, when **you** dispatch — see *Four entry points* below. |
-| Executor — scripted (`agent:execute`) | Claude Haiku 4.5, then Sonnet 5 | `EXECUTOR_MODELS` env / `vars.EXECUTOR_MODELS` in `agent-02-execute.yml` |
+| Executor — scripted (`agent:execute`) | Per task, from the Issue's `model:*` label; Claude Opus 5, then Sonnet 5, then Haiku 4.5 when unlabelled | `model:*` label → `agent-02-execute.yml`'s *Resolve Executor Model Tier*; default and override in `EXECUTOR_MODELS` env / `vars.EXECUTOR_MODELS`. See *The executor's tier is chosen per task* below |
 | Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-04-review.yml` (also used by `agent-02-execute.yml`'s pre-PR self-review) |
 | Fixer | Claude Sonnet 5, then fallbacks | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-execute.yml`'s pre-PR self-fix) |
 | Lint fixer | Claude Haiku 4.5, then Sonnet 5 | `LINT_FIXER_MODELS` env / `vars.LINT_FIXER_MODELS` in `gdscript-lint.yml` |
@@ -68,6 +68,70 @@ Executor and fixer default to a cheaper tier instead — bounded,
 contract-driven work doesn't need the top model the way blind planning or
 review does. See `agent-02-execute.yml` and `agent-05-fix.yml` for their
 exact lists.
+
+### The executor's tier is chosen per task
+
+Every other role in the table gets one list for the whole repository. The
+executor gets a starting point per Issue, because the tasks it runs are not
+alike: adding a field and its accessor is not the same work as changing how
+authority is resolved, and paying the same model for both wastes money on one
+and risks the other.
+
+The planner sets it. It is the only role that sees the whole feature at once
+and reads the code before it is written, so it is the only one positioned to
+judge how much model a task needs — and it is already an Opus session, so the
+judgement is made by the most capable model in the pipeline. The rubric it
+follows is *Choosing a model tier* in `.github/agents/01-planner.agent.md`;
+its one-line summary is that `haiku` is for work fully determined by the
+contract, `sonnet` is the default and the answer when unsure, and `opus` is
+for work where a wrong choice is expensive to undo.
+
+It travels as a label — `model:haiku`, `model:sonnet`, `model:opus` — with the
+reasoning mirrored in the Issue's **Model Tier** section. The label is what
+the workflow reads; the prose is what lets you check the call and relabel by
+hand when it looks wrong. Nothing re-reads the prose.
+
+**It is a tier, not a model id, and that is load-bearing.** The Copilot CLI
+and `claude-code-action` spell the same models differently —
+`claude-haiku-4.5` against `claude-haiku-4-5-20251001` — and this document
+warns elsewhere against copying one spelling into the other. An Issue that
+named an id would bind the task to whichever pipeline used that namespace. A
+tier is meaningful to both, and each workflow maps it to its own ids.
+
+Four rules bound what the recommendation can do:
+
+- **It prepends, it does not replace.** `run-copilot-session` advances through
+  the list only when a model is unavailable to the calling identity, never
+  after a real failure, so the list is what keeps an availability gap from
+  ending the run. A single id would turn every such gap into a dead job.
+- **Each tier's list ascends; the unlabelled default descends.** `model:haiku`
+  resolves to `claude-haiku-4.5,claude-sonnet-5,claude-opus-5`. The asymmetry
+  is deliberate: the default starts at the top and has nowhere to go but down,
+  while a tier is a floor someone chose, and falling below it would silently
+  run a task on less model than was asked for. Unavailability should cost
+  money, not correctness.
+- **An operator outranks the planner.** Setting `vars.EXECUTOR_MODELS` is a
+  deliberate decision about this repository; a planner's guess about one task
+  does not overrule it. `vars.EXECUTOR_TIER_FLOOR` (default `haiku`) raises
+  the lower bound instead, without editing the rubric or relabelling anything.
+- **No label means no change.** An Issue without a `model:*` label runs on the
+  default list exactly as it did before this existed, which is also what
+  happens if the three labels are never created — the planner applies the
+  label as a follow-up edit rather than at creation time, so a missing label
+  costs the hint, not the plan.
+
+The three labels do have to exist for the hint to land: create `model:haiku`,
+`model:sonnet` and `model:opus` once. Until then, planning and execution both
+work, and the planner logs each label it could not apply.
+
+**What this leans on.** A cheaper executor is only safe because a strong
+reviewer follows it — the reasoning this document already gives for the
+executor's tier being cheaper than the planner's. This change leans harder on
+that, so the reviewer staying on the strong tier stops being a preference and
+becomes the thing holding the arrangement up. Nothing here escalates a task
+that keeps failing; a task that burns several fix cycles on `model:haiku` is a
+signal to relabel it by hand, and automatic escalation is the obvious next
+step if that turns out to happen often.
 
 Copilot CLI resolves model availability against the **identity making the
 request**, and in Actions that identity is the workflow's `GITHUB_TOKEN`, not
@@ -148,7 +212,7 @@ So there are four ways in, across two products:
 | **Desktop agents panel** — start a session | **your choice** | `executor` | via the Run This Task block |
 | **GitHub Mobile** — new agent session | **your choice**, *or* a custom agent — never both | either, not both | via the Run This Task block |
 | Issue → assign Copilot | **your choice** | no | yes |
-| `agent:execute` label — scripted, not the cloud agent | fixed preference list (`EXECUTOR_MODELS`) | n/a — not a custom-agent session | yes, `Closes #n` written by the workflow itself |
+| `agent:execute` label — scripted, not the cloud agent | preference list, led by the Issue's `model:*` tier (`EXECUTOR_MODELS` otherwise) | n/a — not a custom-agent session | yes, `Closes #n` written by the workflow itself |
 
 Only the desktop panel offers both pickers at once among the three
 cloud-agent entry points. Mobile makes them exclusive: choose Copilot Agent

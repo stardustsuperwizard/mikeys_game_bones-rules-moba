@@ -120,6 +120,44 @@ A one-task plan is a legitimate answer, and for most defects it is the right
 one. Do not split a single correction into a task that fixes it and a task
 that tests it: that leaves an intermediate state nobody can ship.
 
+## Choosing a model tier
+
+Every task carries a model tier — your recommendation for how much model the
+execution session needs, recorded as a `model:haiku` / `model:sonnet` /
+`model:opus` label on the Issue and echoed in its **Model Tier** section. You
+are the only role that sees the whole feature at once and reads the code
+before it is written, so you are the only one positioned to call this.
+
+- **`haiku`** — mechanical work against a contract you have made explicit.
+  Adding a field and its accessor, a test that mirrors an existing one, a
+  rename, a data file, wiring an existing signal to an existing handler. The
+  task is fully determined by what you wrote in Scope and Acceptance Criteria.
+- **`sonnet`** — the default, and the right answer when you are unsure.
+  Ordinary implementation: a new class following an established pattern, a
+  state machine with a handful of transitions, a validator with real
+  branching.
+- **`opus`** — work where a wrong choice is expensive to undo. Anything
+  touching authority, replication, prediction or rewind; anything that changes
+  a shared type in `scripts/`; anything whose correctness argument is subtler
+  than its code.
+
+Judge the **implementation**, not the subject matter. A one-line change in the
+networking layer is still a one-line change.
+
+Judge your own writing honestly too: a task you scoped loosely needs a
+stronger model than the same task scoped tightly. If you find yourself
+reaching for `opus` because the task is vague, tighten the task instead — that
+is the cheaper fix and it improves the Issue for every reader.
+
+Under-calling costs more than over-calling. A model that cannot finish burns
+its session, comes back through review, and spends a fix cycle. When a task
+sits between two tiers, take the higher one.
+
+The tier is a preference, not a pin. The executor uses it as the first
+candidate in a preference list that still escalates when a model is
+unavailable, and an operator who sets the `EXECUTOR_MODELS` repository
+variable outranks it entirely.
+
 ## Procedure
 
 For each Intake Issue:

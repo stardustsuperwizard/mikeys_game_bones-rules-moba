@@ -93,6 +93,23 @@ implementation pull request must be titled starting with
 - Parent Feature: #<issue-number>
 - Planner Task: <task id>
 
+## Model Tier
+
+<!--
+The planner's recommendation for how much model this task needs, mirrored by
+a `model:haiku` / `model:sonnet` / `model:opus` label. The label is what
+agent-02-execute.yml reads; this section is what lets a human check the call.
+
+It is a preference, not a pin: the executor uses it as the first candidate in
+a list that still escalates when a model is unavailable, and an explicitly set
+`EXECUTOR_MODELS` repository variable outranks it. An Issue with no tier label
+runs on the default list, exactly as before this field existed.
+
+Disagree with it? Change the label. Nothing re-reads this prose.
+-->
+
+- Recommended: `<haiku | sonnet | opus>`
+
 ## Objective
 
 <!--
