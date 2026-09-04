@@ -73,6 +73,11 @@ func apply(actor: Actor) -> void:
 	if actor == null or actor.appearance == null:
 		return
 
+	# The team signal is drawn before the catalog load below can early-return,
+	# so an actor with an appearance always gets it even if the catalog resource
+	# fails to load -- it must never be skippable when appearance is present.
+	_attach_team_signal(actor.team)
+
 	if catalog == null:
 		catalog = load(CATALOG_PATH) as AppearanceCatalog
 	if catalog == null:
@@ -89,8 +94,6 @@ func apply(actor: Actor) -> void:
 		CHEST_FALLBACK_OFFSET,
 		tint
 	)
-
-	_attach_team_signal(actor.team)
 
 
 ## Everything this component rendered last time, so apply() is repeatable and
