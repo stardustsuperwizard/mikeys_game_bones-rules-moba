@@ -26,6 +26,12 @@ addons/*
 !.claude/agents/**
 !.claude/commands/
 !.claude/commands/**
+# Shared project settings only. A cloud session reads .claude/settings.json
+# out of the clone and does NOT read .claude/settings.local.json or
+# ~/.claude/settings.json, so anything that must apply on a phone or on
+# Claude Code for web has to be committed here. settings.local.json stays
+# ignored on purpose -- it is the personal override.
+!.claude/settings.json
 .DS_Store
 private/
 private/**

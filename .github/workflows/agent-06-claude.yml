@@ -18,13 +18,23 @@
 #
 # WHY IT REUSES `.claude/commands/*.md`
 #
-# The prompt for each role is the same file a human invokes as `/execute-task`
-# in a terminal or from the Claude mobile app. There is one contract per role,
-# not a workflow copy that drifts from the interactive one -- the same
-# reasoning `CLAUDE.md` gives for pointing at `AGENTS.md` rather than copying
-# it.
+# The prompt for each role is the same file a human invokes as `/planner`,
+# `/executor`, `/reviewer` or `/fixer` in a terminal or from the Claude mobile
+# app. There is one contract per role, not a workflow copy that drifts from
+# the interactive one -- the same reasoning `CLAUDE.md` gives for pointing at
+# `AGENTS.md` rather than copying it.
 #
-# Those files are addressed by path rather than invoked as `/execute-task`,
+# `claude:execute` routes to `/executor`, NOT to `/execute-task`. Those are
+# different things: `/executor` runs the executor agent once and stops at the
+# open PR, which is the single-role shape every other row here has, while
+# `/execute-task` is the interactive orchestrator that chains all four roles
+# and loops the fix cycle up to four times. That loop cannot fit in the
+# `--max-turns 60` budget below -- the executor step alone can consume most of
+# it -- and a run truncated somewhere inside the third fix cycle is worse than
+# one that stopped at a place it chose. A label is a single role; the
+# orchestrator is a human sitting in a session.
+#
+# Those files are addressed by path rather than invoked as `/executor`,
 # because a slash command resolving inside the action is an assumption this
 # workflow does not need to make. Reading a checked-out file is not.
 #
@@ -171,22 +181,22 @@ jobs:
           # variable names keep the two namespaces from being confused.
           case "$ROLE" in
             plan)
-              PROMPT_FILE=".claude/commands/plan-feature.md"
+              PROMPT_FILE=".claude/commands/planner.md"
               MODEL="${{ vars.CLAUDE_PLANNER_MODEL || 'claude-opus-5' }}"
               TARGET="issue"
               ;;
             execute)
-              PROMPT_FILE=".claude/commands/execute-task.md"
+              PROMPT_FILE=".claude/commands/executor.md"
               MODEL="${{ vars.CLAUDE_EXECUTOR_MODEL || 'claude-haiku-4-5-20251001' }}"
               TARGET="issue"
               ;;
             review)
-              PROMPT_FILE=".claude/commands/review-task.md"
+              PROMPT_FILE=".claude/commands/reviewer.md"
               MODEL="${{ vars.CLAUDE_REVIEWER_MODEL || 'claude-opus-5' }}"
               TARGET="pr"
               ;;
             fix)
-              PROMPT_FILE=".claude/commands/fix-review.md"
+              PROMPT_FILE=".claude/commands/fixer.md"
               MODEL="${{ vars.CLAUDE_FIXER_MODEL || 'claude-sonnet-5' }}"
               TARGET="pr"
               ;;

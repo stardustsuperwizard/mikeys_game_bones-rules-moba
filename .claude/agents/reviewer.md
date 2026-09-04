@@ -129,7 +129,46 @@ one, and compliance against the Architecture Constraints, one by one — with
 the same rigor, not as an afterthought caught only if it happens to surface
 in Findings.
 
-Your first line must be exactly one of:
+## The comment envelope
+
+The comment you post MUST have this exact shape. Everything downstream finds
+your review by grepping for the marker on the first line — the `fixer`, the
+`/fixer` and `/execute-task` commands, `/feature-status`,
+`.github/actions/build-fix-request`, and `agent-01-planner.yml`. A review
+posted without the marker is a review nothing can read, and the fix cycle
+stops dead on a PR that looks reviewed.
+
+```markdown
+<!-- agent-review-verdict -->
+
+## Automated Review — `<PASS|FIX|PLANNING FAILURE|DESIGN AMBIGUITY>`
+
+VERDICT: <the same one>
+
+<the sections below>
+
+---
+
+Reviewed by `.claude/agents/reviewer.md` on `<the model you are running on>`.
+Re-run with `/reviewer <pr-number>`.
+```
+
+This is the same envelope `agent-04-review.yml` writes, so a PR reviewed
+locally and a PR reviewed in CI produce comments the same parsers read. Do
+not improve on it.
+
+Two details in it are load-bearing:
+
+- **`<!-- agent-review-verdict -->` is the literal first line.** Not inside a
+  code fence, not indented, not reworded.
+- **`VERDICT: <x>` starts a line of its own**, and is the first line in the
+  comment that does. Consumers match `^VERDICT:` and take the first hit —
+  `build-fix-request/action.yml` does it with
+  `grep -oE '^VERDICT:\s*(PASS|FIX|PLANNING FAILURE|DESIGN AMBIGUITY)' | head -n1`.
+  So never write the word `VERDICT:` at the start of any earlier line,
+  including when quoting a previous review.
+
+The verdict itself must be exactly one of:
 
 ```
 VERDICT: PASS
@@ -138,7 +177,7 @@ VERDICT: PLANNING FAILURE
 VERDICT: DESIGN AMBIGUITY
 ```
 
-Followed by Markdown with these sections:
+The body following it has these sections:
 
 ```markdown
 ## Acceptance Criteria
@@ -173,9 +212,14 @@ Be concise. Do not restate the diff.
 
 ## Publishing the verdict
 
-Post the review as a PR comment, then apply the matching label — this is
-what makes the result visible to `agent-03-rollup.yml`, the Issue views, and
-the control plane, exactly as `agent-04-review.yml` does:
+Post the review as a PR comment **in the envelope above, marker and all**,
+then apply the matching label — together these are what make the result
+visible to `agent-03-rollup.yml`, the Issue views, the control plane and the
+fix cycle, exactly as `agent-04-review.yml` does.
+
+The comment is what the fixer reads; the label is what the dashboards read.
+Posting one without the other leaves the PR in a state that looks reviewed
+from one side and unreviewed from the other, so do both or neither:
 
 ```bash
 # LOCAL

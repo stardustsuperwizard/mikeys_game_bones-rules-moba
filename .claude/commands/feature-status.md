@@ -81,7 +81,7 @@ both — a task in the comment but not in the list was closed or deleted, and a
 task in the list but not the comment was added by hand.
 
 If there are none, the Issue has not been planned. Say so and stop: the next
-command is `/plan-feature $ARGUMENTS`.
+command is `/planner $ARGUMENTS`.
 
 ## 3. Per task
 
@@ -151,11 +151,11 @@ isn't one. Work down this list and take the first that matches:
 | No PR yet | `/execute-task <n>` |
 | PR is a draft | `mark ready` — a draft in review gets a verdict against unfinished work |
 | CI red | `fix CI` — red CI is work now, whatever the review says |
-| PR open, no verdict comment | `/review-task <pr>` |
-| Latest verdict `FIX` | `/fix-review <pr>` |
+| PR open, no verdict comment | `/reviewer <pr>` |
+| Latest verdict `FIX` | `/fixer <pr>` |
 | Latest verdict `PASS` | `ready to merge` |
 | Latest verdict `DESIGN AMBIGUITY` | `needs your decision` |
-| Latest verdict `PLANNING FAILURE` | `re-plan — /plan-feature $ARGUMENTS` |
+| Latest verdict `PLANNING FAILURE` | `re-plan — /planner $ARGUMENTS` |
 
 Then, below the table:
 

@@ -69,6 +69,68 @@ contract-driven work doesn't need the top model the way blind planning or
 review does. See `agent-02-execute.yml` and `agent-05-fix.yml` for their
 exact lists.
 
+### Claude Code gets one fallback chain, not four lists
+
+The `.claude` roles cannot express the table above. A Claude Code subagent's
+`model:` frontmatter is a single scalar — an alias (`sonnet`, `opus`,
+`haiku`, `fable`), a full model ID, or `inherit` — with no array form and no
+comma-separated preference list. The `model` parameter on a subagent call is
+a single value too. There is nowhere to write `PLANNER_MODELS` locally.
+
+What exists instead is `fallbackModel`, and it is **one chain for the whole
+session**, applied to every subagent in it:
+
+```jsonc
+// .claude/settings.json
+{ "fallbackModel": ["claude-opus-5", "claude-opus-4-8"] }
+```
+
+**The chain only ever escalates, and that is the whole design.** A chain is
+session-wide, so the same list that catches an unavailable Haiku executor also
+catches an unavailable Opus reviewer. A natural-looking
+`["claude-sonnet-5", "claude-haiku-4-5"]` would quietly hand a Haiku model the
+review of a pull request the planner deliberately tiered to Opus — the exact
+outcome `EXECUTOR_MODELS` refuses when its `haiku` tier falls *up* through
+`claude-sonnet-5` to `claude-opus-5` rather than down. Escalate-only is the
+one shape a single shared chain can take without contradicting the tiering
+everything else in this document is built on. It costs more only when a model
+is genuinely unavailable, which is rare; a review done cheaply because Opus
+was busy costs a fix cycle, and that is not cheaper.
+
+Three things about it are easy to get wrong.
+
+- **The file has to be `.claude/settings.json`, committed.** A cloud session —
+  Claude Code on the web, and therefore the Claude mobile app — runs on a
+  fresh clone and reads shared project settings out of it. It does **not**
+  read `~/.claude/settings.json` or `.claude/settings.local.json`; both stay
+  on the machine. Anything that must apply from a phone has to be in the
+  clone. `.gitignore` ignores `.claude/*` wholesale, so this file needs its
+  own `!.claude/settings.json` negation next to the ones for `agents/` and
+  `commands/` — without it the setting works on the desktop and is invisible
+  everywhere it was written for. `settings.local.json` stays ignored on
+  purpose: it is the personal override, and a personal override that reached
+  cloud sessions would not be one.
+- **These are Claude Code model IDs, and they use dashes.** `claude-opus-4-8`,
+  not the `claude-opus-4.8` that appears in `EXECUTOR_MODELS` above — that is
+  the Copilot CLI spelling. This is the same two-namespace hazard
+  *`model:` in an agent file takes a display name* describes for agent files
+  and `--model`, and the failure is quiet: an unreachable entry is skipped and
+  the chain moves on, so a mistyped ID looks exactly like a chain that was
+  never needed.
+- **Subagent coverage needs Claude Code v2.1.247 or later.** Before it, a
+  failure the chain covers ended the subagent instead of failing it over. On
+  an older build the file is harmless but does nothing for the four roles,
+  which is the only place it matters here.
+
+The trigger conditions match `run-copilot-session`'s rule closely enough to
+be worth stating: Claude Code switches when the primary is overloaded,
+unavailable, or returns another non-retryable server error, and never on
+authentication, billing, rate-limit, request-size, transport, or policy
+errors. Both systems fall back on *unavailability alone* — never after a real
+failure, because a cheap retry after a genuine failure defeats whichever tier
+the caller chose. Claude Code caps the chain at three after removing
+duplicates, and a switch lasts one turn.
+
 ### The executor's tier is chosen per task
 
 Every other role in the table gets one list for the whole repository. The
@@ -1049,7 +1111,7 @@ cannot write — see *Paths the agent workflows cannot push*. Both comment
 and drop `agent:fix` without starting a session. Neither is a red run: a
 refusal is not a malfunction.
 
-The equivalent local path is `/fix-review <pr-number>` or the
+The equivalent local path is `/fixer <pr-number>` or the
 `fixer` Claude Code agent; commenting `@copilot` on the PR still works too,
 outside this repository's scripted path. A fix push gets the same
 independent check run an executor push does — see *The independent
@@ -1450,16 +1512,18 @@ Claude Code at those same files rather than duplicating them, so there is one
 contract, not two to keep in sync.
 
 `.claude/agents/*.md` and `.claude/commands/*.md` are local Claude Code
-counterparts of the four roles, invoked as `/plan-feature`, `/execute-task`,
-`/review-task`, and `/fix-review`, or their matching subagents (`planner`,
-`executor`, `reviewer`, `fixer`):
+counterparts of the four roles, invoked as `/planner`, `/executor`,
+`/reviewer`, and `/fixer`, or their matching subagents (`planner`,
+`executor`, `reviewer`, `fixer`). The command names match the agent names
+one-for-one, because the only thing each command does is guard its inputs and
+run that agent:
 
 | Role | GitHub-side | Claude Code-side |
 | --- | --- | --- |
-| Plan | `agent-01-planner.yml` / `.github/agents/01-planner.agent.md` | `.claude/commands/plan-feature.md` / `.claude/agents/planner.md` |
-| Execute | `agent-02-execute.yml` / `.github/agents/02-executor.agent.md` | `.claude/commands/execute-task.md` / `.claude/agents/executor.md` |
-| Review | `agent-04-review.yml` / `.github/agents/03-reviewer.agent.md` | `.claude/commands/review-task.md` / `.claude/agents/reviewer.md` |
-| Fix | `agent-05-fix.yml` / `.github/agents/05-fixer.agent.md` | `.claude/commands/fix-review.md` / `.claude/agents/fixer.md` |
+| Plan | `agent-01-planner.yml` / `.github/agents/01-planner.agent.md` | `.claude/commands/planner.md` / `.claude/agents/planner.md` |
+| Execute | `agent-02-execute.yml` / `.github/agents/02-executor.agent.md` | `.claude/commands/executor.md` / `.claude/agents/executor.md` |
+| Review | `agent-04-review.yml` / `.github/agents/03-reviewer.agent.md` | `.claude/commands/reviewer.md` / `.claude/agents/reviewer.md` |
+| Fix | `agent-05-fix.yml` / `.github/agents/05-fixer.agent.md` | `.claude/commands/fixer.md` / `.claude/agents/fixer.md` |
 
 Each of those eight files opens with a **GitHub access** section, because the
 two Claude Code surfaces do not agree on how to reach GitHub. A desktop
@@ -1494,22 +1558,58 @@ facility with no `gh` equivalent, so `/execute-task` subscribes on the cloud
 surface and polls `gh pr checks --watch` on the desktop one. Same step, two
 mechanisms, both written out, and neither pretending to be the other.
 
-### `/execute-task` drives one task to a verdict
+### `/execute-task` drives one task to a `PASS`, unattended
 
 The four roles are four contracts, but they are not four things a human wants
-to sit and trigger in sequence. `/execute-task` therefore does not stop when
-the executor opens a PR. It subscribes to that PR, waits for CI on the pushed
-commit, hands the CI outcome to the `reviewer` subagent along with the diff,
-and routes on the verdict: `FIX` goes to the `fixer`, whose push re-runs CI
-and sends the loop round again; `DESIGN AMBIGUITY` and `PLANNING FAILURE`
-stop and go to the human, because neither is a bounded correction. Two fix
-cycles, then it hands over — a third round on the same finding means the
-review and the fix disagree about what the finding is, which is not something
-a fourth round settles.
+to sit and trigger in sequence. `/execute-task` is the fifth command, and the
+only one that is not a role: it invokes the other four and keeps going.
 
-Three things about that loop are worth stating, because each is a decision
-rather than an obvious consequence:
+It runs `/executor` on the Issue, subscribes to the pull request that comes
+back, waits for CI on the pushed commit, hands the CI outcome to `/reviewer`
+along with the diff, and routes on the `review:*` label it applies. `FIX` goes to `/fixer`, whose push re-runs CI and
+sends the loop round again; `DESIGN AMBIGUITY` and `PLANNING FAILURE` stop
+and go to the human, because neither is a bounded correction.
 
+**Four fix cycles, then it alerts.** After the fourth fix it runs one more
+CI-and-review pass so the last fix is actually verified, and then stops
+whatever that fifth verdict says, unless it is `PASS`. The alert names the
+PR, what is still wrong, whether the same finding has now survived more than
+one cycle, and which model tier each cycle ran at. A finding that outlives
+four fixes usually means the review and the fix disagree about what the
+finding *is*, which is not something a fifth round settles.
+
+Six things about that loop are decisions rather than obvious consequences:
+
+- **It routes on the label and reads the payload from the comment.** The
+  `review:*` label is one value from a vocabulary of four, so routing is a
+  field lookup rather than a parse of comment prose — which matters most on
+  the cheap models this pipeline is meant to run on. But the label cannot
+  carry the **Findings** and **Required Before Merge** sections, and those are
+  the correction contract the fixer works from, so the comment remains the
+  payload. When the two disagree — a session that died between the two calls
+  leaves the PR half-labelled — the comment wins: comments are append-only and
+  timestamped, where the label is a single mutable value that may still be
+  describing the previous cycle.
+
+- **The fixer's model climbs.** The first fix cycle runs at the tier the
+  executor built the code at — a model a tier below the one that wrote the
+  code is being asked to understand something it could not have written. Every
+  cycle after the first runs at `opus`, because a second cycle on the same PR
+  is evidence the first was not enough. This is the local shape of the
+  escalation `agent-06-claude.yml`'s tier step already runs for `claude:fix`,
+  and it keeps that step's floor rule: the fixer never runs below its
+  configured model.
+- **The executor's model comes from the Issue.** `/executor` reads the
+  planner's `model:*` label and passes it as the subagent's model, which
+  overrides `executor.md`'s `model: haiku` frontmatter. An Issue with no tier
+  label gets `sonnet`, not `haiku` — the planner's own rule is that `sonnet`
+  is the answer when the tier is unclear, and an absent label is the most
+  unclear a tier gets. Without this the planner's tiering, which is the one
+  judgement made with the whole feature in view, was being discarded locally. When a model turns out to be unavailable rather than merely
+  cheap, `.claude/settings.json`'s `fallbackModel` chain catches it — see
+  *Claude Code gets one fallback chain, not four lists* above for why that
+  chain only ever escalates, and why it has to be the committed project file
+  rather than either of the other two settings scopes.
 - **CI failures do not get their own repair path.** A red check is carried
   into the review as context, not fixed on the spot. The `fixer` finds its
   work by reading an `<!-- agent-review-verdict -->` comment, so a check
@@ -1527,26 +1627,49 @@ rather than an obvious consequence:
   here is path-filtered — `godot-ci-validation.yml` by `paths-ignore`,
   `gdscript-lint.yml` by `paths` — so a docs-only PR legitimately runs
   nothing, and that *is* green. A PR that changes `**.gd` and still has no
-  checks is the other case, below, and is not. Either way the wait stops:
-  waiting for a check that will never be created is the one way that step
-  hangs forever.
+  checks is the other case: without `AGENT_GITHUB_TOKEN`, pull requests opened
+  by `GITHUB_TOKEN` get no `pull_request` runs at all, and no approval step
+  can rescue that because there is no parked run to approve. The gates did not
+  pass, they never ran, and the file says to report it that way. Either way
+  the wait stops: waiting for a check that will never be created is the one
+  way that step hangs forever.
 
-The loop ends at a `PASS` on green CI. It does not merge and does not approve;
-that is still the human's, as it is on every other path in this document.
+The loop ends at a `PASS` on green CI. It does not merge and does not approve
+the pull request; that is still the human's, as it is on every other path in
+this document.
 
-One caveat is written into the file because the file has two readers.
-`agent-06-claude.yml` hands this same prompt to a headless session for the
-`claude:execute` label, and that session is bounded by `--max-turns 60` — the
-executor step alone can consume most of it, and a truncated run stops
-mid-loop rather than anywhere it chose. So an unattended session runs steps
-one through four and stops at the verdict, saying on the PR that the fix
-cycle was not run and that `agent:fix` or `/fix-review` starts it. It also
-bounds the CI wait, for the reason the identity comment in that workflow
-already gives: without `AGENT_GITHUB_TOKEN`, the pull requests it opens are
-authored by `GITHUB_TOKEN` and GitHub starts no `pull_request` runs for them.
-That is the second reading of an empty check list, and the one where empty is
-not green — the gates did not pass, they never ran, and the file says to
-report it that way.
+It also does not release workflow runs parked in `action_required`, and an
+earlier draft of this section had it doing so. That step does not belong here,
+because the two ways checks fail to start on this repository are both outside
+a session's reach and neither is fixed by an approval:
+
+- **A session's own pull requests are never parked.** `/execute-task` runs in
+  a Claude Code session — desktop or cloud — which reaches GitHub as
+  `stardustsuperwizard`, an account with write access, and pushes a branch of
+  this repository rather than a fork. GitHub parks runs for pull requests from
+  forks and from first-time contributors; neither describes anything a session
+  opens. No run in this repository is in `action_required` today, across 2,608
+  of them.
+- **The cases that do fail are Actions-authored pushes**, and they fail
+  earlier than approval. A pull request authored by `GITHUB_TOKEN` gets no
+  `pull_request` run created at all, and *The independent validation gate*
+  above records agent pushes whose `pull_request` validation landed in
+  `action_required` and never executed — which is why that gate is called as a
+  job of the same run instead of relying on a second trigger. Neither has a
+  parked run for a session to release.
+
+The identity is what separates the two, and it is not the agent doing the
+work. A subagent runs inside its parent session, on the same credentials and
+the same GitHub connection, so the executor subagent opens a pull request as
+exactly the same account the session would. What differs is the surface: a
+session carries a user token, and a workflow carries `GITHUB_TOKEN` unless
+`AGENT_GITHUB_TOKEN` is set.
+
+`/execute-task` has one reader, and that is deliberate. `agent-06-claude.yml`
+routes `claude:execute` to `/executor`, not here: a headless run is bounded by
+`--max-turns 60`, the executor step alone can consume most of it, and a run
+truncated inside the third fix cycle is worse than one that stopped at a place
+it chose. A label is a single role. The orchestrator is a human in a session.
 
 ### `/feature-status` — where does this feature stand?
 
@@ -1561,7 +1684,7 @@ table, with the literal next command in the right-hand column.
 
   #  Task                              Tier    PR    CI  Verdict   Next
   1  Appearance data model             opus    #381  ok  PASS      ready to merge
-  2  Character creation UI             sonnet  #390  ok  FIX (x1)  /fix-review 390
+  2  Character creation UI             sonnet  #390  ok  FIX (x1)  /fixer 390
   3  Placeholder appearance rendering  haiku   --    --  --        /execute-task 377
   4  Team-colour signal                sonnet  --    --  --        blocked by #377
 ```
@@ -1625,10 +1748,10 @@ included. Four labels, one per role:
 
 | Label | Target | Prompt | Model |
 | --- | --- | --- | --- |
-| `claude:plan` | intake Issue | `.claude/commands/plan-feature.md` | `vars.CLAUDE_PLANNER_MODEL`, default Opus 5 |
-| `claude:execute` | `[impl]` Issue | `.claude/commands/execute-task.md` | `vars.CLAUDE_EXECUTOR_MODEL`, default Haiku 4.5 |
-| `claude:review` | pull request | `.claude/commands/review-task.md` | `vars.CLAUDE_REVIEWER_MODEL`, default Opus 5 |
-| `claude:fix` | pull request | `.claude/commands/fix-review.md` | `vars.CLAUDE_FIXER_MODEL`, default Sonnet 5 |
+| `claude:plan` | intake Issue | `.claude/commands/planner.md` | `vars.CLAUDE_PLANNER_MODEL`, default Opus 5 |
+| `claude:execute` | `[impl]` Issue | `.claude/commands/executor.md` | `vars.CLAUDE_EXECUTOR_MODEL`, default Haiku 4.5 |
+| `claude:review` | pull request | `.claude/commands/reviewer.md` | `vars.CLAUDE_REVIEWER_MODEL`, default Opus 5 |
+| `claude:fix` | pull request | `.claude/commands/fixer.md` | `vars.CLAUDE_FIXER_MODEL`, default Sonnet 5 |
 
 The tiers mirror the Copilot routing table above, for the same reason. The ids
 do not: these are Claude Code model ids (`claude-opus-5`,
@@ -1681,8 +1804,10 @@ is a prompt path and a model, so the roles are a `case` statement rather than
 four files sharing one guard to keep in sync.
 
 Its prompts are the same `.claude/commands/*.md` files a human invokes as
-`/execute-task` — one contract per role, not a workflow copy that drifts from
-the interactive one. It addresses them by path rather than as slash commands,
+`/planner`, `/executor`, `/reviewer` and `/fixer` — one contract per role, not
+a workflow copy that drifts from the interactive one. `claude:execute` routes
+to `/executor` rather than to `/execute-task`: one label is one role, and the
+orchestrator's fix loop does not fit the `--max-turns 60` budget. It addresses them by path rather than as slash commands,
 because a slash command resolving inside the action is an assumption the
 workflow does not need to make; reading a checked-out file is not.
 
