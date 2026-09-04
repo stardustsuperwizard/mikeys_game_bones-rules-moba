@@ -1553,8 +1553,8 @@ report it that way.
 `/execute-task` drives one task to a verdict, but a feature is many tasks, and
 between them someone has to work out what is already done: which tasks exist,
 which have pull requests, which came back `FIX`, which are blocked on a task
-that has not merged. `/feature-status <intake-issue>` answers that in one table, with the
-literal next command in the right-hand column.
+that has not merged. `/feature-status <intake-issue>` answers that in one
+table, with the literal next command in the right-hand column.
 
 ```
 /feature-status 283
