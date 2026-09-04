@@ -1306,6 +1306,54 @@ counterparts of the four roles, invoked as `/plan-feature`, `/execute-task`,
 | Review | `agent-04-review.yml` / `.github/agents/03-reviewer.agent.md` | `.claude/commands/review-task.md` / `.claude/agents/reviewer.md` |
 | Fix | `agent-05-fix.yml` / `.github/agents/05-fixer.agent.md` | `.claude/commands/fix-review.md` / `.claude/agents/fixer.md` |
 
+### `/deliver-feature` — one session that runs all four
+
+The four roles above are four separate invocations, and someone has to sit
+between them: read the plan, dispatch each task, notice a PR came back `FIX`,
+call the fixer, ask for another review. `/deliver-feature <intake-issue>` is
+that someone.
+
+It plans the intake Issue, stops and shows you the plan, and — once you
+approve it — implements each task in dependency order, driving every pull
+request through review and fix until it passes or until it needs a human. It
+merges nothing.
+
+**It is an orchestrator, and it does no thinking.** It reads a verdict line
+and picks a branch; every judgement in the run belongs to a subagent carrying
+its own model. That is deliberate, because it is what makes the session cheap:
+a Haiku session can drive an Opus reviewer, since a subagent's `model:`
+frontmatter is independent of the session that spawns it. The expensive models
+are spent where decisions are made, and nowhere else.
+
+Four things about it are load-bearing:
+
+- **The plan gate is a hard stop.** It prints the task table and waits. A bad
+  plan is the most expensive thing to discover late, because every task after
+  it is wasted work — and this is the one moment where a human sees the whole
+  shape for the cost of reading a table. It mirrors the GitHub side's posture,
+  where *Mostly label-driven, on purpose* means a human adds `agent:execute`
+  per task.
+- **Tasks run serially, never in parallel.** Two executor subagents share one
+  working tree and one checkout. Being independent in the dependency graph
+  does not make them independent on disk.
+- **It honours the same `model:*` label `agent-02-execute.yml` reads,** passing
+  it as the executor subagent's model override, and it escalates the fixer to
+  Opus from the second round — the same rule `FIXER_ESCALATE_AFTER` applies in
+  Actions. The planner calls the tier once; both surfaces obey it.
+- **It writes run state to a file after every step.** A full delivery is more
+  subagent traffic than a session holds, and the failure mode is silent — you
+  forget task 4 exists and report success. The file, not the session's memory,
+  is what the run trusts.
+
+`DESIGN AMBIGUITY` and `PLANNING FAILURE` verdicts stop that task and go to
+you at the end, as decisions rather than work. Three fix rounds on one pull
+request is the cap.
+
+This does not replace the GitHub pipeline, and it is not reachable from a
+label. It is for the case the label-driven flow handles badly: wanting a whole
+feature carried from intake to merge-ready in one sitting, without being the
+person holding the baton between each leg.
+
 The two sides share the Issue and PR graph, not a runtime. A PR opened by
 Claude Code doesn't land on a `copilot/*` branch, so it won't trigger
 `agent-04-review.yml`'s automatic `ready_for_review` review — add
@@ -1405,7 +1453,7 @@ are custom agents and MCP servers.
 | `.github/ISSUE_TEMPLATE/99-execute_task.md` | Planner-emitted bounded task |
 | `.github/pull_request_template.md` | Handoff record, verdict |
 | `CLAUDE.md` | Points Claude Code at the same contract Copilot reads |
-| `.claude/agents/*.md`, `.claude/commands/*.md` | Local Claude Code counterparts of the four roles — see *Claude Code as an additional environment* |
+| `.claude/agents/*.md`, `.claude/commands/*.md` | Local Claude Code counterparts of the four roles, plus `/deliver-feature` which orchestrates all four — see *Claude Code as an additional environment* |
 
 ## Sources
 

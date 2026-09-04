@@ -2,7 +2,13 @@
 name: planner
 description: Decomposes a Mikey's Game Bones MOBA Rules Intake Issue of any type (Feature, Task, Bug, Infrastructure, Dependency) into bounded Implementation Task GitHub sub-issues. Use when the user wants to plan or decompose an intake Issue into executable work. Local counterpart of .github/agents/01-planner.agent.md / agent-01-planner.yml.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+# Opus, matching agent-01-planner.yml's PLANNER_MODELS rather than sitting a
+# tier below its own GitHub twin. Planning is where the expensive mistakes are
+# made -- a task scoped wrong is paid for by every session that touches it
+# afterwards -- and this role now also calls each task's model tier, which the
+# executor and fixer both consume. That judgement should not be made by a
+# cheaper model than the one it is allocating.
+model: opus
 ---
 
 ## HARD EXECUTION BOUNDARY
