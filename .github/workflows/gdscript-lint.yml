@@ -439,6 +439,12 @@ jobs:
           models: ${{ env.LINT_FIXER_MODELS }}
           max-ai-credits: ${{ env.LINT_FIXER_MAX_AI_CREDITS }}
           max-turns: ${{ env.LINT_FIXER_MAX_TURNS }}
+          # Only read when LINT_FIXER_VENDOR is claude, and empty is fine
+          # otherwise. Passed unconditionally because a composite action
+          # cannot read `secrets` itself: a key set on the repository but not
+          # threaded through here never reaches the process, which is a
+          # failure mode with no symptom until the vendor is switched.
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           step-label: "Auto-fixing lint"
 
       # The session was told not to touch anything outside the targeted

@@ -111,9 +111,20 @@ def classify(args):
     is_error = bool(envelope.get("is_error"))
     subtype = str(envelope.get("subtype") or "")
 
-    # The harness-authored match set. `.result` is deliberately excluded --
-    # see the module docstring.
-    harness_text = "\n".join([stderr_text, subtype])
+    # The harness-authored match set. `.result` is normally excluded -- see
+    # the module docstring -- with one narrow exception.
+    #
+    # Claude Code "prints the failure as the result on stdout" when a failure
+    # happens inside the run, and a missing key is exactly that. So on a run
+    # the envelope itself marks as failed, `.result` is harness-authored
+    # rather than model-authored and is safe to match. Gating on `is_error`
+    # is what keeps the discipline intact: a model that merely discusses an
+    # API key in a *successful* run still cannot be mistaken for one.
+    #
+    # Without this, a missing key degrades to `session_error` -- not
+    # dangerous, but it reports "unrecognised failure" for the one failure
+    # this harness most wants to name.
+    harness_text = "\n".join([stderr_text, subtype] + ([text] if is_error else []))
 
     unavailable_signals = _hits(UNAVAILABLE_PATTERNS, harness_text)
     rate_signals = _hits(RATE_LIMIT_PATTERNS, harness_text)

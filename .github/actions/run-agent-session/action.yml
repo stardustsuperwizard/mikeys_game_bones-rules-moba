@@ -88,6 +88,24 @@ inputs:
     required: false
     default: "read-only"
 
+  api-key:
+    description: >-
+      Claude only. An Anthropic API key, which the caller must pass from
+      `secrets.ANTHROPIC_API_KEY` -- a composite action cannot read `secrets`
+      itself, so a key that is set on the repository but not threaded through
+      a caller never reaches this process.
+
+      `--bare` never reads OAuth credentials or the keychain, so this is the
+      only auth that works on the claude branch. CLAUDE_CODE_OAUTH_TOKEN does
+      not, whatever it is set to.
+
+      Empty is allowed, and fails at the point of use rather than here: a
+      caller running `vendor: copilot` has no reason to hold a Claude key,
+      and refusing to start would make the copilot path depend on a secret it
+      never uses.
+    required: false
+    default: ""
+
   step-label:
     description: >-
       Human-readable label for the run's log group and failure summary,
@@ -214,6 +232,7 @@ runs:
         MAX_TURNS: ${{ inputs.max-turns }}
         CAPABILITY: ${{ inputs.capability }}
         STEP_LABEL: ${{ inputs.step-label }}
+        ANTHROPIC_API_KEY: ${{ inputs.api-key }}
       run: |
         set -euo pipefail
 
@@ -335,6 +354,20 @@ runs:
             --model "$model" \
             --out agent-outcome.json
         }
+
+        # Checked before the loop, not inside it. Without a key every
+        # candidate fails identically, so walking the list would turn one
+        # missing secret into N identical failures and report the last one.
+        if [ "$VENDOR" = "claude" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+          jq -n '{reason:"harness_error",
+                  headline:"No ANTHROPIC_API_KEY reached this session",
+                  guidance:"A composite action cannot read `secrets` itself. The caller must pass secrets.ANTHROPIC_API_KEY to this action'"'"'s `api-key` input. `--bare` never reads OAuth credentials, so CLAUDE_CODE_OAUTH_TOKEN does not work here whatever it is set to."}' \
+            > agent-session-failure.json
+
+          echo "::error::vendor is 'claude' but no ANTHROPIC_API_KEY reached" \
+               "this step. Pass secrets.ANTHROPIC_API_KEY to the api-key input."
+          exit 1
+        fi
 
         resolved=""
         last_reason=""
