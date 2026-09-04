@@ -25,7 +25,7 @@ name: GDScript Lint
 #      agent-05-fix.yml: that workflow's prompt is built from a PR's
 #      `<!-- agent-review-verdict -->` comment and full diff, which doesn't
 #      exist yet here and shouldn't be faked just to reuse it. It shares
-#      only the generic `run-copilot-session` action, with its own prompt,
+#      only the generic `run-agent-session` action, with its own prompt,
 #      its own (cheap, capped) model list, and its own validation gate.
 #
 # This is a deliberate, narrow exception to the rule elsewhere in this repo
@@ -47,7 +47,7 @@ on:
     #   - setup-godot/: installs the engine `validate-godot.sh` needs below
     #     -- same reasoning godot-ci-validation.yml gives for keeping it
     #     out of *its* ignore list.
-    #   - run-copilot-session/: runs the gdlint auto-fix session.
+    #   - run-agent-session/: runs the gdlint auto-fix session.
     #   - validate-godot.sh: gates both auto-fix commits below.
     #   - .gdlintrc: the rule set gdlint is checked against. Changing a
     #     threshold here changes what passes, so it has to run the linter.
@@ -60,7 +60,7 @@ on:
       - '.gdlintrc'
       - '.github/actions/lint-gdscript/**'
       - '.github/actions/setup-godot/**'
-      - '.github/actions/run-copilot-session/**'
+      - '.github/actions/run-agent-session/**'
       - '.github/scripts/validate-godot.sh'
       - '.github/workflows/gdscript-lint.yml'
 
@@ -399,8 +399,12 @@ jobs:
           steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
           steps.build-prompt.outputs.has-fixable == 'true'
         id: fix-session
-        uses: ./.github/actions/run-copilot-session
+        uses: ./.github/actions/run-agent-session
         with:
+          # The lint fixer is not one of the four labelled roles, so it has
+          # no `agent:{role}:{vendor}` label to take a vendor from. It is
+          # pinned to copilot deliberately rather than left to a default.
+          vendor: copilot
           prompt-file: lint-fix-prompt.txt
           models: ${{ env.LINT_FIXER_MODELS }}
           max-ai-credits: ${{ env.LINT_FIXER_MAX_AI_CREDITS }}

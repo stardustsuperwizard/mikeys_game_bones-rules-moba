@@ -62,7 +62,7 @@ on:
       # run validation.
       - '.github/actions/build-review-request/**'
       - '.github/actions/build-fix-request/**'
-      - '.github/actions/run-copilot-session/**'
+      - '.github/actions/run-agent-session/**'
       - '.github/actions/extract-review-verdict/**'
       - '.github/actions/lint-gdscript/**'
 

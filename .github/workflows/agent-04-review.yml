@@ -13,7 +13,7 @@ name: Agent - PR Review
 # agent-02-execute.yml's pre-PR review gate and agent-05-fix.yml:
 #
 #   - build-review-request  -- pulls the PR/task/diff and writes the prompt
-#   - run-copilot-session   -- runs the model, walking a fallback list
+#   - run-agent-session     -- runs the model, walking a fallback list
 #   - extract-review-verdict -- turns the session's text into a VERDICT
 #
 # This workflow's own job is everything specific to reviewing an *existing*
@@ -136,8 +136,11 @@ jobs:
 
       - name: Run Reviewer Session
         id: session
-        uses: ./.github/actions/run-copilot-session
+        uses: ./.github/actions/run-agent-session
         with:
+          # Explicit for now. Stage 3 replaces this literal with the vendor
+          # segment of the `agent:{role}:{vendor}` label that triggered the run.
+          vendor: copilot
           prompt-file: ${{ steps.build.outputs.prompt-file }}
           models: ${{ env.REVIEWER_MODELS }}
           max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
@@ -252,7 +255,7 @@ jobs:
           # failure file behind; the other one was never reached.
           failure = {}
 
-          for candidate in ("review-verdict-failure.json", "copilot-session-failure.json"):
+          for candidate in ("review-verdict-failure.json", "agent-session-failure.json"):
               path = pathlib.Path(candidate)
 
               if path.exists():

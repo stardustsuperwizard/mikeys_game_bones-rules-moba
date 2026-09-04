@@ -1,0 +1,460 @@
+name: Run Agent Session
+description: >-
+  Runs one agent session against a prepared prompt and returns the model's
+  answer as text. The vendor -- Copilot CLI or Claude Code -- is an input, so
+  every caller gets the same contract regardless of which company's model
+  answers: the same preference-list walk, the same outcome vocabulary, the
+  same output files.
+
+  This is the one place a vendor difference is allowed to exist. Above it the
+  agent workflows are vendor-blind: they build a prompt, run a session, parse
+  a verdict, publish it. Below it the two CLIs disagree about flags, output
+  shape and failure phrasing, and that disagreement is confined here.
+
+inputs:
+  vendor:
+    description: >-
+      Which CLI answers: `copilot` or `claude`. Comes from the second segment
+      of an `agent:{role}:{vendor}` label, so the label is what chooses the
+      company.
+    required: true
+
+  prompt-file:
+    description: >-
+      Path to the prepared prompt, relative to the workspace. Copilot reads
+      it from stdin; Claude is pointed at it by path and reads it with its
+      own Read tool. Neither form passes it as an argv element -- Linux caps
+      a single argument at 128 KiB (MAX_ARG_STRLEN) and a diff-bearing prompt
+      exceeds that long before the larger ARG_MAX applies.
+    required: true
+
+  models:
+    description: >-
+      Comma-separated model id preference list, tried in order. The next
+      candidate is only tried when a model is unavailable to the calling
+      identity -- never after a real failure. A cheap fallback after a real
+      failure would silently defeat whatever tier the caller chose.
+
+      The ids are vendor-native and must not be copied between vendors:
+      Copilot CLI spells its Opus 4.8 `claude-opus-4.8`, Claude Code spells
+      the same model `claude-opus-4-8`.
+    required: true
+
+  max-ai-credits:
+    description: >-
+      Copilot only. Soft credit cap for the session. The CLI rejects any
+      value below 30, so that is a floor, not a tuning choice. Ignored when
+      vendor is `claude`.
+    required: false
+    default: "75"
+
+  max-turns:
+    description: >-
+      Claude only. Turn ceiling for the session. Ignored when vendor is
+      `copilot`. A session that hits it is classified `budget_exhausted`,
+      not `completed`, so a truncated answer is never mistaken for a finished
+      one.
+    required: false
+    default: "60"
+
+  excluded-tools:
+    description: >-
+      Copilot only. Comma-separated tools to remove from the session.
+      Copilot's posture is subtractive -- it starts able and the caller takes
+      capability away.
+    required: false
+    default: "task,write_agent"
+
+  allowed-tools:
+    description: >-
+      Claude only. Comma-separated tools to permit, in permission-rule
+      syntax. Claude's posture is additive -- it starts unable under
+      `--permission-mode dontAsk` and the caller grants capability.
+
+      The default is read-only on purpose. A role that must edit or push says
+      so explicitly at its call site, the same way the reviewer says
+      explicitly that it cannot.
+    required: false
+    default: "Read,Grep,Glob"
+
+  step-label:
+    description: >-
+      Human-readable label for the run's log group and failure summary,
+      e.g. "Reviewing" or "Fixing"
+    required: false
+    default: "Running"
+
+outputs:
+  resolved-model:
+    description: The model id that actually produced output
+    value: ${{ steps.run.outputs.resolved_model }}
+  resolved-vendor:
+    description: >-
+      The vendor that produced output. Echoed back so a caller rendering a
+      report does not have to thread its own input through to the summary.
+    value: ${{ steps.run.outputs.resolved_vendor }}
+  assistant-text-file:
+    description: >-
+      Path to a file holding the joined text of the session's assistant
+      messages. Written even on a failed run if any text survived.
+    value: agent-assistant-text.txt
+  final-text-file:
+    description: >-
+      Path to a file holding only the session's *last* assistant message --
+      its Completion Report, for the roles that end with one. Prefer this
+      over assistant-text-file anywhere the text is rendered to a human as
+      the session's report: a session that narrates while it works ("Now
+      the doc.") puts every one of those lines into the joined file, and
+      they end up in the pull request body verbatim. Falls back to the
+      joined text when no single final message could be isolated, so it is
+      never empty where assistant-text-file would not be.
+
+      Claude returns one `.result` string rather than a stream of messages,
+      so for that vendor this file and the joined one are identical. The two
+      outputs stay distinct anyway: which one a caller wants is a property of
+      the caller, not of whoever happens to be answering today.
+    value: agent-final-text.txt
+  outcome-file:
+    description: >-
+      Path to the classifier verdict for the attempt that produced output (or
+      the last attempt tried, on total failure). Both vendors write the same
+      schema -- see the docstring in classify-claude-outcome.py for why that
+      matters.
+    value: agent-outcome.json
+  failure-file:
+    description: >-
+      Path to a failure summary, written only when no model produced usable
+      output. Callers should check for its existence before reading it.
+    value: agent-session-failure.json
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+
+    - name: Install Agent CLI
+      shell: bash
+      env:
+        VENDOR: ${{ inputs.vendor }}
+      run: |
+        set -euo pipefail
+
+        case "$VENDOR" in
+          copilot) npm install -g @github/copilot ;;
+          claude)  npm install -g @anthropic-ai/claude-code ;;
+          *)
+            echo "::error::Unknown vendor '$VENDOR'. Expected 'copilot' or 'claude'."
+            exit 1
+            ;;
+        esac
+
+    # Copilot CLI model ids are not published as a stable list; they are
+    # shown in the --model help text. Dumping them costs nothing and means
+    # a rejected id is self-diagnosing instead of a mystery failure.
+    - name: Show Available Models
+      if: inputs.vendor == 'copilot'
+      continue-on-error: true
+      shell: bash
+      env:
+        MODELS: ${{ inputs.models }}
+      run: |
+        set +e
+
+        copilot --version
+        copilot --help 2>&1 | sed -n '/--model/,/^[[:space:]]*$/p' \
+          > model-help.txt
+
+        echo "Candidate models for this run: $MODELS"
+        cat model-help.txt
+
+        {
+          echo "<details><summary>Copilot CLI model ids</summary>"
+          echo ""
+          echo "Candidates tried in order: \`$MODELS\`"
+          echo ""
+          echo '```'
+          cat model-help.txt
+          echo '```'
+          echo "</details>"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Show Claude Version
+      if: inputs.vendor == 'claude'
+      continue-on-error: true
+      shell: bash
+      env:
+        MODELS: ${{ inputs.models }}
+      run: |
+        set +e
+        claude --version
+        echo "Candidate models for this run: $MODELS"
+
+    - name: ${{ inputs.step-label }}
+      id: run
+      shell: bash
+      env:
+        VENDOR: ${{ inputs.vendor }}
+        PROMPT_FILE: ${{ inputs.prompt-file }}
+        MODELS: ${{ inputs.models }}
+        MAX_AI_CREDITS: ${{ inputs.max-ai-credits }}
+        MAX_TURNS: ${{ inputs.max-turns }}
+        EXCLUDED_TOOLS: ${{ inputs.excluded-tools }}
+        ALLOWED_TOOLS: ${{ inputs.allowed-tools }}
+        STEP_LABEL: ${{ inputs.step-label }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -f "$PROMPT_FILE" ]; then
+          echo "::error::Prompt file $PROMPT_FILE does not exist."
+          exit 1
+        fi
+
+        # One invocation function per vendor, one shared loop. The loop is
+        # the load-bearing part -- "advance only on model_unavailable" is the
+        # rule that keeps a real failure from being retried on a cheaper
+        # model -- so it must not be written twice.
+        #
+        # Each function leaves behind: agent-outcome.json (the shared
+        # schema), and whatever raw evidence its classifier needed.
+
+        invoke_copilot() {
+          local model="$1"
+          local status=0
+
+          # The prompt goes on stdin, NOT via -p "$(cat ...)": Linux caps a
+          # single argv element (MAX_ARG_STRLEN, 128 KiB), independently of
+          # the larger total ARG_MAX. A large diff-bearing prompt fails
+          # execve() with E2BIG before copilot even starts. Copilot CLI
+          # reads the prompt from stdin when -p is empty.
+          copilot \
+            -p "" \
+            --model "$model" \
+            --output-format json \
+            --no-ask-user \
+            --max-ai-credits "$MAX_AI_CREDITS" \
+            --allow-all-tools \
+            --excluded-tools "$EXCLUDED_TOOLS" \
+            < "$PROMPT_FILE" \
+            > copilot-output.jsonl 2> agent-error.txt || status=$?
+
+          echo "copilot exited $status"
+          echo "output: $(wc -c < copilot-output.jsonl) bytes of JSONL"
+
+          python3 .github/scripts/classify-copilot-outcome.py \
+            --jsonl copilot-output.jsonl \
+            --stderr agent-error.txt \
+            --exit-status "$status" \
+            --model "$model" \
+            --credit-limit "$MAX_AI_CREDITS" \
+            --out agent-outcome.json
+        }
+
+        invoke_claude() {
+          local model="$1"
+          local status=0
+
+          # Claude is pointed at the prompt file rather than fed it, for the
+          # same MAX_ARG_STRLEN reason as above and because `-p` with piped
+          # stdin combines the two in a way this harness would rather not
+          # depend on. `--bare` is the documented mode for CI: it skips the
+          # host's hooks, plugins, MCP servers, auto memory and CLAUDE.md, so
+          # the run does not vary with whatever is configured on the machine
+          # that happens to be executing it.
+          #
+          # `--bare` also never reads OAuth credentials or the keychain, so
+          # ANTHROPIC_API_KEY is the only auth that works here.
+          # CLAUDE_CODE_OAUTH_TOKEN does not, and the classifier says so by
+          # name rather than reporting a generic failure.
+          claude \
+            --bare \
+            -p "Read $PROMPT_FILE and follow it exactly. It is the whole task." \
+            --model "$model" \
+            --output-format json \
+            --max-turns "$MAX_TURNS" \
+            --permission-mode dontAsk \
+            --allowedTools "$ALLOWED_TOOLS" \
+            > claude-output.json 2> agent-error.txt || status=$?
+
+          echo "claude exited $status"
+          echo "output: $(wc -c < claude-output.json) bytes of JSON"
+
+          python3 .github/scripts/classify-claude-outcome.py \
+            --json claude-output.json \
+            --stderr agent-error.txt \
+            --exit-status "$status" \
+            --model "$model" \
+            --out agent-outcome.json
+        }
+
+        resolved=""
+        last_reason=""
+
+        IFS=',' read -r -a candidates <<< "$MODELS"
+
+        for candidate in "${candidates[@]}"; do
+          model="$(echo "$candidate" | tr -d '[:space:]')"
+          [ -n "$model" ] || continue
+
+          echo "::group::$STEP_LABEL with $model ($VENDOR)"
+
+          case "$VENDOR" in
+            copilot) invoke_copilot "$model" ;;
+            claude)  invoke_claude  "$model" ;;
+          esac
+
+          reason="$(jq -r '.reason' agent-outcome.json)"
+          headline="$(jq -r '.headline' agent-outcome.json)"
+          guidance="$(jq -r '.guidance' agent-outcome.json)"
+
+          echo "::endgroup::"
+
+          last_reason="$reason"
+
+          if [ "$reason" = "model_unavailable" ]; then
+            echo "::warning::$headline. Trying the next candidate."
+            continue
+          fi
+
+          chars="$(jq -r '.assistant_text_chars' agent-outcome.json)"
+
+          # Anything that produced text goes forward, even a session that
+          # ended badly -- a run can trip its credit or turn cap and still
+          # return a whole answer. Whether what came back is *complete* is
+          # the caller's question (e.g. extract-review-verdict), asked once,
+          # in one place, using this outcome file.
+          if [ "$reason" = "completed" ] || [ "$chars" -gt 0 ]; then
+            resolved="$model"
+
+            if [ "$reason" != "completed" ]; then
+              echo "::warning::$headline, but it produced $chars characters" \
+                   "of output."
+            fi
+
+            break
+          fi
+
+          echo "::error::$headline"
+          echo "$guidance"
+
+          {
+            echo "### $STEP_LABEL failed: $reason"
+            echo ""
+            echo "$headline"
+            echo ""
+            echo "$guidance"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cp agent-outcome.json agent-session-failure.json
+
+          exit 1
+        done
+
+        if [ -z "$resolved" ]; then
+          if [ "$VENDOR" = "claude" ]; then
+            GUIDANCE="Availability is resolved per account. Check the id spelling -- Claude Code ids use dashes (claude-opus-4-8), not the dotted Copilot form -- then set the relevant CLAUDE_*_MODELS repository variable."
+          else
+            GUIDANCE="Availability is resolved per identity. Check https://github.com/settings/copilot/features, then set the relevant COPILOT_*_MODELS repository variable."
+          fi
+
+          jq -n \
+            --arg guidance "$GUIDANCE" \
+            '{reason:"model_unavailable",
+              headline:"No candidate model was available",
+              guidance:$guidance}' \
+            > agent-session-failure.json
+
+          echo "::error::None of these models were available to the calling" \
+               "identity: $MODELS. (last reason: $last_reason)"
+          exit 1
+        fi
+
+        echo "resolved_model=$resolved" >> "$GITHUB_OUTPUT"
+        echo "resolved_vendor=$VENDOR" >> "$GITHUB_OUTPUT"
+
+    # Runs even when the step above failed, so a truncated or budget-capped
+    # session's partial text is still available to whatever the caller's
+    # own failure-reporting does with it.
+    - name: Extract Assistant Text
+      if: always()
+      shell: python
+      env:
+        VENDOR: ${{ inputs.vendor }}
+      run: |
+        import json
+        import os
+        import pathlib
+
+        vendor = os.environ["VENDOR"]
+        parts = []
+
+        if vendor == "copilot":
+            jsonl = pathlib.Path("copilot-output.jsonl")
+
+            if jsonl.exists():
+                for raw_line in jsonl.read_text(errors="replace").splitlines():
+                    raw_line = raw_line.strip()
+
+                    if not raw_line:
+                        continue
+
+                    try:
+                        event = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if event.get("type") != "assistant.message":
+                        continue
+
+                    content = (event.get("data") or {}).get("content")
+
+                    if isinstance(content, str):
+                        parts.append(content)
+                    elif isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                parts.append(block.get("text", ""))
+
+        elif vendor == "claude":
+            # One envelope, one answer. `.result` carries the final text --
+            # and on an in-run failure Claude Code puts the failure message
+            # there too, which is why it is still worth writing out on a
+            # failed run rather than only on a clean one.
+            envelope = pathlib.Path("claude-output.json")
+
+            if envelope.exists():
+                raw = envelope.read_text(errors="replace").strip()
+
+                if raw:
+                    try:
+                        loaded = json.loads(raw)
+                    except json.JSONDecodeError:
+                        loaded = None
+
+                    if isinstance(loaded, dict):
+                        result = loaded.get("result")
+
+                        if isinstance(result, str) and result.strip():
+                            parts.append(result)
+
+        text = "\n".join(parts).strip()
+        pathlib.Path("agent-assistant-text.txt").write_text(text + "\n")
+
+        # The last assistant message is the Completion Report for the roles
+        # that end with one. Everything before it is the session thinking out
+        # loud, which is useful in a log and noise in a pull request body.
+        #
+        # Falls back to the joined text rather than emitting nothing: a
+        # capped session can be cut off mid-stream, and partial text is still
+        # better than a blank report -- the same reasoning as the
+        # `if: always()` on this step.
+        final = ""
+
+        for part in reversed(parts):
+            if part.strip():
+                final = part.strip()
+                break
+
+        pathlib.Path("agent-final-text.txt").write_text((final or text) + "\n")

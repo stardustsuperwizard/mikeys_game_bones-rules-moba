@@ -8,7 +8,7 @@ name: Agent - PR Fix
 #
 # The gathering and prompt-building work is shared with
 # agent-02-execute.yml's pre-PR review-and-fix gate via the
-# `build-fix-request` and `run-copilot-session` composite actions. This
+# `build-fix-request` and `run-agent-session` composite actions. This
 # workflow's own job is everything specific to fixing an *existing* pull
 # request: checking out its branch, pushing the correction, and posting the
 # result as a comment on it.
@@ -548,8 +548,11 @@ jobs:
       - name: Run Fixer Session
         if: steps.build.outputs.verdict == 'FIX'
         id: session
-        uses: ./.github/actions/run-copilot-session
+        uses: ./.github/actions/run-agent-session
         with:
+          # Explicit for now. Stage 3 replaces this literal with the vendor
+          # segment of the `agent:{role}:{vendor}` label that triggered the run.
+          vendor: copilot
           prompt-file: ${{ steps.build.outputs.prompt-file }}
           models: ${{ steps.tier.outputs.models }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
@@ -697,7 +700,7 @@ jobs:
 
           failure = {}
 
-          for candidate in ("fixer-failure.json", "copilot-session-failure.json"):
+          for candidate in ("fixer-failure.json", "agent-session-failure.json"):
               path = pathlib.Path(candidate)
 
               if path.exists():
