@@ -68,10 +68,10 @@ name: Agent - AW02 Execute Task
 # right from the start instead, because it writes the pull request itself,
 # only after its own validation and (when applicable) review-and-fix pass.
 #
-# Deliberately human-gated, like `agent:plan`/`agent:review`/`agent:fix`:
+# Deliberately human-gated, like `agent:planner:copilot`/`agent:reviewer:copilot`/`agent:fixer:copilot`:
 # this workflow pushes a branch and opens a pull request, so it never fires
 # just because an Issue exists or gets assigned. A human decides when to
-# spend it by adding `agent:execute` (works from GitHub Mobile).
+# spend it by adding `agent:implementor:copilot` (works from GitHub Mobile).
 #
 # The pull request opens as soon as the implementor's commit exists --
 # immediately after "Check For Commit" below, before validation,
@@ -141,8 +141,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
        (github.event.label.name == 'agent:implementor:copilot' ||
-        github.event.label.name == 'agent:implementor:claude' ||
-        github.event.label.name == 'agent:execute'))
+        github.event.label.name == 'agent:implementor:claude'))
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -335,7 +334,7 @@ jobs:
                > blockers.json; then
             echo "::error::Could not read #$ISSUE_NUMBER's blockers." \
                  "Refusing to dispatch a session that may be blocked." \
-                 "Re-add \`agent:execute\` once the API is reachable."
+                 "Re-add the same label once the API is reachable."
             exit 1
           fi
 
@@ -440,13 +439,13 @@ jobs:
               MSG="This Issue is not open. Nothing to execute."
               ;;
             not_implementation_task)
-              MSG="This Issue is not labeled \`implementation\`. \`agent:execute\` only runs against Implementation Task Issues."
+              MSG="This Issue is not labeled \`implementation\`. \`agent:implementor:copilot\` only runs against Implementation Task Issues."
               ;;
             blocked)
-              MSG="This Issue is blocked by: **${{ steps.context.outputs.blockers }}**. Resolve those first, then re-add \`agent:execute\`."
+              MSG="This Issue is blocked by: **${{ steps.context.outputs.blockers }}**. Resolve those first, then re-add \`agent:implementor:copilot\`."
               ;;
             pr_exists)
-              MSG="A pull request already exists for this Issue: ${{ steps.context.outputs.existing_pr_url }}. \`agent:execute\` is for starting fresh implementation, not correcting existing work -- use the \`agent:fix\` label on that pull request instead."
+              MSG="A pull request already exists for this Issue: ${{ steps.context.outputs.existing_pr_url }}. \`agent:implementor:copilot\` is for starting fresh implementation, not correcting existing work -- use the \`agent:fixer:copilot\` label on that pull request instead."
               ;;
             workflow_scope)
               # Built by appending rather than written as one multi-line
@@ -457,7 +456,7 @@ jobs:
               MSG="This task expects to change $RESTRICTED_PATHS, and the scripted implementor cannot push those paths."
               MSG="$MSG"$'\n\n'"\`GITHUB_TOKEN\` is not allowed to create or update files under \`.github/workflows/\` or \`.github/actions/\`. No \`permissions:\` key grants it: GitHub reserves workflow edits for credentials carrying the \`workflow\` OAuth scope, so that a compromised workflow cannot rewrite its own CI. The restriction is deliberate and this workflow respects it rather than working around it."
               MSG="$MSG"$'\n\n'"Refused before any session starts, because the push is the *last* step of an execution run. Without this check the run implements the task in full and then loses all of it at the push, having spent the credits either way."
-              MSG="$MSG"$'\n\n'"**Run this task from a human-credentialed session instead.** A Claude Code session -- terminal, desktop, web, or Remote Control -- pushes with your own credentials and can write these paths. It reads the same contract this Issue encodes: see *Claude Code as an additional environment* in \`docs/AGENT_WORKFLOW.md\`, and \`CLAUDE.md\` at the repository root. Open the pull request with \`Closes #$ISSUE_NUMBER\`, and add \`agent:review\` to it by hand so it goes through the same review gate everything else does."
+              MSG="$MSG"$'\n\n'"**Run this task from a human-credentialed session instead.** A Claude Code session -- terminal, desktop, web, or Remote Control -- pushes with your own credentials and can write these paths. It reads the same contract this Issue encodes: see *Claude Code as an additional environment* in \`docs/AGENT_WORKFLOW.md\`, and \`CLAUDE.md\` at the repository root. Open the pull request with \`Closes #$ISSUE_NUMBER\`, and add \`agent:reviewer:copilot\` to it by hand so it goes through the same review gate everything else does."
               MSG="$MSG"$'\n\n'"Assigning this Issue to the Copilot cloud agent will not help -- that path is subject to the same restriction."
               ;;
             *)
@@ -477,9 +476,13 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --body-file skip-comment.md
 
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "${TRIGGER_LABEL:-agent:execute}" || true
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none.
+          if [ -n "$TRIGGER_LABEL" ]; then
+            gh issue edit "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$TRIGGER_LABEL" || true
+          fi
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -487,7 +490,7 @@ jobs:
       # guard doesn't: a prior run that pushed $BRANCH but never got a pull
       # request onto it (e.g. `gh pr create` itself failed after the push --
       # see the comment on that failure in "Push Branch and Open Pull
-      # Request" below). Re-adding `agent:execute` today would blow that
+      # Request" below). Re-adding `agent:implementor:copilot` today would blow that
       # branch away with `git checkout -B` and pay for a whole new implementor
       # session to reproduce a commit that already exists. Checking here,
       # before Godot setup or any Copilot session, means a hit skips the
@@ -826,7 +829,7 @@ jobs:
 
             echo '{"reason":"uncommitted_changes",' \
                  '"headline":"The implementor left uncommitted changes instead of committing or making no changes",' \
-                 '"guidance":"This is a session-behavior fault, not a budget or availability one. Re-adding agent:execute retries from a clean branch."}' \
+                 '"guidance":"This is a session-behavior fault, not a budget or availability one. Re-adding the same label retries from a clean branch."}' \
               > implementor-failure.json
 
             echo "made=false" >> "$GITHUB_OUTPUT"
@@ -1028,7 +1031,7 @@ jobs:
                           "Workflow permissions not allowing GitHub "
                           "Actions to create pull requests. The branch "
                           "still exists, so a pull request can be opened "
-                          "manually from it, or `agent:execute` can be "
+                          "manually from it, or `agent:implementor:copilot` can be "
                           "retried once the cause is fixed."
                       ),
                   })
@@ -1051,7 +1054,7 @@ jobs:
 
           subprocess.run(
               ["gh", "issue", "edit", issue_number, "--repo", repo,
-               "--remove-label", os.environ.get("TRIGGER_LABEL") or "agent:execute"],
+               "--remove-label", os.environ.get("TRIGGER_LABEL") or "agent:implementor:copilot"],
               check=False,
           )
 
@@ -1643,12 +1646,12 @@ jobs:
       #     that exists, so publishing it as *the* verdict would describe
       #     code that no longer exists. Both get a plainly-labeled
       #     informational comment instead, and no review:* label, so
-      #     `agent:review` on this pull request is a first review, not a
+      #     `agent:reviewer:copilot` on this pull request is a first review, not a
       #     wasted repeat of one that already happened.
       #   - PASS / unfixed-FIX / PLANNING FAILURE / DESIGN AMBIGUITY: this
       #     verdict is still exactly what the current code would get from
       #     `agent-04-review.yml`, so it's posted as the real thing, label
-      #     included. Re-adding `agent:review` here would be paying for a
+      #     included. Re-adding `agent:reviewer:copilot` here would be paying for a
       #     second opinion on unchanged code -- the label already visible
       #     on the pull request is the signal that already happened.
       - name: Publish Pre-PR Review
@@ -1692,7 +1695,7 @@ jobs:
                   "The automated review run for this pull request did not"
                   " finish (budget, availability, or a malformed response)"
                   " -- see the workflow run log. This pull request has not"
-                  " been reviewed at all yet. Add `agent:review` for a"
+                  " been reviewed at all yet. Add `agent:reviewer:copilot` for a"
                   " first pass."
               )
           elif verdict == "FIX" and fix_applied:
@@ -1714,7 +1717,7 @@ jobs:
                   f"{fix_report}\n\n"
                   "</details>\n\n"
                   "The code changed after the review above, so it has not"
-                  " been re-reviewed as-is. Add `agent:review` for a fresh"
+                  " been re-reviewed as-is. Add `agent:reviewer:copilot` for a fresh"
                   " verdict."
               )
           else:
@@ -1733,7 +1736,7 @@ jobs:
                   "Reviewed by `.github/agents/03-reviewer.agent.md` via"
                   f" `agent-02-implement.yml`'s pre-PR pass on"
                   f" `{reviewer_model}`.\n"
-                  "Re-run by adding the `agent:review` label."
+                  "Re-run by adding the `agent:reviewer:copilot` label."
               )
 
               label = {
@@ -1805,16 +1808,20 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --body-file no-commit-comment.md
 
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "${TRIGGER_LABEL:-agent:execute}" || true
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none.
+          if [ -n "$TRIGGER_LABEL" ]; then
+            gh issue edit "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$TRIGGER_LABEL" || true
+          fi
 
       # The pull request already exists by this point (opened right after
       # the implementor's commit, before validation ever ran), so this posts
       # to the pull request itself rather than the Issue -- that's where
       # someone picking this up will be working, and it's the same place
       # "Publish Pre-PR Review" would have posted to had validation
-      # succeeded. `agent:execute` was already removed from the Issue by
+      # succeeded. `agent:implementor:copilot` was already removed from the Issue by
       # "Push Branch and Open Pull Request", so there's nothing left to
       # clean up there.
       - name: Report Validation Failure
@@ -1948,13 +1955,13 @@ jobs:
           if pr_url:
               retry_line = (
                   "Since a pull request already exists for this Issue,"
-                  " re-adding `agent:execute` will just point back at it --"
-                  f" use `agent:fix` on {pr_url} instead, or push directly"
+                  " re-adding the implementor label will just point back at it --"
+                  f" use `agent:fixer:copilot` on {pr_url} instead, or push directly"
                   " to address whatever failed."
               )
           else:
               retry_line = (
-                  "`agent:execute` has been removed, so re-adding it is a"
+                  "The trigger label has been removed, so re-adding it is a"
                   " clean retry."
               )
 
@@ -1974,13 +1981,20 @@ jobs:
               check=True,
           )
 
-          subprocess.run(
-              [
-                  "gh", "issue", "edit", issue_number, "--repo", repo,
-                  "--remove-label", "agent:execute",
-              ],
-              check=False,
-          )
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none -- and
+          # `--remove-label ""` is a call with an empty argument,
+          # not a no-op, so it is skipped rather than guarded by gh.
+          trigger_label = os.environ.get("TRIGGER_LABEL") or ""
+
+          if trigger_label:
+              subprocess.run(
+                  [
+                      "gh", "issue", "edit", issue_number, "--repo", repo,
+                      "--remove-label", trigger_label,
+                  ],
+                  check=False,
+              )
 
           if pr_url:
               pr_number = re.search(r"(\d+)$", pr_url).group(1)

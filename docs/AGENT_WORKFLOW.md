@@ -32,7 +32,7 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 | --- | --- | --- |
 | Planner | Claude Opus 5, then fallbacks | `PLANNER_MODELS` env / `vars.PLANNER_MODELS` in `agent-01-planner.yml` |
 | Implementor — native cloud agent | Claude Haiku 4.5 | The picker, when **you** dispatch — see *Four entry points* below. |
-| Implementor — scripted (`agent:execute`) | Per task, from the Issue's `model:*` label; Claude Opus 5, then Sonnet 5, then Haiku 4.5 when unlabelled | `model:*` label → `agent-02-implement.yml`'s *Resolve Implementor Model Tier*; default and override in `IMPLEMENTOR_MODELS` env / `vars.IMPLEMENTOR_MODELS`. See *The implementor's tier is chosen per task* below |
+| Implementor — scripted (`agent:implementor:copilot`) | Per task, from the Issue's `model:*` label; Claude Opus 5, then Sonnet 5, then Haiku 4.5 when unlabelled | `model:*` label → `agent-02-implement.yml`'s *Resolve Implementor Model Tier*; default and override in `IMPLEMENTOR_MODELS` env / `vars.IMPLEMENTOR_MODELS`. See *The implementor's tier is chosen per task* below |
 | Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-04-review.yml` (also used by `agent-02-implement.yml`'s pre-PR self-review) |
 | Fixer | Claude Sonnet 5, then fallbacks — climbing a tier per repeat round | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-implement.yml`'s pre-PR self-fix); escalation in its *Resolve Fixer Model Tier* step |
 | Lint fixer | Claude Haiku 4.5, then Sonnet 5 | `LINT_FIXER_MODELS` env / `vars.LINT_FIXER_MODELS` in `gdscript-lint.yml` |
@@ -347,9 +347,11 @@ doesn't block automation in general, only automation that goes through that
 API. `agent-02-implement.yml` sidesteps it by not using that API at all: it
 runs Copilot CLI directly inside Actions, the same trick `agent-01-planner.yml`
 and `agent-04-review.yml` already use, driven by a preference list
-(`IMPLEMENTOR_MODELS`) instead of a picker. There was once an `agent:execute`
+(`IMPLEMENTOR_MODELS`) instead of a picker. There was once an
+`agent:implementor:copilot`
 label that dispatched the cloud agent blind onto Auto; that version was
-removed. The current `agent:execute` is a different mechanism entirely — a
+removed. The current `agent:implementor:copilot` is a different mechanism
+entirely — a
 scripted CLI session, not a cloud-agent assignment — and is very much
 present. See *Step 2 — Execution* below for what it actually does.
 
@@ -360,7 +362,7 @@ So there are four ways in, across two products:
 | **Desktop agents panel** — start a session | **your choice** | `implementor` | via the Run This Task block |
 | **GitHub Mobile** — new agent session | **your choice**, *or* a custom agent — never both | either, not both | via the Run This Task block |
 | Issue → assign Copilot | **your choice** | no | yes |
-| `agent:execute` label — scripted, not the cloud agent | preference list, led by the Issue's `model:*` tier (`IMPLEMENTOR_MODELS` otherwise) | n/a — not a custom-agent session | yes, `Closes #n` written by the workflow itself |
+| `agent:implementor:copilot` label — scripted, not the cloud agent | preference list, led by the Issue's `model:*` tier (`IMPLEMENTOR_MODELS` otherwise) | n/a — not a custom-agent session | yes, `Closes #n` written by the workflow itself |
 
 Only the desktop panel offers both pickers at once among the three
 cloud-agent entry points. Mobile makes them exclusive: choose Copilot Agent
@@ -374,7 +376,8 @@ ignored because the cloud agent's toolset is fixed, its `model:` line is
 ignored because you just picked one, and its prose is mirrored into
 *Executing an Implementation Task* in `.github/copilot-instructions.md`,
 which **every** cloud session reads no matter how it started. If you'd
-rather not be at a picker at all, that's what `agent:execute` is for — it
+rather not be at a picker at all, that's what `agent:implementor:copilot` is
+for — it
 gives up the live choice on purpose, in exchange for full automation. See
 *Step 2 — Execution* below.
 
@@ -528,7 +531,7 @@ assignment events, not by a stage completing.
 ```
 Intake Issue        [plan] in title, `plan` + type label
         │
-        │  you add  agent:plan
+        │  you add  agent:planner:copilot
         ▼
 ┌────────────────────────────────────────────────┐
 │ agent-01-planner.yml                           │
@@ -542,16 +545,16 @@ Intake Issue        [plan] in title, `plan` + type label
 Implementation Task
         │
         ├─────────────────────────────┬───────────────────────────┐
-        │  you add  agent:execute     │  you paste its "Run This  │
-        │  (scripted, no live picker) │  Task" block into the     │
-        │                             │  agents panel, model you  │
+        │  you add                    │  you paste its "Run This  │
+        │  agent:implementor:copilot  │  Task" block into the     │
+        │  (scripted, no live picker) │  agents panel, model you  │
         │                             │  chose. (Assigning        │
         │                             │  Copilot from the Issue   │
         │                             │  also works: model, no    │
         │                             │  agent.)                  │
         ▼                             ▼
 ┌─────────────────────────────┐  Copilot Cloud Agent
-│ agent-02-implement.yml        │       │
+│ agent-02-implement.yml      │       │
 │ Copilot CLI, spends AI      │       ▼
 │ credits: implements,        │  draft PR
 │ opens a draft PR, then      │
@@ -565,7 +568,7 @@ Implementation Task
                         ▼
                 PR ready for review
                         │
-        │  you add agent:review (auto only for the
+        │  you add agent:reviewer:copilot (auto only for the
         │  cloud agent's copilot/* branches)
         ▼
 ┌────────────────────────────────────────────────┐
@@ -577,10 +580,10 @@ Implementation Task
    PASS  → review:pass label
    other → review:fix / planning-failure / design-ambiguity
         │
-        │  review:fix?  you add  agent:fix
+        │  review:fix?  you add  agent:fixer:copilot
         ▼
 ┌────────────────────────────────────────────────┐
-│ agent-05-fix.yml               spends AI credits│
+│ agent-05-fix.yml              spends AI credits│
 │ Copilot CLI, edits + commits on the same branch│
 │ bounded correction against the FIX verdict     │
 └────────────────────────────────────────────────┘
@@ -616,7 +619,8 @@ the label it consumed**. That gives three properties worth keeping:
 - **No workflow fires on its own output**, so there are no dispatch loops.
 
 Execution has two products, and only one of them is label-driven. The
-scripted `agent:execute` path follows the rule above like everything else,
+scripted `agent:implementor:copilot` path follows the rule above like
+everything else,
 trading a live model choice for full automation. The native cloud agent is
 the exception, because a label cannot carry a model — see *Four entry
 points, two different products* above.
@@ -624,12 +628,12 @@ points, two different products* above.
 | Trigger | Added by | Consumed by | Means |
 | --- | --- | --- | --- |
 | `plan` label | Issue template | `agent-01-planner.yml` | Filed, not yet decomposed |
-| `agent:plan` label | You | `agent-01-planner.yml` | This Issue is ready to be planned |
+| `agent:planner:copilot` label | You | `agent-01-planner.yml` | This Issue is ready to be planned |
 | **a pasted agent session** | You | — | Run this task via the native cloud agent, on the model you picked |
 | **assigning Copilot** | You | — | Run this task via the native cloud agent, on the model you picked |
-| `agent:execute` label | You | `agent-02-implement.yml` | Implement this Task via the scripted CLI implementor — no live picker; walks a preference list, opens the PR, then self-reviews and self-fixes against it |
-| `agent:review` label | You | `agent-04-review.yml` | Re-review this PR |
-| `agent:fix` label | You | `agent-05-fix.yml` | Apply the bounded correction the last `FIX` verdict asked for |
+| `agent:implementor:copilot` label | You | `agent-02-implement.yml` | Implement this Task via the scripted CLI implementor — no live picker; walks a preference list, opens the PR, then self-reviews and self-fixes against it |
+| `agent:reviewer:copilot` label | You | `agent-04-review.yml` | Re-review this PR |
+| `agent:fixer:copilot` label | You | `agent-05-fix.yml` | Apply the bounded correction the last `FIX` verdict asked for |
 | `planned` label | Planner | — | Intake Issue has been decomposed |
 | `review:*` label | Reviewer | — | Last verdict on a PR |
 | `blocker` label | Planner, any agent, you | `issue-dependencies.yml` | This Issue blocks at least one other; wire its `## Dependencies` table into GitHub dependencies |
@@ -667,10 +671,10 @@ depends on the color. Checked live against the repository on 2026-08-22:
 
 | Label | Color | Bootstrapped by |
 | --- | --- | --- |
-| `agent:plan` | `#1D76DB` | — not created by any workflow; must already exist |
-| `agent:execute` | `#1D76DB` | — not created by any workflow; must already exist |
-| `agent:review` | `#1D76DB` | — not created by any workflow; must already exist |
-| `agent:fix` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:planner:copilot` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:implementor:copilot` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:reviewer:copilot` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:fixer:copilot` | `#1D76DB` | — not created by any workflow; must already exist |
 | `plan` | `#0E8A16` | `agent-01-planner.yml` |
 | `planned` | `#0E8A16` | `agent-01-planner.yml` |
 | `implementation` | `#1D76DB` | `agent-01-planner.yml` |
@@ -743,7 +747,7 @@ gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/mikeys_game_bones-rule
 1. File the Issue with one of the intake templates. Title starts with
    `[plan]`; the template applies `plan` plus a type label.
 2. When the Issue is actually ready — not when you file it — add
-   **`agent:plan`**.
+   **`agent:planner:copilot`**.
 
 `agent-01-planner.yml` then:
 
@@ -756,7 +760,7 @@ gh secret delete PROJECT_TOKEN --repo stardustsuperwizard/mikeys_game_bones-rule
 - creates one `[impl]` sub-issue per task with native `--parent` and
   `--add-blocked-by` relationships;
 - posts the plan as a comment on the intake Issue;
-- adds `planned` and consumes both `agent:plan` and `plan`.
+- adds `planned` and consumes both `agent:planner:copilot` and `plan`.
 
 Comments are read as amendments to the body, and later comments win over the
 original text. The workflow skips its own machine comments so a re-plan does
@@ -766,12 +770,15 @@ A second run is blocked by the `<!-- automated-planner-complete -->` marker.
 To genuinely re-plan, run the workflow manually with `force: true` — and close
 the stale sub-issues yourself first, because nothing removes them for you.
 
-If the run **fails**, it removes `agent:plan`, leaves `plan` in place, and
-comments with a link to the failed run. That is deliberate: `agent:plan` is
+If the run **fails**, it removes `agent:planner:copilot`, leaves `plan` in
+place, and
+comments with a link to the failed run. That is deliberate:
+`agent:planner:copilot` is
 what puts an Issue in the planning view, so leaving it on a failed run would
 park the Issue there forever. Giving the label back returns the Issue to
 the awaiting-planning view — which is true, because `plan` never came off —
-and re-adding `agent:plan` is the same clean retry as always. Check for
+and re-adding `agent:planner:copilot` is the same clean retry as always. Check
+for
 partial sub-issues before you do.
 
 `plan` comes off in one place only, the success path, so an Issue can never
@@ -781,7 +788,7 @@ fall out of the intake queue without a plan to show for it.
 
 All five intake templates decompose through the same planner. Nothing in
 `agent-01-planner.yml` gates on the type label: the only trigger is
-`agent:plan`, and the only other gate is the already-planned marker.
+`agent:planner:copilot`, and the only other gate is the already-planned marker.
 
 | Type label | Template | What its `Acceptance Criteria` ships |
 | --- | --- | --- |
@@ -844,7 +851,7 @@ paste. `issue-linking.yml` handles the closing-reference bookkeeping this
 path needs, since a pasted session gets a free-text description instead of a
 form.
 
-**The scripted implementor, `agent-02-implement.yml`.** Add the `agent:execute`
+**The scripted implementor, `agent-02-implement.yml`.** Add the `agent:implementor:copilot`
 label instead (works from GitHub Mobile) and the workflow does the rest with
 no picker involved:
 
@@ -876,14 +883,16 @@ no picker involved:
    on that commit. See *The independent validation gate*.
 
 A `PASS` (or an unfixed `FIX`) is posted to the pull request as the real
-verdict, `review:*` label included — so adding `agent:review` to it is a
+verdict, `review:*` label included — so adding `agent:reviewer:copilot` to it
+is a
 second opinion, not a first one. The pull request opens right after step 3,
 before validation, formatting, or review ever run, so a failure in any of
 those (e.g. a validation failure) just leaves a comment on the already-open
 pull request explaining what got skipped — there is always something to
 work with instead of a dead-end Issue comment. Only a failure *before* the
 pull request exists — no commit, an uncommitted session, `gh pr create`
-itself failing — comments on the Issue and removes `agent:execute` rather
+itself failing — comments on the Issue and removes `agent:implementor:copilot`
+rather
 than opening a broken PR, so re-adding the label is a clean retry in that
 case.
 
@@ -919,7 +928,8 @@ out of `.github/scripts/task_scope.py`:
   instead, in place of the usual paste-this-into-a-session instructions.
 - **The implementor** refuses it. The `workflow_scope` guard sits with the other
   pre-flight checks in `Resolve Implementation Task Issue`, so a hand-written
-  `[impl]` Issue the planner never saw is caught too. Adding `agent:execute`
+  `[impl]` Issue the planner never saw is caught too. Adding
+  `agent:implementor:copilot`
   gets a comment naming the restriction and the alternative, and the label
   removed — no session, no credits.
 - **The fixer** refuses it too, in `Resolve Pull Request`, before
@@ -1079,7 +1089,8 @@ gh workflow run agent-02-implement.yml -f issue_number=68
 ### Step 3 — Review
 
 `agent-04-review.yml` runs automatically when a `copilot/*` branch's PR is
-marked ready for review, or any time you add **`agent:review`**. Only the
+marked ready for review, or any time you add **`agent:reviewer:copilot`**.
+Only the
 native cloud agent's branches match `copilot/*` — the scripted implementor's
 `agent-exec/*` branches and a Claude Code PR's branch don't, so both need the
 manual label.
@@ -1108,7 +1119,8 @@ thing — and what keeps those views from double-counting a PR.
 
 Fix cycles are not automatic — nothing re-summons a session just because a
 verdict came back adverse, because an auto-fix loop can burn credits without
-converging. A human decides when to spend one, by adding **`agent:fix`**
+converging. A human decides when to spend one, by adding
+**`agent:fixer:copilot`**
 (works from GitHub Mobile), which runs `agent-05-fix.yml`: it re-reads the
 latest `<!-- agent-review-verdict -->` comment, requires that verdict to
 still say `FIX` — a stale `review:fix` label surviving a later review is a
@@ -1123,7 +1135,8 @@ what this workflow can *push* rather than what the pull request deserves: a
 pull request from a fork, whose head branch this token cannot write, and one
 whose diff touches `.github/workflows/` or `.github/actions/`, which it also
 cannot write — see *Paths the agent workflows cannot push*. Both comment
-and drop `agent:fix` without starting a session. Neither is a red run: a
+and drop `agent:fixer:copilot` without starting a session. Neither is a red
+run: a
 refusal is not a malfunction.
 
 The equivalent local path is `/fixer <pr-number>` or the
@@ -1205,8 +1218,8 @@ The views worth having, and the queries behind them:
 
 | View | Query |
 | --- | --- |
-| Awaiting planning | `is:issue is:open label:plan -label:"agent:plan"` |
-| Planning in flight | `is:issue is:open label:"agent:plan"` |
+| Awaiting planning | `is:issue is:open label:plan -label:"agent:planner:copilot"` |
+| Planning in flight | `is:issue is:open label:"agent:planner:copilot"` |
 | Planned Features | `is:issue is:open label:planned` |
 | Open tasks | `is:issue is:open label:implementation` |
 | Blocking something | `is:issue is:open label:blocker` |
@@ -1214,9 +1227,11 @@ The views worth having, and the queries behind them:
 | Needs your attention | `is:pr is:open label:"review:fix","review:planning-failure","review:design-ambiguity","validation:failed"` |
 | Ready to merge | `is:pr is:open label:"review:pass"` |
 
-Quote any label containing a colon. `label:agent:plan` is parsed as a label
+Quote any label containing a colon. `label:agent:planner:copilot` is parsed as
+a label
 named `agent` qualified by a stray `plan`, and silently returns the wrong
-set; `label:"agent:plan"` is unambiguous. Commas inside a single `label:`
+set; `label:"agent:planner:copilot"` is unambiguous. Commas inside a single
+`label:`
 qualifier are OR.
 
 Two properties make these queries exact rather than approximate, and both are
@@ -1230,8 +1245,9 @@ enforced by the workflows:
   the other three before adding one, so *Needs your attention* and *Ready to
   merge* cannot both claim the same PR.
 
-The `-label:"agent:plan"` exclusion is what separates "queued" from
-"running": `agent:plan` is consumed by the planner on success and given back
+The `-label:"agent:planner:copilot"` exclusion is what separates "queued" from
+"running": `agent:planner:copilot` is consumed by the planner on success and
+given back
 on failure, so a Feature is in exactly one of the two views at any moment.
 
 What a view cannot express is the **dependency graph** — `blocker` tells you
@@ -1255,7 +1271,7 @@ every Issue template carries, and nowhere else:
 The Issue doing the blocking gets the `blocker` label.
 `issue-dependencies.yml` fires on that label, reads the table, and creates
 GitHub's native blocked-by relationship — which is what the control plane
-orders by, what `agent:execute` refuses to run past, and what
+orders by, what `agent:implementor:copilot` refuses to run past, and what
 `issue-linking.yml` warns about when a task is dispatched anyway.
 
 **Why the table exists at all**, when GitHub has a native relationship: the
@@ -1361,7 +1377,7 @@ the moment it runs, and stored nowhere:
 | Condition | Feature state |
 | --- | --- |
 | Issue closed | Done |
-| `agent:plan` present | Planning |
+| `agent:planner:copilot` present | Planning |
 | No sub-issues | Awaiting planning |
 | Sub-issues, some open | In progress |
 | Sub-issues, all closed | **Awaiting your sign-off** |
@@ -1631,7 +1647,7 @@ Six things about that loop are decisions rather than obvious consequences:
   repaired before any verdict exists is a repair nothing recorded — and a
   reviewer not told CI is red will hand back a `PASS` on a PR that cannot
   merge. One repair path, driven by verdicts.
-- **It does not add `agent:review`.** That label is the entry to
+- **It does not add `agent:reviewer:copilot`.** That label is the entry to
   `agent-04-review.yml`, and a session that has already run the `reviewer`
   subagent would be commissioning a second full review of the same PR — two
   verdict comments, two `review:*` writes, and no way to know which one the
@@ -1732,7 +1748,8 @@ a state file in the first place.
 The two sides share the Issue and PR graph, not a runtime. A PR opened by
 Claude Code doesn't land on a `copilot/*` branch, so it won't trigger
 `agent-04-review.yml`'s automatic `ready_for_review` review — add
-`agent:review` by hand (works from GitHub Mobile) to put it through the same
+`agent:reviewer:copilot` by hand (works from GitHub Mobile) to put it through
+the same
 reviewer, same as the scripted implementor's own `agent-exec/*` branches
 already require.
 
@@ -1804,9 +1821,21 @@ credentials, so `CLAUDE_CODE_OAUTH_TOKEN` does not authenticate this path
 whatever it is set to. A missing key fails before the model loop with that
 sentence, rather than walking every candidate and blaming availability.
 
-**The legacy `agent:plan`, `agent:execute`, `agent:review` and `agent:fix`
-labels still work** and mean Copilot, which is what they have always meant.
-They are retired separately rather than broken mid-migration.
+**The pre-vendor labels are gone.** `agent:plan`, `agent:execute`,
+`agent:review` and `agent:fix` triggered these workflows before the vendor
+segment existed. They were kept working through the migration so nothing broke
+mid-flight, then removed here — gates, retry messages and all — and deleted
+from the repository.
+
+Deleting rather than leaving them inert was the deliberate choice. A label that
+exists and does nothing is a trap: someone adds it from a phone, sees no run
+start, and has nothing to read. A label that does not exist cannot be added at
+all, and the picker shows what replaced it.
+
+Every message that used to say "re-add `agent:plan` to retry" now says to
+re-add *the same label*, read from the run's own trigger. A retry therefore
+re-runs the vendor that was asked for, and no message names a label that
+cannot be applied.
 
 **The eight labels already exist on the repository** — `agent:{planner,
 implementor, reviewer, fixer}:{copilot, claude}` — created by hand rather than
@@ -1874,10 +1903,10 @@ are custom agents and MCP servers.
 | --- | --- |
 | `.github/workflows/agent-00-dashboard.yml` | Rewrites the pinned control plane Issue from derived state, on `dashboard:update` or dispatch |
 | `.github/workflows/agent-01-planner.yml` | Decomposes an intake Issue of any type into `[impl]` sub-issues |
-| `.github/workflows/agent-02-implement.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:execute`; ends with an independent validation job on the pushed SHA |
+| `.github/workflows/agent-02-implement.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:implementor:copilot`; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
-| `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix`; refuses fork PRs and diffs it cannot push before spending a session; ends with an independent validation job on the pushed SHA |
+| `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fixer:copilot`; refuses fork PRs and diffs it cannot push before spending a session; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/issue-dependencies.yml` | Turns an Issue's `## Dependencies` table into GitHub dependencies, on the `blocker` label or a dispatch; `sweep` rebuilds the whole chain |
 | `.github/workflows/godot-validation.yml` | The one reusable validation job (`workflow_call`); called by `godot-ci-validation.yml`, `agent-02-implement.yml`, and `agent-05-fix.yml` |
 | `.github/workflows/godot-ci-validation.yml` | Human-authored `pull_request` validation gate (`paths-ignore` deny-list) plus a manual dispatch; calls `godot-validation.yml` |

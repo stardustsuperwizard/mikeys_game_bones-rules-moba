@@ -59,7 +59,7 @@ a parser that stops recognizing the table produces a clean, green, empty sync.
 If you're picking up a `[impl]` Issue instead of the Copilot cloud agent or
 the scripted `agent-02-implement.yml` implementor: read the Issue body in full
 (acceptance criteria, scope, expected files), open a PR with
-`Closes #<issue>`, and add the `agent:review` label yourself once it's
+`Closes #<issue>`, and add the `agent:reviewer:copilot` label yourself once it's
 ready. The automated reviewer (`agent-04-review.yml`) only auto-triggers on
 `copilot/*` branches, so a Claude Code PR needs the manual label to enter
 the same review gate everything else uses.
@@ -75,7 +75,8 @@ of the session. File discovered work when asked, and link it from the PR.
 
 Such a PR has no originating Issue and so no `Closes #<issue>` line. Say that
 explicitly at the top instead of leaving the template's placeholder in, and
-still add `agent:review` — the gate is the same one everything else uses.
+still add `agent:reviewer:copilot` — the gate is the same one everything else
+uses.
 
 Put this marker on the **first non-blank line** of the body:
 

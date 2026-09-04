@@ -1,5 +1,6 @@
 ---
-description: Implement one Implementation Task Issue and open the PR that closes it (local counterpart of the agent:execute label)
+description: Implement one Implementation Task Issue and open the PR that
+closes it (local counterpart of the agent:implementor:copilot label)
 argument-hint: <task-issue-number>
 ---
 
@@ -126,5 +127,6 @@ CLOUD — call mcp__github__list_pull_requests with:
 ```
 
 Report the implementor's completion report, the PR URL, and the model tier you
-ran it at. Do not add the `agent:review` label and do not review the PR
+ran it at. Do not add the `agent:reviewer:copilot` label and do not review the
+PR
 yourself — this command's contract ends at the open PR.

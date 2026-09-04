@@ -75,7 +75,8 @@ something is waiting on.
 The table is the declaration; the GitHub relationship is derived from it.
 That direction matters, because everything downstream reads the relationship
 and none of it reads the table: the control plane orders dispatch by it,
-`agent:execute` refuses a task whose blockers are open, and `issue-linking.yml`
+`agent:implementor:copilot` refuses a task whose blockers are open, and
+`issue-linking.yml`
 warns when work starts on a blocked task anyway. An edge that exists only in
 someone's head is an implementor implementing step three before step one exists.
 

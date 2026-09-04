@@ -28,7 +28,7 @@ Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 > custom agent removes the model picker, which is a worse trade than
 > skipping the profile. That manual path remains available for when you
 > want to hand-pick a model or intervene live; `agent-02-implement.yml` (the
-> `agent:execute` Issue label) is the scripted alternative when you don't.
+> `agent:implementor:copilot` Issue label) is the scripted alternative when you don't.
 >
 > This contract is also mirrored in `.github/copilot-instructions.md` under
 > *Executing an Implementation Task*, and in short form in the

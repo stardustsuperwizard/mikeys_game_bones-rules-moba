@@ -654,7 +654,7 @@ jobs:
               echo
               echo "See \`CLAUDE.md\` → *Working without an Issue*. Such a"
               echo "pull request still goes through the same reviewer via the"
-              echo "\`agent:review\` label."
+              echo "\`agent:reviewer:copilot\` label."
 
             elif [ "${{ steps.tasks.outputs.count }}" = "0" ]; then
               echo "❌ This Copilot pull request closes no Issue."

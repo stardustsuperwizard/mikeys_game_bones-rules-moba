@@ -131,7 +131,8 @@ stop and ask the user what to fix instead of guessing.
 5. Reply to the PR summarizing what was fixed, referencing the review
    comment, so the person re-reviewing doesn't have to diff it themselves.
    Do not add or remove `review:*` labels yourself — re-review
-   (`/reviewer <pr-number>` or the `agent:review` label) decides the next
+   (`/reviewer <pr-number>` or the `agent:reviewer:copilot` label) decides the
+   next
    one; leave the stale `review:fix` label alone unless the user asks you to
    remove it.
 

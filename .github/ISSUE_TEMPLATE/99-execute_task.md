@@ -186,7 +186,8 @@ Add the `blocker` label to any Issue with a `Blocks` row.
 
 This is a declaration, not a description of one: the table is what *creates*
 GitHub's native blocked-by relationship, which is what the control plane
-orders by and what `agent:execute` refuses to run past. Do not wire the
+orders by and what `agent:implementor:copilot` refuses to run past. Do not
+wire the
 relationship by hand and leave the table saying something else -- the table
 wins, and a sweep will report the difference.
 
