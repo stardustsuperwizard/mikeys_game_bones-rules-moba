@@ -54,6 +54,13 @@ inputs:
       `copilot`. A session that hits it is classified `budget_exhausted`,
       not `completed`, so a truncated answer is never mistaken for a finished
       one.
+
+      This and `max-ai-credits` are NOT the same knob in different units, and
+      no conversion between them exists. Credits price what a session spent;
+      turns count how many times it acted. A role whose credit cap was tuned
+      by watching it work is not tuned at all on the other vendor, so
+      changing a label's vendor segment silently reprices the role. Set both
+      per role, from observation, rather than assuming one implies the other.
     required: false
     default: "60"
 
@@ -300,6 +307,14 @@ runs:
           # ANTHROPIC_API_KEY is the only auth that works here.
           # CLAUDE_CODE_OAUTH_TOKEN does not, and the classifier says so by
           # name rather than reporting a generic failure.
+          #
+          # And it does not read `.claude/settings.json`, so the
+          # `fallbackModel` chain committed there does NOT apply to this run.
+          # That is the intended arrangement, not an oversight: the `models`
+          # input above is the fallback here, it is per role rather than
+          # per session, and it is the same mechanism the Copilot side uses.
+          # Two fallback systems agreeing by accident would be worse than
+          # one that obviously owns the job.
           claude \
             --bare \
             -p "Read $PROMPT_FILE and follow it exactly. It is the whole task." \
