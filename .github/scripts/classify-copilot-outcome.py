@@ -231,6 +231,9 @@ def classify(args):
     ]
 
     outcome = {
+        # Present so a caller reading either classifier's output can name the
+        # vendor without knowing which one produced the file.
+        "vendor": "copilot",
         "model": args.model,
         "exit_status": args.exit_status,
         "credit_limit": args.credit_limit,

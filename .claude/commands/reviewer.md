@@ -1,5 +1,5 @@
 ---
-description: Review a pull request against its Implementation Task Issue's acceptance criteria and publish a verdict (local counterpart of the agent:review label)
+description: Review a pull request against its Implementation Task Issue's acceptance criteria and publish a verdict (local counterpart of the agent:reviewer:copilot label)
 argument-hint: <pr-number>
 ---
 

@@ -16,7 +16,7 @@ name: Agent - PR Fix
 # No AWNN number, unlike Plan/Execute/Rollup: those three are the flow a
 # human walks through step by step (01 -> 02 -> 03), coupled by that
 # numbering on purpose. Fix (like Review) is a reactive support agent
-# instead -- it runs on demand (the `agent:fix` label) or as part of
+# instead -- it runs on demand (the `agent:fixer:copilot` label) or as part of
 # Execute's own pre-PR pass, not as a sequential step in that flow.
 #
 # Unlike `agent-04-review.yml`, this workflow writes to the repository: it
@@ -24,9 +24,9 @@ name: Agent - PR Fix
 # radius than posting a comment, so — deliberately, unlike the reviewer's
 # automatic trigger on `ready_for_review` — it never fires on its own just
 # because a PR picked up `review:fix`. A human decides when to spend it, by
-# adding `agent:fix` (works from GitHub Mobile) or running it manually.
+# adding `agent:fixer:copilot` (works from GitHub Mobile) or running it manually.
 #
-# `build-fix-request` re-reads the latest verdict even though `agent:fix`
+# `build-fix-request` re-reads the latest verdict even though `agent:fixer:copilot`
 # implies a human already believes it says FIX: labels can be applied to
 # the wrong PR, and a stale `review:fix` label can survive a later review
 # that changed the verdict. Re-reading the latest verdict comment costs
@@ -86,8 +86,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
        (github.event.label.name == 'agent:fixer:copilot' ||
-        github.event.label.name == 'agent:fixer:claude' ||
-        github.event.label.name == 'agent:fix'))
+        github.event.label.name == 'agent:fixer:claude'))
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -310,7 +309,7 @@ jobs:
               MSG="This pull request changes $RESTRICTED_PATHS, and this workflow cannot push a correction to it."
               MSG="$MSG"$'\n\n'"\`GITHUB_TOKEN\` is not allowed to create or update files under \`.github/workflows/\` or \`.github/actions/\`. No \`permissions:\` key grants it: GitHub reserves workflow edits for credentials carrying the \`workflow\` OAuth scope, so that a compromised workflow cannot rewrite its own CI. The restriction is deliberate and this workflow respects it rather than working around it."
               MSG="$MSG"$'\n\n'"Refused before the fixer session starts, because pushing is the *last* thing this workflow does. Without this check the session runs, produces a correction, and loses it at the push -- leaving this pull request untouched and the reason visible only in the run log."
-              MSG="$MSG"$'\n\n'"**Apply the fix from a human-credentialed session instead.** Whoever authored this branch can already write these paths; Claude Code -- terminal, desktop, web, or Remote Control -- pushes with your own credentials. Read the review verdict comment above, apply the correction it asks for, and push to this branch. Re-running the reviewer afterwards works normally: \`agent:review\` has nothing to push and is not affected by this."
+              MSG="$MSG"$'\n\n'"**Apply the fix from a human-credentialed session instead.** Whoever authored this branch can already write these paths; Claude Code -- terminal, desktop, web, or Remote Control -- pushes with your own credentials. Read the review verdict comment above, apply the correction it asks for, and push to this branch. Re-running the reviewer afterwards works normally: \`agent:reviewer:copilot\` has nothing to push and is not affected by this."
               ;;
             *)
               MSG="Refused for an unrecognised reason: \`$REASON\`."
@@ -329,9 +328,13 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --body-file skip-comment.md
 
-          gh pr edit "$PR_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "${TRIGGER_LABEL:-agent:fix}" || true
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none.
+          if [ -n "$TRIGGER_LABEL" ]; then
+            gh pr edit "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$TRIGGER_LABEL" || true
+          fi
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -367,7 +370,7 @@ jobs:
 
           case "$VERDICT" in
             none)
-              MSG="No \`<!-- agent-review-verdict -->\` comment was found on this pull request. Run the reviewer first (the \`agent:review\` label, or \`agent-04-review.yml\`) before requesting a fix."
+              MSG="No \`<!-- agent-review-verdict -->\` comment was found on this pull request. Run the reviewer first (the \`agent:reviewer:copilot\` label, or \`agent-04-review.yml\`) before requesting a fix."
               ;;
             unrecognized)
               MSG="The most recent review comment did not contain a recognisable \`VERDICT:\` line. Nothing was fixed."
@@ -398,9 +401,13 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --body-file skip-comment.md
 
-          gh pr edit "$PR_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "${TRIGGER_LABEL:-agent:fix}" || true
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none.
+          if [ -n "$TRIGGER_LABEL" ]; then
+            gh pr edit "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$TRIGGER_LABEL" || true
+          fi
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -669,7 +676,7 @@ jobs:
 
             echo '{"reason":"uncommitted_changes",' \
                  '"headline":"The fixer left uncommitted changes instead of committing or making no changes",' \
-                 '"guidance":"This is a session-behavior fault, not a budget or availability one. Re-adding agent:fix retries from a clean branch."}' \
+                 '"guidance":"This is a session-behavior fault, not a budget or availability one. Re-adding the same label retries from a clean branch."}' \
               > fixer-failure.json
 
             echo "pushed=false" >> "$GITHUB_OUTPUT"
@@ -722,16 +729,20 @@ jobs:
                  "\`agent-05-fix.yml\` on \`${{ steps.session.outputs.resolved-model }}\`."
             echo ""
             echo "This does not change the \`review:fix\` label. Re-review" \
-                 "with the \`agent:review\` label when ready."
+                 "with the \`agent:reviewer:copilot\` label when ready."
           } > fix-comment.md
 
           gh pr comment "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --body-file fix-comment.md
 
-          gh pr edit "$PR_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "${TRIGGER_LABEL:-agent:fix}" || true
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none.
+          if [ -n "$TRIGGER_LABEL" ]; then
+            gh pr edit "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$TRIGGER_LABEL" || true
+          fi
 
           cat fix-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -761,9 +772,13 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --body-file no-commit-comment.md
 
-          gh pr edit "$PR_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "${TRIGGER_LABEL:-agent:fix}" || true
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none.
+          if [ -n "$TRIGGER_LABEL" ]; then
+            gh pr edit "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$TRIGGER_LABEL" || true
+          fi
 
       # Deliberately just `failure()`, not also gated on the verdict check
       # having passed: a hard crash in "Resolve Pull Request" itself (bad
@@ -833,7 +848,7 @@ jobs:
           lines += [
               f"Full run log: {run_url}",
               "",
-              "`agent:fix` has been removed, so re-adding it is a clean retry.",
+              "Any trigger label has been released, so re-adding it is a clean retry.",
           ]
 
           body = "\n".join(lines)
@@ -843,13 +858,20 @@ jobs:
               check=True,
           )
 
-          subprocess.run(
-              [
-                  "gh", "pr", "edit", pr_number, "--repo", repo,
-                  "--remove-label", "agent:fix",
-              ],
-              check=False,
-          )
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none -- and
+          # `--remove-label ""` is a call with an empty argument,
+          # not a no-op, so it is skipped rather than guarded by gh.
+          trigger_label = os.environ.get("TRIGGER_LABEL") or ""
+
+          if trigger_label:
+              subprocess.run(
+                  [
+                      "gh", "pr", "edit", pr_number, "--repo", repo,
+                      "--remove-label", trigger_label,
+                  ],
+                  check=False,
+              )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("\n" + body + "\n")

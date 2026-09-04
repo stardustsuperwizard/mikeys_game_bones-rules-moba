@@ -1,5 +1,5 @@
 ---
-description: Plan an intake Issue of any type (Feature, Task, Bug, Infrastructure, Dependency) into Implementation Task sub-issues (local counterpart of adding agent:plan)
+description: Plan an intake Issue of any type (Feature, Task, Bug, Infrastructure, Dependency) into Implementation Task sub-issues (local counterpart of adding agent:planner:copilot)
 argument-hint: <intake-issue-number>
 ---
 

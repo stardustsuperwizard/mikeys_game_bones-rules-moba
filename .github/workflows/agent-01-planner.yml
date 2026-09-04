@@ -46,15 +46,12 @@ jobs:
     name: Agent - AW01 Plan Tasks
     runs-on: ubuntu-latest
 
-    # Three ways in. `agent:planner:{vendor}` is the standard form -- one
-    # role, one vendor, one label. `agent:plan` is the legacy trigger, kept
-    # working here and retired in Stage 4 rather than broken mid-migration:
-    # it means copilot, which is what it has always meant.
+    # Two ways in: the label, or a manual dispatch. One role, one vendor,
+    # one label -- the vendor segment is the whole difference between them.
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event.label.name == 'agent:planner:copilot' ||
-      github.event.label.name == 'agent:planner:claude' ||
-      github.event.label.name == 'agent:plan'
+      github.event.label.name == 'agent:planner:claude'
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -756,13 +753,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # workflow_dispatch has no label, so it takes the input; the legacy
-          # `agent:plan` label has no vendor segment and means copilot, which
-          # is what it has always meant. Stage 4 retires it.
+          # workflow_dispatch has no label, so it takes the input.
           case "$LABEL" in
             agent:planner:claude)  VENDOR=claude ;;
             agent:planner:copilot) VENDOR=copilot ;;
-            agent:plan)            VENDOR=copilot ;;
             *)                     VENDOR="${DISPATCH_VENDOR:-copilot}" ;;
           esac
 
@@ -1705,7 +1699,7 @@ jobs:
                       "than working around it. Both automated paths hit it: "
                       "the scripted implementor is rejected at its push, and a "
                       "Copilot cloud session is rejected at its own.\n\n"
-                      "Adding `agent:execute` to this Issue is refused up "
+                      "Adding `agent:implementor:copilot` to this Issue is refused up "
                       "front by `agent-02-implement.yml`, before any session "
                       "is paid for.\n\n"
                       "**Run it from a human-credentialed session "
@@ -1721,7 +1715,7 @@ jobs:
                       "````\n\n"
                       f"Open the pull request with `Closes #{number}`, "
                       f"titled starting with `[{number}]`, and add "
-                      "`agent:review` to it by hand -- the automated "
+                      "`agent:reviewer:copilot` to it by hand -- the automated "
                       "reviewer only auto-triggers on `copilot/*` branches, "
                       "so that label is what puts this work through the "
                       "same review gate as everything else.\n\n"
@@ -2016,11 +2010,11 @@ jobs:
           echo "Issue #$ISSUE_NUMBER planned successfully."
       # Nothing records a failed plan as *status*, because status is a label
       # query and there is no field to write it to. What matters is that the
-      # Issue must not sit in the planning view forever: `agent:plan` is
+      # Issue must not sit in the planning view forever: `agent:planner:copilot` is
       # what puts it there, so a failed run gives the label back. `plan` was
       # never removed -- that only happens on success -- so the Issue is
       # back in the awaiting-planning view, which is true, and re-adding
-      # `agent:plan` is the same clean retry it always was.
+      # `agent:planner:copilot` is the same clean retry it always was.
       #
       # The comment is the part that notifies you, so it carries the reason
       # rather than a link to go and find one. Whichever step failed leaves a
@@ -2066,15 +2060,15 @@ jobs:
                   "Raise `PLANNER_MAX_AI_CREDITS` in"
                   " `.github/workflows/agent-01-planner.yml` (currently"
                   " `{credit_limit}`), or split this Issue into smaller"
-                  " ones, then re-add `agent:plan`. Re-running unchanged will"
+                  " ones, then re-add the same label. Re-running unchanged will"
                   " stop at the same place."
               ),
               "rate_limited": (
-                  "Nothing is misconfigured. Re-add `agent:plan` in a few"
+                  "Nothing is misconfigured. Re-add the same label in a few"
                   " minutes."
               ),
               "truncated_output": (
-                  "Re-add `agent:plan` to retry. If it truncates again at the"
+                  "Re-add the same label to retry. If it truncates again at the"
                   " same point, the Issue is too large for one plan."
               ),
               "malformed_json": (
@@ -2172,9 +2166,9 @@ jobs:
           lines += [
               f"Full run log: {run_url}",
               "",
-              "`agent:plan` has been removed and `plan` was left in place, so"
+              "Any trigger label has been released and `plan` was left in place, so"
               " this Issue is back in the awaiting-planning view. Re-add"
-              " `agent:plan` to retry.",
+              " it to retry.",
           ]
 
           body = "\n".join(lines)

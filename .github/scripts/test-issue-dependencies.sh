@@ -452,7 +452,7 @@ fi
 # empty result without checking that the result was meaningful. The pattern
 # was `.blockedBy.nodes[]?`, whose `?` suppresses the iterate-over-null error
 # -- so a null or renamed field produced an empty list indistinguishable from
-# a task with no blockers, and `agent:execute` would spend a session on a task
+# a task with no blockers, and `agent:implementor:*` would spend a session on a task
 # whose dependency had not landed.
 # ---------------------------------------------------------------------------
 

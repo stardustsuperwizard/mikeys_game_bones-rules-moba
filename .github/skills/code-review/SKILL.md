@@ -86,7 +86,8 @@ wasn't addressed, call that out.
 
 This repository also runs a separate, Issue-aware review pipeline
 (`.github/agents/03-reviewer.agent.md`, dispatched by
-`.github/workflows/agent-04-review.yml` via the `agent:review` label). It
+`.github/workflows/agent-04-review.yml` via the `agent:reviewer:copilot`
+label). It
 checks a PR's diff against its linked Implementation Task Issue's
 acceptance criteria and publishes a `PASS` / `FIX` / `PLANNING FAILURE` /
 `DESIGN AMBIGUITY` verdict with a `review:*` label. This skill is

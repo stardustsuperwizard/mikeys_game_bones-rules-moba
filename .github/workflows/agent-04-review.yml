@@ -6,7 +6,7 @@ name: Agent - PR Review
 # No AWNN number, unlike Plan/Execute/Rollup: those three are the flow a
 # human walks through step by step (01 -> 02 -> 03), coupled by that
 # numbering on purpose. Review (like Fix) is a reactive support agent
-# instead -- it runs on demand (the `agent:review` label) or as part of
+# instead -- it runs on demand (the `agent:reviewer:copilot` label) or as part of
 # Execute's own pre-PR pass, not as a sequential step in that flow.
 #
 # The actual work happens in three composite actions shared with
@@ -72,13 +72,12 @@ jobs:
     runs-on: ubuntu-latest
 
     # Automatic on a Copilot or Claude branch becoming ready; manual anywhere else via
-    # the agent:review label, which works from the GitHub mobile apps.
+    # the agent:reviewer:copilot label, which works from the GitHub mobile apps.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
        (github.event.label.name == 'agent:reviewer:copilot' ||
-        github.event.label.name == 'agent:reviewer:claude' ||
-        github.event.label.name == 'agent:review')) ||
+        github.event.label.name == 'agent:reviewer:claude')) ||
       (github.event.action == 'ready_for_review' &&
        (startsWith(github.event.pull_request.head.ref, 'copilot/') ||
         startsWith(github.event.pull_request.head.ref, 'claude/')))
@@ -143,9 +142,7 @@ jobs:
           set -euo pipefail
 
           # A `ready_for_review` run and a workflow_dispatch have no label to
-          # read, and the legacy `agent:review` label has no vendor segment. All
-          # three mean copilot, which is what they have always meant. Stage 4
-          # retires the legacy label.
+          # read; both mean copilot, which is the surface they came from.
           case "$LABEL" in
             agent:reviewer:claude)  VENDOR=claude ;;
             agent:reviewer:copilot) VENDOR=copilot ;;
@@ -239,7 +236,7 @@ jobs:
             echo ""
             echo "Reviewed by \`.github/agents/03-reviewer.agent.md\` via" \
                  "\`agent-04-review.yml\` on \`${{ steps.session.outputs.resolved-model }}\`."
-            echo "Re-run by adding the \`agent:review\` label."
+            echo "Re-run by adding the \`agent:reviewer:copilot\` label."
           } > review-comment.md
 
           gh pr comment "$PR_NUMBER" \
@@ -287,12 +284,16 @@ jobs:
             --add-label "review:${{ steps.verdict.outputs.slug }}"
 
           # The label is consumed so re-adding it is a clean re-review signal.
-          gh pr edit "$PR_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "${TRIGGER_LABEL:-agent:review}" || true
+          # Release the button that was pressed. Empty on a
+          # workflow_dispatch run, which pressed none.
+          if [ -n "$TRIGGER_LABEL" ]; then
+            gh pr edit "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "$TRIGGER_LABEL" || true
+          fi
 
       # Until now a failed review said nothing at all: the run went red, the
-      # pull request looked un-reviewed, and `agent:review` stayed attached --
+      # pull request looked un-reviewed, and `agent:reviewer:copilot` stayed attached --
       # which meant re-adding the label could not retrigger anything, because
       # it was never removed. Both halves of that are fixed here.
       #
@@ -343,14 +344,14 @@ jobs:
                   " `.github/workflows/agent-04-review.yml` (currently"
                   " `{credit_limit}`; 30 is the CLI's floor, not a ceiling),"
                   " or split this pull request into smaller ones. Then remove"
-                  " and re-add `agent:review`. Re-running unchanged will stop"
+                  " and re-add the same label. Re-running unchanged will stop"
                   " at the same place."
               ),
               "truncated_review": (
                   "Raise `REVIEWER_MAX_AI_CREDITS` in"
                   " `.github/workflows/agent-04-review.yml` (currently"
                   " `{credit_limit}`), or split this pull request, then"
-                  " re-add `agent:review`. **Do not read the verdict above as"
+                  " re-add the same label. **Do not read the verdict above as"
                   " a result** -- the reviewer never finished the analysis"
                   " behind it."
               ),
@@ -361,7 +362,7 @@ jobs:
                   " tightening, not a bigger budget."
               ),
               "rate_limited": (
-                  "Nothing is misconfigured. Re-add `agent:review` in a few"
+                  "Nothing is misconfigured. Re-add the same label in a few"
                   " minutes."
               ),
               "model_unavailable": (
@@ -443,7 +444,7 @@ jobs:
           lines += [
               f"Full run log: {run_url}",
               "",
-              "`agent:review` has been removed, so re-adding it is a clean"
+              "Any trigger label has been released, so re-adding it is a clean"
               " retry.",
           ]
 
@@ -466,19 +467,28 @@ jobs:
           # Removed last: if the comment call fails, the label is still there
           # and the pull request still looks like it is awaiting review, which
           # is the truthful state.
-          subprocess.run(
-              [
-                  "gh",
-                  "pr",
-                  "edit",
-                  pr_number,
-                  "--repo",
-                  repo,
-                  "--remove-label",
-                  "agent:review",
-              ],
-              check=False,
-          )
+          #
+          # The label that was pressed, not a hardcoded one -- otherwise an
+          # `agent:reviewer:claude` run leaves the claude label attached and
+          # re-adding it cannot retrigger, which is exactly what the message
+          # above promises it can. Empty on a dispatch or ready_for_review run,
+          # which pressed no button.
+          trigger_label = os.environ.get("TRIGGER_LABEL") or ""
+
+          if trigger_label:
+              subprocess.run(
+                  [
+                      "gh",
+                      "pr",
+                      "edit",
+                      pr_number,
+                      "--repo",
+                      repo,
+                      "--remove-label",
+                      trigger_label,
+                  ],
+                  check=False,
+              )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("\n" + body + "\n")

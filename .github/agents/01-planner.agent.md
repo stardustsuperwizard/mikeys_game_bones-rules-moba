@@ -333,7 +333,8 @@ gh issue edit <blocking-issue-number> \
 `.github/workflows/issue-dependencies.yml` fires on that label, reads the
 table, and creates GitHub's native blocked-by relationship. Nothing else in
 this repository creates that relationship, and everything downstream reads it
-— the control plane's dispatch ordering, `agent:execute`'s refusal to run a
+— the control plane's dispatch ordering, `agent:implementor:copilot`'s refusal
+to run a
 blocked task, and `issue-linking.yml`'s open-blocker warning.
 
 **Do not reach for `gh issue create --blocked-by` or `gh issue edit

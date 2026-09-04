@@ -196,7 +196,8 @@ checks applied", or "CI suppressed". A reviewer that is not told CI is red
 will review around it and hand back a `PASS` on a PR that cannot merge.
 
 Because this command runs the reviewer itself, do **not** also add the
-`agent:review` label. That label triggers `agent-04-review.yml`, which is a
+`agent:reviewer:copilot` label. That label triggers `agent-04-review.yml`,
+which is a
 second full review of the same PR by the Copilot reviewer — two verdict
 comments, two `review:*` label writes, and no way to tell which one the
 fixer will read. `CLAUDE.md`'s instruction to add the label by hand is for
@@ -326,7 +327,8 @@ alert.** The fifth verification review writes the fifth comment, which is
 exactly what trips the limit — the count and the rule are the same fact, so
 they cannot drift apart the way a remembered tally can.
 
-Verdicts posted by CI count too. If someone ran `agent:review` on this PR
+Verdicts posted by CI count too. If someone ran `agent:reviewer:copilot` on
+this PR
 before you started, those were real review rounds and the budget is genuinely
 smaller. Say so in the alert rather than silently starting from zero.
 
