@@ -251,7 +251,7 @@ Create a sub-issue using the equivalent of:
 
 ```bash
 gh issue create \
-  --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+  --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --title "[impl] [<parent-feature-number>] <task title>" \
   --body-file <prepared-body-file> \
   --label "implementation,machine" \

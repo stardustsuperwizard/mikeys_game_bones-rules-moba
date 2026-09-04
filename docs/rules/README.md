@@ -145,9 +145,9 @@ Nothing else can start until these land. No gameplay.
 
 | # | Title |
 | --- | --- |
-| [#20](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/20) | Establish the rules/ module layout and extraction contract for mikeys_game_rules_moba |
-| [#21](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/21) | Ability and passive Resource definitions with JSON export tooling |
-| [#22](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/22) | Python balance harness scaffold and split Fast/Deep CI suites |
+| [#20](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/20) | Establish the rules/ module layout and extraction contract for mikeys_game_rules_moba |
+| [#21](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/21) | Ability and passive Resource definitions with JSON export tooling |
+| [#22](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/22) | Python balance harness scaffold and split Fast/Deep CI suites |
 
 Covers §57, §62, §21, §48, §65. §66 implementation item 1.
 
@@ -176,13 +176,13 @@ out of real statistics, see it on screen. **If you only run one batch, run this 
 
 | # | Title |
 | --- | --- |
-| [#23](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/23) | Combat stat block and the MobaCombatant node |
-| [#24](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/24) | Damage resolution: damage types, mitigation, penetration, and critical hits |
-| [#25](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/25) | Character state machine with a data-driven interrupt table |
-| [#26](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/26) | Resource pool, cooldowns, charges, and ability haste |
-| [#27](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/27) | Ability resources, JSON loader, and the activation pipeline |
-| [#28](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/28) | Combat loadout: basic attack plus four equipped ability slots |
-| [#29](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/29) | Core combat HUD: health, resource, and ability slots |
+| [#23](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/23) | Combat stat block and the MobaCombatant node |
+| [#24](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/24) | Damage resolution: damage types, mitigation, penetration, and critical hits |
+| [#25](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/25) | Character state machine with a data-driven interrupt table |
+| [#26](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/26) | Resource pool, cooldowns, charges, and ability haste |
+| [#27](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/27) | Ability resources, JSON loader, and the activation pipeline |
+| [#28](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/28) | Combat loadout: basic attack plus four equipped ability slots |
+| [#29](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/29) | Core combat HUD: health, resource, and ability slots |
 
 Covers §4, §6, §7, §8, §9, §10, §11 (self and targeted only), §12, §13, §15, §56, §61.
 §66 items 2 and 5.
@@ -202,12 +202,12 @@ Everything the damage pipeline left as a documented seam.
 
 | # | Title |
 | --- | --- |
-| [#30](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/30) | Status effects, stat modifiers, and stacking policies |
-| [#31](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/31) | Crowd control effects and Tenacity |
-| [#32](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/32) | Sustain: lifesteal, omnivamp, healing, and shields |
-| [#33](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/33) | Cast time, channeled abilities, cancellation, and resource refunds |
-| [#34](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/34) | Death, the dead state, and respawn |
-| [#35](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/35) | Combat feedback HUD: cast bar, status tray, damage numbers, and target frame |
+| [#30](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/30) | Status effects, stat modifiers, and stacking policies |
+| [#31](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/31) | Crowd control effects and Tenacity |
+| [#32](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/32) | Sustain: lifesteal, omnivamp, healing, and shields |
+| [#33](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/33) | Cast time, channeled abilities, cancellation, and resource refunds |
+| [#34](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/34) | Death, the dead state, and respawn |
+| [#35](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/35) | Combat feedback HUD: cast bar, status tray, damage numbers, and target frame |
 
 Covers §14, §16, §17, §18, §58, §59, §60. §66 items 3 and 4.
 
@@ -223,12 +223,12 @@ The batch §66 warns gets expensive if deferred.
 
 | # | Title |
 | --- | --- |
-| [#36](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/36) | Device-agnostic input intent layer |
-| [#37](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/37) | Targeting modes: skillshot, ground, area, toggle, and projectiles |
-| [#38](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/38) | Aim assist tiers and per-device magnetism scaling |
-| [#39](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/39) | Lock-on targeting, target cycling, and the aim reticle |
-| [#40](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/40) | Jump as a defined mechanic and the Airborne state |
-| [#41](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/41) | Gamepad camera look and a scheme-independent aim direction |
+| [#36](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/36) | Device-agnostic input intent layer |
+| [#37](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/37) | Targeting modes: skillshot, ground, area, toggle, and projectiles |
+| [#38](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/38) | Aim assist tiers and per-device magnetism scaling |
+| [#39](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/39) | Lock-on targeting, target cycling, and the aim reticle |
+| [#40](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/40) | Jump as a defined mechanic and the Airborne state |
+| [#41](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/41) | Gamepad camera look and a scheme-independent aim direction |
 
 Covers §5.1, §5.2, §5.4, §5.5, §11 (the remaining four types), §55. §66 items 6 and 7.
 
@@ -242,9 +242,9 @@ camera, so a gamepad player cannot aim independently of where they are walking.
 
 | # | Title |
 | --- | --- |
-| [#42](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/42) | Dash and displacement abilities |
-| [#43](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/43) | Passive abilities |
-| [#44](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/44) | Prototype content: two weapons, eight abilities, four loadouts, four enemy profiles |
+| [#42](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/42) | Dash and displacement abilities |
+| [#43](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/43) | Passive abilities |
+| [#44](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/44) | Prototype content: two weapons, eight abilities, four loadouts, four enemy profiles |
 
 Covers §19, §42, §53, §62, and the `DASHING` row of §56. §66 item 8.
 
@@ -263,8 +263,8 @@ point at which the question "is this combat model any good" can be answered.
 
 | # | Title |
 | --- | --- |
-| [#45](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/45) | PvE threat table and enemy target selection |
-| [#46](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/46) | Data-driven enemy ability policy |
+| [#45](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/45) | PvE threat table and enemy target selection |
+| [#46](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/46) | Data-driven enemy ability policy |
 
 Covers §63. §66 item 10.
 
@@ -277,8 +277,8 @@ work at all.
 
 | # | Title |
 | --- | --- |
-| [#47](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/47) | Server-authoritative combat resolution with client-side prediction |
-| [#48](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/48) | Lag compensation and the rewind window for skillshots |
+| [#47](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/47) | Server-authoritative combat resolution with client-side prediction |
+| [#48](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/48) | Lag compensation and the rewind window for skillshots |
 
 Covers §64. §66 item 9.
 
@@ -304,10 +304,10 @@ already sits oddly against its own Out of Scope list.
 
 | # | Title |
 | --- | --- |
-| [#49](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/49) | Python duel simulation and combat metrics |
-| [#50](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/50) | GDScript-to-Python conformance suite |
-| [#51](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/51) | Deep Balance Suite: build generation, matchup matrix, and balance reports |
-| [#52](https://github.com/stardustsuperwizard/mikeys_gamebones-rules-moba/issues/52) | Touch control scheme and mobile combat HUD |
+| [#49](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/49) | Python duel simulation and combat metrics |
+| [#50](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/50) | GDScript-to-Python conformance suite |
+| [#51](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/51) | Deep Balance Suite: build generation, matchup matrix, and balance reports |
+| [#52](https://github.com/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/52) | Touch control scheme and mobile combat HUD |
 
 Covers §5.3, §20–§52 (the balance methodology), §65. §66 item 11.
 

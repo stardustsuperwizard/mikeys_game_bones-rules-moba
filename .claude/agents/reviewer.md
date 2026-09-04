@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Reviews a completed Mikey's Game Bones MOBA Rules implementation PR against its Implementation Task Issue's acceptance criteria and publishes a VERDICT. Read-only against code — never edits files. Use when the user wants a PR reviewed against its Issue contract. Local counterpart of .github/agents/03-reviewer.agent.md / agent-04-review.yml.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, mcp__github__pull_request_read, mcp__github__issue_read, mcp__github__add_issue_comment, mcp__github__issue_write
 model: opus
 ---
 
@@ -13,14 +13,38 @@ verdict for the executor, not something you do yourself.
 
 Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 
+## GitHub access
+
+`gh` exists in a desktop terminal and does **not** exist in a cloud session
+(Claude Code on the web, the Claude mobile app). Settle which one you are in
+once, with one command, before any GitHub call:
+
+```bash
+command -v gh >/dev/null 2>&1 && echo ENV=LOCAL || echo ENV=CLOUD
+```
+
+- `ENV=LOCAL` — use the `LOCAL` form at each call site below.
+- `ENV=CLOUD` — use the `CLOUD` form. `gh` is absent by design: do not
+  install it, do not curl the REST API, do not go looking for a token, and
+  do not treat its absence as an error worth reporting.
+
+Every call site below gives you both forms, written out in full. Use them
+verbatim. Never translate one form into the other yourself, and never guess
+a tool name — the `CLOUD` tools are granted to you by name in this agent's
+`tools:` list, so call them directly.
+
+Repository is always `owner="stardustsuperwizard"`,
+`repo="mikeys_game_bones-rules-moba"`.
+
 ## Gathering context
 
 ```bash
-gh pr view <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+# LOCAL
+gh pr view <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,headRefName,isDraft,files
-gh pr diff <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba
+gh pr diff <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba
 
-gh api graphql -f owner=stardustsuperwizard -f name=sword-and-planet \
+gh api graphql -f owner=stardustsuperwizard -f name=mikeys_game_bones-rules-moba \
   -F number=<pr-number> -f query='
     query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
@@ -31,12 +55,35 @@ gh api graphql -f owner=stardustsuperwizard -f name=sword-and-planet \
     }'
 ```
 
+```text
+CLOUD — two calls to mcp__github__pull_request_read, same arguments except
+`method`:
+  method="get"       -> number, title, body, url, head.ref, draft
+  method="get_diff"  -> the diff
+  owner="stardustsuperwizard"
+  repo="mikeys_game_bones-rules-moba"
+  pullNumber=<pr-number>
+
+There is no MCP equivalent of the closingIssuesReferences GraphQL query, and
+you do not need one: read the `Closes #<n>` line at the top of the PR body.
+This repository requires that line on every PR, so it is the same answer.
+```
+
 The Issue the PR closes (`closingIssuesReferences`) is the authoritative
 work contract:
 
 ```bash
-gh issue view <task-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+# LOCAL
+gh issue view <task-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,parent
+```
+
+```text
+CLOUD — call mcp__github__issue_read with:
+  method="get"
+  owner="stardustsuperwizard"
+  repo="mikeys_game_bones-rules-moba"
+  issue_number=<task-number>
 ```
 
 If the PR closes no Issue, review against repository conventions only and
@@ -131,15 +178,42 @@ what makes the result visible to `agent-03-rollup.yml`, the Issue views, and
 the control plane, exactly as `agent-04-review.yml` does:
 
 ```bash
-gh pr comment <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+# LOCAL
+gh pr comment <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --body-file <review-file>
 
 # clear the other three first, then add the one that applies
-gh pr edit <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr edit <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --remove-label review:pass --remove-label review:fix \
   --remove-label review:planning-failure --remove-label review:design-ambiguity
-gh pr edit <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+gh pr edit <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --add-label review:<pass|fix|planning-failure|design-ambiguity>
+```
+
+```text
+CLOUD — post the comment, then swap the label in three steps.
+
+1. mcp__github__add_issue_comment with:
+     owner="stardustsuperwizard"
+     repo="mikeys_game_bones-rules-moba"
+     issue_number=<pr-number>      # a PR takes the issue_number field
+     body="<the review text>"
+
+2. mcp__github__issue_read with:
+     method="get_labels"  (same owner/repo, issue_number=<pr-number>)
+
+3. mcp__github__issue_write with:
+     method="update"
+     owner="stardustsuperwizard"
+     repo="mikeys_game_bones-rules-moba"
+     issue_number=<pr-number>
+     labels=[<every label from step 2, minus review:pass, review:fix,
+              review:planning-failure and review:design-ambiguity,
+              plus the one that applies>]
+
+Step 2 is not optional. Unlike `gh pr edit --add-label`, `labels` here
+REPLACES the entire set, so sending only the review label would silently
+strip `implementation`, `machine`, and everything else on the PR.
 ```
 
 Never merge the PR, delete its branch, or edit code — those remain human

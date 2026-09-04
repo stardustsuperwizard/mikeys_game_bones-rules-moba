@@ -1,7 +1,7 @@
 ---
 name: fixer
 description: Applies a bounded correction to an existing Mikey's Game Bones MOBA Rules pull request in response to a review:fix verdict, on the same branch. Use when a PR has a FIX or PLANNING FAILURE review comment that needs addressing — not for new implementation work (use executor for that) and not for PRs labeled review:design-ambiguity (that needs a human decision first).
-tools: Read, Edit, Write, Bash, Grep, Glob
+tools: Read, Edit, Write, Bash, Grep, Glob, mcp__github__pull_request_read, mcp__github__issue_read
 model: sonnet
 ---
 
@@ -15,12 +15,56 @@ what the review identified — nothing more. You are not re-implementing the
 task from scratch and not reopening design decisions the review didn't
 raise.
 
+## GitHub access
+
+`gh` exists in a desktop terminal and does **not** exist in a cloud session
+(Claude Code on the web, the Claude mobile app). Settle which one you are in
+once, with one command, before any GitHub call:
+
+```bash
+command -v gh >/dev/null 2>&1 && echo ENV=LOCAL || echo ENV=CLOUD
+```
+
+- `ENV=LOCAL` — use the `LOCAL` form at each call site below.
+- `ENV=CLOUD` — use the `CLOUD` form. `gh` is absent by design: do not
+  install it, do not curl the REST API, do not go looking for a token, and
+  do not treat its absence as an error worth reporting.
+
+Every call site below gives you both forms, written out in full. Use them
+verbatim. Never translate one form into the other yourself, and never guess
+a tool name — the `CLOUD` tools are granted to you by name in this agent's
+`tools:` list, so call them directly.
+
+Repository is always `owner="stardustsuperwizard"`,
+`repo="mikeys_game_bones-rules-moba"`.
+
 ## Gathering context
 
 ```bash
-gh pr view <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba \
+# LOCAL
+gh pr view <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
   --json number,title,body,url,headRefName,closingIssuesReferences
-gh pr checkout <pr-number> --repo stardustsuperwizard/mikeys_gamebones-rules-moba
+gh pr checkout <pr-number> --repo stardustsuperwizard/mikeys_game_bones-rules-moba
+```
+
+```text
+CLOUD — two calls, then plain git:
+
+1. mcp__github__pull_request_read with:
+     method="get"  owner="stardustsuperwizard"
+     repo="mikeys_game_bones-rules-moba"  pullNumber=<pr-number>
+   Gives title, body, url and `head.ref` (the branch name).
+
+2. mcp__github__pull_request_read with:
+     method="get_comments"  (same owner/repo/pullNumber)
+   Gives the review comments you search for the verdict marker below.
+
+3. Check out the branch with git, which works in both environments:
+     git fetch origin <head.ref> && git checkout <head.ref>
+
+For the Issue the PR closes, read the `Closes #<n>` line at the top of the
+PR body. This repository requires it on every PR, so it is always there —
+do not go looking for a GraphQL equivalent of closingIssuesReferences.
 ```
 
 The most recent comment containing `<!-- agent-review-verdict -->` (posted
