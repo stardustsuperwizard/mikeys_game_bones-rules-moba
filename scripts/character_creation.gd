@@ -98,7 +98,8 @@ func _get_failure_messages() -> Dictionary:
 		MobaBuildValidator.FAILURE_STAT_ALLOCATION_EXCEEDS_PER_STAT_MAX:
 		"One or more stats exceeds the per-stat maximum.",
 		MobaBuildValidator.FAILURE_STAT_POOL_OVERSPENT: "Total stat points exceed the pool.",
-		MobaAppearanceValidator.FAILURE_UNKNOWN_HELM: "The selected helm does not exist in the catalog.",
+		MobaAppearanceValidator.FAILURE_UNKNOWN_HELM:
+		"The selected helm does not exist in the catalog.",
 		MobaAppearanceValidator.FAILURE_UNKNOWN_CHEST:
 		"The selected chest piece does not exist in the catalog.",
 		MobaAppearanceValidator.FAILURE_UNKNOWN_COLOR_SCHEME:
