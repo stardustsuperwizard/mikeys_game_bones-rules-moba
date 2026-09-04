@@ -127,11 +127,13 @@ func _ready() -> void:
 	if _action_ability_options.any(func(opt): return opt == null):
 		push_error("Failed to resolve one or more action ability option buttons")
 		return
-	if _passive_ability_option == null:
-		push_error("Failed to resolve passive ability option button")
-		return
-	if _helm_option == null or _chest_option == null or _color_scheme_option == null:
-		push_error("Failed to resolve one or more appearance option buttons")
+	if (
+		_passive_ability_option == null
+		or _helm_option == null
+		or _chest_option == null
+		or _color_scheme_option == null
+	):
+		push_error("Failed to resolve passive ability or appearance option buttons")
 		return
 	if _character_name_input == null or _save_button == null or _cancel_button == null:
 		push_error("Failed to resolve name input or save/cancel buttons")
@@ -871,21 +873,18 @@ func _apply_selected_weapon() -> void:
 
 ## Signal handler: Helm appearance option changed.
 func _on_helm_changed(_index: int) -> void:
-	var helm_id = _helm_option.get_selected_metadata() as String
 	_apply_appearance_selection()
 	_clear_message()
 
 
 ## Signal handler: Chest appearance option changed.
 func _on_chest_changed(_index: int) -> void:
-	var chest_id = _chest_option.get_selected_metadata() as String
 	_apply_appearance_selection()
 	_clear_message()
 
 
 ## Signal handler: Color scheme appearance option changed.
 func _on_color_scheme_changed(_index: int) -> void:
-	var color_scheme_id = _color_scheme_option.get_selected_metadata() as String
 	_apply_appearance_selection()
 	_clear_message()
 
@@ -917,21 +916,28 @@ func _restore_appearance_selection() -> void:
 
 	var appearance = _current_build.appearance
 
-	# Restore helm selection
+	# Restore helm selection. If the stored id is no longer found in the
+	# picker (e.g. a hand-edited .tres carrying an id the catalog dropped),
+	# clear the build's field to match what the picker now shows -- the same
+	# "select by data, fall back to (None) and clear the field if not found"
+	# pattern _update_ability_options() follows for abilities.
 	if appearance != null and appearance.helm_id != "":
-		_select_option_by_data(_helm_option, str(appearance.helm_id))
+		if not _select_option_by_data(_helm_option, str(appearance.helm_id)):
+			appearance.helm_id = &""
 	else:
 		_helm_option.select(0)
 
 	# Restore chest selection
 	if appearance != null and appearance.chest_id != "":
-		_select_option_by_data(_chest_option, str(appearance.chest_id))
+		if not _select_option_by_data(_chest_option, str(appearance.chest_id)):
+			appearance.chest_id = &""
 	else:
 		_chest_option.select(0)
 
 	# Restore color scheme selection
 	if appearance != null and appearance.color_scheme_id != "":
-		_select_option_by_data(_color_scheme_option, str(appearance.color_scheme_id))
+		if not _select_option_by_data(_color_scheme_option, str(appearance.color_scheme_id)):
+			appearance.color_scheme_id = &""
 	else:
 		_color_scheme_option.select(0)
 

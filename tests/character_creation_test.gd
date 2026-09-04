@@ -12,8 +12,12 @@
 ##   - ability pickers filter by selected disciplines and re-filter on discipline change
 ##   - a shipped template (melee_bruiser_build.tres) loads into the form unmodified
 ##   - saving a valid template succeeds and round-trips (save + load = identical)
+##   - a build with a non-default helm, chest, and colour scheme round-trips
+##     with an identical MobaAppearance
 ##   - same-discipline selection is rejected at save time with validator's reason
 ##   - overspending the stat pool is rejected at save time with validator's reason
+##   - an unknown appearance id is rejected at save time with validator's reason
+##   - an over-long character name is rejected at save time, writing nothing to disk
 ##   - a saved character is listed by, and loads back through, the screen's own
 ##     saved-character picker (not just the CharacterStorage API underneath it)
 ##   - the stat spinboxes cannot be driven past the policy's pool through the UI
@@ -77,8 +81,11 @@ const _EXPECTED_CHECKS: Array[String] = [
 	"ability pickers re-filter when disciplines change",
 	"shipped template loads unmodified",
 	"template round-trips (save and load returns identical build)",
+	"appearance round-trips (save and load returns identical MobaAppearance)",
 	"same-discipline selection refused with validator's reason",
 	"overspend stat pool refused with validator's reason",
+	"unknown appearance id refused with its mapped message",
+	"over-long name refused with nothing written to disk",
 	"saved character reloads through the screen's own picker",
 	"stat spinboxes cannot exceed the pool through the UI",
 	"hand-built character saves the weapon the picker shows",
@@ -113,8 +120,10 @@ func _run() -> void:
 	await _test_ability_pickers_refilter()
 	await _test_template_loading()
 	await _test_save_and_round_trip()
+	await _test_appearance_round_trip()
 	await _test_same_discipline_rejection()
 	await _test_overspend_rejection()
+	await _test_save_refusals_for_appearance_and_name()
 	await _test_saved_character_reload()
 	await _test_ui_pool_clamp()
 	await _test_weapon_applied_without_reselect()
@@ -478,6 +487,41 @@ func _test_save_and_round_trip() -> void:
 	_pass("template round-trips (save and load returns identical build)")
 
 
+## A build with a non-default helm/chest/colour scheme round-trips through
+## CharacterStorage with an identical MobaAppearance (AC 7).
+func _test_appearance_round_trip() -> void:
+	var test_build := MobaCharacterBuild.new()
+	test_build.character_name = "Appearance RoundTrip"
+	test_build.primary_discipline = MobaAbility.Discipline.WARRIOR
+	test_build.secondary_discipline = MobaAbility.Discipline.GUARDIAN
+	var appearance := MobaAppearance.new()
+	appearance.helm_id = &"iron_helm"
+	appearance.chest_id = &"leather_chest"
+	appearance.color_scheme_id = &"azure"
+	test_build.appearance = appearance
+
+	var file_path: String = CharacterStorage.SAVE_DIR + test_build.character_name + ".tres"
+	DirAccess.remove_absolute(file_path)
+	if not CharacterStorage.save_character(test_build, test_build.character_name):
+		_fail("failed to save appearance round-trip build")
+		return
+
+	var loaded := CharacterStorage.load_character(test_build.character_name)
+	DirAccess.remove_absolute(file_path)
+	if loaded == null or loaded.appearance == null:
+		_fail("loaded build has no appearance sub-resource")
+		return
+
+	var la := loaded.appearance
+	var got: Array = [la.helm_id, la.chest_id, la.color_scheme_id]
+	var want: Array = [appearance.helm_id, appearance.chest_id, appearance.color_scheme_id]
+	if got != want:
+		_fail("loaded appearance mismatch: %s vs %s" % [got, want])
+		return
+
+	_pass("appearance round-trips (save and load returns identical MobaAppearance)")
+
+
 ## Test that same-discipline selection is rejected at save time.
 func _test_same_discipline_rejection() -> void:
 	if _character_creation == null:
@@ -621,6 +665,55 @@ func _test_overspend_rejection() -> void:
 func _get_pool_overspent_message() -> String:
 	var messages: Dictionary = _character_creation._get_failure_messages()
 	return messages.get(MobaBuildValidator.FAILURE_STAT_POOL_OVERSPENT, "")
+
+
+## Saving is refused for both an unknown appearance id (AC 6) and an
+## over-long character name (AC 5), each with its mapped message; the
+## over-long case additionally must write nothing new to disk.
+func _test_save_refusals_for_appearance_and_name() -> void:
+	if _character_creation == null:
+		return
+
+	var name_input := _character_creation.get_node_or_null(NodePath(_PATH_NAME_INPUT)) as LineEdit
+	var save_button := _character_creation.get_node_or_null(NodePath(_PATH_SAVE_BUTTON)) as Button
+	var error_label := _character_creation.get_node_or_null(NodePath(_PATH_ERROR_LABEL)) as Label
+	if name_input == null or save_button == null or error_label == null:
+		_fail("required controls not found for save-refusal tests")
+		return
+
+	var messages: Dictionary = _character_creation._get_failure_messages()
+	# Unknown appearance id: the pickers only ever offer catalog ids, so this
+	# writes an unknown one into the build directly.
+	var appearance := MobaAppearance.new()
+	appearance.helm_id = &"nonexistent_helm"
+	_character_creation._current_build.appearance = appearance
+	name_input.text = "Unknown Helm Test"
+	error_label.text = ""
+	save_button.pressed.emit()
+	await process_frame
+
+	var expected_helm: String = messages.get(MobaAppearanceValidator.FAILURE_UNKNOWN_HELM, "")
+	if error_label.text != expected_helm:
+		_fail("unknown helm refused with %s, screen said: %s" % [expected_helm, error_label.text])
+	else:
+		_pass("unknown appearance id refused with its mapped message")
+	_character_creation._current_build.appearance = null
+	# Over-long name, refused with nothing new written to disk.
+	var over_long_name := "X".repeat(MobaBuildValidator.MAX_NAME_LENGTH + 1)
+	var before := CharacterStorage.list_characters()
+	name_input.text = over_long_name
+	error_label.text = ""
+	save_button.pressed.emit()
+	await process_frame
+
+	var expected_name: String = messages.get(MobaBuildValidator.FAILURE_NAME_TOO_LONG, "")
+	var after := CharacterStorage.list_characters()
+	if error_label.text != expected_name:
+		_fail("over-long name refused with %s, screen said: %s" % [expected_name, error_label.text])
+	elif after != before:
+		_fail("over-long name was refused but disk contents changed: %s -> %s" % [before, after])
+	else:
+		_pass("over-long name refused with nothing written to disk")
 
 
 ## A character saved through the screen becomes selectable in the screen's own
