@@ -32,9 +32,9 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 | --- | --- | --- |
 | Planner | Claude Opus 5, then fallbacks | `PLANNER_MODELS` env / `vars.PLANNER_MODELS` in `agent-01-planner.yml` |
 | Executor — native cloud agent | Claude Haiku 4.5 | The picker, when **you** dispatch — see *Four entry points* below. |
-| Executor — scripted (`agent:execute`) | Claude Haiku 4.5, then Sonnet 5 | `EXECUTOR_MODELS` env / `vars.EXECUTOR_MODELS` in `agent-02-execute.yml` |
+| Executor — scripted (`agent:execute`) | Per task, from the Issue's `model:*` label; Claude Opus 5, then Sonnet 5, then Haiku 4.5 when unlabelled | `model:*` label → `agent-02-execute.yml`'s *Resolve Executor Model Tier*; default and override in `EXECUTOR_MODELS` env / `vars.EXECUTOR_MODELS`. See *The executor's tier is chosen per task* below |
 | Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-04-review.yml` (also used by `agent-02-execute.yml`'s pre-PR self-review) |
-| Fixer | Claude Sonnet 5, then fallbacks | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-execute.yml`'s pre-PR self-fix) |
+| Fixer | Claude Sonnet 5, then fallbacks — climbing a tier per repeat round | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-execute.yml`'s pre-PR self-fix); escalation in its *Resolve Fixer Model Tier* step |
 | Lint fixer | Claude Haiku 4.5, then Sonnet 5 | `LINT_FIXER_MODELS` env / `vars.LINT_FIXER_MODELS` in `gdscript-lint.yml` |
 
 Planner, the scripted executor, reviewer, and fixer are all Copilot CLI
@@ -68,6 +68,134 @@ Executor and fixer default to a cheaper tier instead — bounded,
 contract-driven work doesn't need the top model the way blind planning or
 review does. See `agent-02-execute.yml` and `agent-05-fix.yml` for their
 exact lists.
+
+### The executor's tier is chosen per task
+
+Every other role in the table gets one list for the whole repository. The
+executor gets a starting point per Issue, because the tasks it runs are not
+alike: adding a field and its accessor is not the same work as changing how
+authority is resolved, and paying the same model for both wastes money on one
+and risks the other.
+
+The planner sets it. It is the only role that sees the whole feature at once
+and reads the code before it is written, so it is the only one positioned to
+judge how much model a task needs — and it is already an Opus session, so the
+judgement is made by the most capable model in the pipeline. The rubric it
+follows is *Choosing a model tier* in `.github/agents/01-planner.agent.md`;
+its one-line summary is that `haiku` is for work fully determined by the
+contract, `sonnet` is the default and the answer when unsure, and `opus` is
+for work where a wrong choice is expensive to undo.
+
+It travels as a label — `model:haiku`, `model:sonnet`, `model:opus` — with the
+reasoning mirrored in the Issue's **Model Tier** section. The label is what
+the workflow reads; the prose is what lets you check the call and relabel by
+hand when it looks wrong. Nothing re-reads the prose.
+
+**It is a tier, not a model id, and that is load-bearing.** The Copilot CLI
+and `claude-code-action` spell the same models differently —
+`claude-haiku-4.5` against `claude-haiku-4-5-20251001` — and this document
+warns elsewhere against copying one spelling into the other. An Issue that
+named an id would bind the task to whichever pipeline used that namespace. A
+tier is meaningful to both, and each workflow maps it to its own ids.
+
+Both pipelines do. `agent-02-execute.yml` maps the tier to Copilot CLI ids;
+`agent-06-claude.yml`'s *Apply Per-Task Model Tier* step maps the same label
+to Claude Code ids for `claude:execute` and `claude:fix`. One decision, made
+once by the planner, read by whichever executor the label happens to summon.
+`claude:plan` and `claude:review` keep their configured models — planning and
+review are repository-wide judgements, not per-task ones.
+
+The Claude side escalates too, on the same signal: `claude:fix` counts the
+same `<!-- agent-fix-applied -->` comments `agent-05-fix.yml` counts, and
+climbs a tier per round past `CLAUDE_FIXER_ESCALATE_AFTER` (default `1`). A
+pull request fixed once by one pipeline therefore escalates on the other,
+which is the point of sharing a marker rather than each keeping its own tally.
+
+The two bounds that hold on the Copilot side hold here as well, and for the
+same reasons. Setting `vars.CLAUDE_EXECUTOR_MODEL` or `vars.CLAUDE_FIXER_MODEL`
+skips tier resolution entirely for that role: an operator naming a model has
+made a decision about this repository, and neither a planner's guess about one
+task nor an escalation counter overrules it. And `claude:fix` treats its
+configured model as a **floor** rather than a starting point to overwrite —
+the Issue's tier applies only when it is higher, and when nothing has raised
+the fixer above where it is configured to run, the configured id is handed
+back untouched rather than replaced by a tier's idea of it.
+
+Four rules bound what the recommendation can do:
+
+- **It prepends, it does not replace.** `run-copilot-session` advances through
+  the list only when a model is unavailable to the calling identity, never
+  after a real failure, so the list is what keeps an availability gap from
+  ending the run. A single id would turn every such gap into a dead job.
+- **Each tier's list ascends; the unlabelled default descends.** `model:haiku`
+  resolves to `claude-haiku-4.5,claude-sonnet-5,claude-opus-5`. The asymmetry
+  is deliberate: the default starts at the top and has nowhere to go but down,
+  while a tier is a floor someone chose, and falling below it would silently
+  run a task on less model than was asked for. Unavailability should cost
+  money, not correctness.
+- **An operator outranks the planner.** Setting `vars.EXECUTOR_MODELS` is a
+  deliberate decision about this repository; a planner's guess about one task
+  does not overrule it. `vars.EXECUTOR_TIER_FLOOR` (default `haiku`) raises
+  the lower bound instead, without editing the rubric or relabelling anything.
+- **No label means no change.** An Issue without a `model:*` label runs on the
+  default list exactly as it did before this existed, which is also what
+  happens if the three labels are never created — the planner applies the
+  label as a follow-up edit rather than at creation time, so a missing label
+  costs the hint, not the plan.
+
+The three labels do have to exist for the hint to land: create `model:haiku`,
+`model:sonnet` and `model:opus` once. Until then, planning and execution both
+work, and the planner logs each label it could not apply.
+
+**What this leans on.** A cheaper executor is only safe because a strong
+reviewer follows it — the reasoning this document already gives for the
+executor's tier being cheaper than the planner's. This change leans harder on
+that, so the reviewer staying on the strong tier stops being a preference and
+becomes the thing holding the arrangement up.
+
+### A pull request that keeps coming back buys a better model
+
+The planner calls the tier before the code exists, so it will sometimes call
+it wrong, and the failure is asymmetric. Over-calling costs money once.
+Under-calling costs a session that cannot finish, a review that rejects it, and
+a fix cycle — repeated at the same tier for as long as nobody notices, which
+is how a task scoped as cheap becomes the most expensive one in the milestone.
+
+So `agent-05-fix.yml` climbs. Its *Resolve Fixer Model Tier* step counts the
+fix rounds already completed on the pull request and raises the tier one step
+for each round past `FIXER_ESCALATE_AFTER` (default `1`), to a ceiling of
+`opus`. With the default, the first fix runs where the fixer runs today and the
+second buys Opus. Set it to `0` to escalate immediately, or to something large
+to switch escalation off.
+
+Three properties are worth stating, because each one is a decision:
+
+- **It only ever raises.** The base is `FIXER_BASE_TIER` (default `sonnet`),
+  and the Issue's `model:*` tier applies only when it is *higher* than that. A
+  cheap executor is a cost decision made before the code existed; the fixer is
+  a correction responding to a reviewer who has read the code, and spending
+  less on it than this repository already does would be a regression wearing a
+  feature's clothes. So `model:haiku` never produces a cheaper fixer — but
+  `model:opus` does produce a stronger one, from the first round.
+- **Rounds are counted from `<!-- agent-fix-applied -->`,** the marker
+  *Publish Fix* posts when a fix was actually pushed. A session that crashed
+  before diagnosing anything does not count against the budget: escalating on
+  a crash spends more model on a problem nobody has understood yet.
+- **Nothing changes until something is raised.** When the effective tier is
+  no higher than the base, the configured `FIXER_MODELS` list is used
+  untouched — it carries intermediate ids like `claude-sonnet-4.5` that a tier
+  list does not, and narrowing the fallback walk for no reason would trade
+  availability for tidiness.
+
+`FIXER_BASE_TIER` is a tier name rather than something inferred from the first
+id in `FIXER_MODELS`, so that retuning that list later does not silently move
+where the climb starts.
+
+An explicitly set `vars.FIXER_MODELS` skips all of it, the same way it does on
+the executor side: if you name the list, you own it, including on the fourth
+round. And the ceiling is real — once a pull request is at `opus`, further
+rounds cannot buy anything, and the run log says so. A fix that keeps failing
+at the top tier is telling you the finding is not a model problem.
 
 Copilot CLI resolves model availability against the **identity making the
 request**, and in Actions that identity is the workflow's `GITHUB_TOKEN`, not
@@ -148,7 +276,7 @@ So there are four ways in, across two products:
 | **Desktop agents panel** — start a session | **your choice** | `executor` | via the Run This Task block |
 | **GitHub Mobile** — new agent session | **your choice**, *or* a custom agent — never both | either, not both | via the Run This Task block |
 | Issue → assign Copilot | **your choice** | no | yes |
-| `agent:execute` label — scripted, not the cloud agent | fixed preference list (`EXECUTOR_MODELS`) | n/a — not a custom-agent session | yes, `Closes #n` written by the workflow itself |
+| `agent:execute` label — scripted, not the cloud agent | preference list, led by the Issue's `model:*` tier (`EXECUTOR_MODELS` otherwise) | n/a — not a custom-agent session | yes, `Closes #n` written by the workflow itself |
 
 Only the desktop panel offers both pickers at once among the three
 cloud-agent entry points. Mobile makes them exclusive: choose Copilot Agent
@@ -1231,6 +1359,47 @@ semantics and is flagged where it is used: setting labels through
 `issue_write` replaces the whole set, where `gh pr edit --add-label` adds to
 it, so the reviewer reads the current labels first.
 
+### `/feature-status` — where does this feature stand?
+
+The four roles above are four separate invocations, and between them someone
+has to work out what is already done: which tasks exist, which have pull
+requests, which came back `FIX`, which are blocked on a task that has not
+merged. `/feature-status <intake-issue>` answers that in one table, with the
+literal next command in the right-hand column.
+
+```
+/feature-status 283
+
+  #  Task                              Tier    PR    CI  Verdict   Next
+  1  Appearance data model             opus    #381  ok  PASS      ready to merge
+  2  Character creation UI             sonnet  #390  ok  FIX (x1)  /fix-review 390
+  3  Placeholder appearance rendering  haiku   --    --  --        /execute-task 377
+  4  Team-colour signal                sonnet  --    --  --        blocked by #377
+```
+
+**It reads and never writes.** No Issues, no pull requests, no labels, no
+subagents — it answers where things stand and hands you the command, and you
+decide whether to run it.
+
+**It holds no state.** Everything in that table is derived from GitHub each
+time it runs: the sub-issues, their `model:*` labels, the pull request titled
+`[<n>]`, the most recent `<!-- agent-review-verdict -->` comment, and the count
+of `<!-- agent-fix-applied -->` comments — the same counter `agent-05-fix.yml`
+uses to decide when to escalate the fixer, so the table also tells you what
+model the next fix round will buy.
+
+That is deliberate, and it is the same decision *Where the handoff contract
+lives* already made for the planner: there is no plan file. A cached index of
+GitHub state drifts the moment anyone closes or relabels an Issue by hand, and
+nothing reconciles it. Re-deriving is cheap and is correct by construction.
+
+An earlier draft of this went further and orchestrated the whole pipeline from
+one session — plan, then execute every task, then drive each pull request
+through review and fix. It was dropped. Once a status command tells you the
+next command, typing it yourself costs seconds and keeps every stopping point
+visible, and the orchestrator's own bookkeeping was the only thing that needed
+a state file in the first place.
+
 The two sides share the Issue and PR graph, not a runtime. A PR opened by
 Claude Code doesn't land on a `copilot/*` branch, so it won't trigger
 `agent-04-review.yml`'s automatic `ready_for_review` review — add
@@ -1406,7 +1575,7 @@ are custom agents and MCP servers.
 | `.github/ISSUE_TEMPLATE/99-execute_task.md` | Planner-emitted bounded task |
 | `.github/pull_request_template.md` | Handoff record, verdict |
 | `CLAUDE.md` | Points Claude Code at the same contract Copilot reads |
-| `.claude/agents/*.md`, `.claude/commands/*.md` | Local Claude Code counterparts of the four roles — see *Claude Code as an additional environment* |
+| `.claude/agents/*.md`, `.claude/commands/*.md` | Local Claude Code counterparts of the four roles, plus `/feature-status` which reports where a feature stands — see *Claude Code as an additional environment* |
 
 ## Sources
 

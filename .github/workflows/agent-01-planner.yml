@@ -602,6 +602,41 @@ jobs:
           into a task that fixes it and a task that tests it: that leaves an
           intermediate state nobody can ship.
 
+          MODEL TIER:
+
+          Each task carries a `model_tier` -- your recommendation for how
+          much model the execution session needs. You are the only role that
+          sees the whole feature at once and reads the code before it is
+          written, so you are the only one positioned to call this. The
+          executor consumes it as the FIRST candidate in its preference
+          list, not as a fixed choice: an unavailable model still escalates.
+
+          - "haiku" -- mechanical work against a contract you have made
+            explicit. Adding a field and its accessor, a test that mirrors
+            an existing one, a rename, a data file, wiring an existing
+            signal to an existing handler. The task is fully determined by
+            what you wrote in `scope` and `acceptance_criteria`.
+          - "sonnet" -- the default, and the right answer when you are
+            unsure. Ordinary implementation: a new class following an
+            established pattern, a state machine with a handful of
+            transitions, a validator with real branching.
+          - "opus" -- work where a wrong choice is expensive to undo.
+            Anything touching authority, replication, prediction or rewind;
+            anything that changes a shared type in `scripts/`; anything
+            whose correctness argument is subtler than its code.
+
+          Judge the IMPLEMENTATION, not the subject matter. A one-line
+          change in the networking layer is still a one-line change. And
+          judge your own writing honestly: a task you scoped loosely needs
+          a stronger model than the same task scoped tightly. If you find
+          yourself reaching for "opus" because the task is vague, tighten
+          the task instead.
+
+          Under-calling costs more than over-calling. A model that cannot
+          finish burns its session, comes back through review, and spends a
+          fix cycle -- so when a task sits between two tiers, take the
+          higher one.
+
           Return ONLY one valid JSON object.
 
           Do not wrap it in Markdown fences.
@@ -620,6 +655,7 @@ jobs:
                 "title": "short implementation task title",
                 "objective": "engineering outcome",
                 "scope": "authoritative bounded implementation scope",
+                "model_tier": "haiku | sonnet | opus",
                 "expected_files": [
                   "path or subsystem"
                 ],
@@ -1190,14 +1226,30 @@ jobs:
               "depends_on",
           }
 
+          # Optional, unlike every field above. A planner that omits it
+          # produces a plan with no tier recommendation, and the executor
+          # falls back to its configured default -- which is exactly the
+          # behaviour before this field existed. Making it required would
+          # mean one forgotten key fails an otherwise good plan, and a
+          # routing hint is not worth a planning failure.
+          MODEL_TIERS = ("haiku", "sonnet", "opus")
+
           task_ids = []
 
           for task in tasks:
               if not isinstance(task, dict):
                   schema_fail(f"task is not an object: {task!r}")
 
-              if set(task.keys()) != required_task:
+              if set(task.keys()) - {"model_tier"} != required_task:
                   schema_fail(f"task has unexpected fields: {task}")
+
+              tier = task.get("model_tier")
+
+              if tier is not None and tier not in MODEL_TIERS:
+                  schema_fail(
+                      f"{task['id']}.model_tier is {tier!r}; expected one of "
+                      + ", ".join(MODEL_TIERS)
+                  )
 
               for field in (
                   "id",
@@ -1444,6 +1496,26 @@ jobs:
                   if not is_standing(item)
               )
 
+          # Prose next to the label, because the label is what the workflows
+          # read and prose is what tells a human whether the call was sane.
+          # A tier that looks wrong is worth relabelling by hand; that only
+          # happens if the reasoning is visible on the Issue.
+          def tier_note(tier):
+              if tier is None:
+                  return (
+                      "The planner did not record a tier. The executor uses "
+                      "its configured default; nothing is blocked by this."
+                  )
+
+              return (
+                  f"The planner judged this task `{tier}` work. That is the "
+                  "executor session's starting model, not a pin -- an "
+                  "unavailable model escalates rather than failing the run, "
+                  "and an operator who sets the `EXECUTOR_MODELS` repository "
+                  "variable outranks it. Relabel this Issue "
+                  "`model:haiku|sonnet|opus` to overrule it."
+              )
+
           # First pass: create every task so all dependency
           # task IDs can be translated to actual Issue numbers.
           for task in plan["tasks"]:
@@ -1458,6 +1530,12 @@ jobs:
 
           - Parent Feature: #{parent}
           - Planner Task: {task["id"]}
+
+          ## Model Tier
+
+          - Recommended: `{task.get("model_tier") or "unset"}`
+
+          {tier_note(task.get("model_tier"))}
 
           ## Objective
 
@@ -1572,6 +1650,38 @@ jobs:
                   "url": url,
                   "title": task["title"],
               }
+
+              # Deliberately not a `--label` on the create command above.
+              # `gh issue create` fails outright on a label that does not
+              # exist in the repository, which would turn "the three
+              # `model:*` labels were never created" into "planning is
+              # broken" -- and take the whole plan down, not just the hint.
+              # As a follow-up edit the worst case is an Issue without a
+              # tier label, which the executor already handles.
+              tier = task.get("model_tier")
+
+              if tier:
+                  label_result = subprocess.run(
+                      [
+                          "gh",
+                          "issue",
+                          "edit",
+                          str(number),
+                          "--repo",
+                          repo,
+                          "--add-label",
+                          f"model:{tier}",
+                      ],
+                      check=False,
+                      capture_output=True,
+                      text=True,
+                  )
+
+                  if label_result.returncode != 0:
+                      print(
+                          f"  could not apply model:{tier} to #{number} -- "
+                          f"{label_result.stderr.strip()}"
+                      )
 
               bodies[task["id"]] = body
 
