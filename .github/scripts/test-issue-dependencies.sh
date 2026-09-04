@@ -444,6 +444,112 @@ else
   fail "--dry-run wrote to the repository state"
 fi
 
+# ---------------------------------------------------------------------------
+# Part 3: the read side fails closed.
+#
+# Creating the chain is only half of it. Three places *read* it to decide
+# whether work may start, and all three used to infer "unblocked" from an
+# empty result without checking that the result was meaningful. The pattern
+# was `.blockedBy.nodes[]?`, whose `?` suppresses the iterate-over-null error
+# -- so a null or renamed field produced an empty list indistinguishable from
+# a task with no blockers, and `agent:execute` would spend a session on a task
+# whose dependency had not landed.
+# ---------------------------------------------------------------------------
+
+echo
+echo "Reading the chain fails closed"
+
+# The two enforcement points now read the REST dependencies endpoint, which
+# has a known shape and no `gh` version floor. Pin that they do not drift back.
+for guard in \
+  "$repo_root/.github/workflows/agent-02-execute.yml" \
+  "$repo_root/.github/workflows/issue-linking.yml"
+do
+  name="$(basename "$guard")"
+
+  # Comment lines are stripped first. Both files *describe* the old pattern in
+  # the comment explaining why it was replaced, and a grep over the raw file
+  # matches that prose — which would make this check fail forever on a
+  # correctly fixed file. Only executable lines count. `#` opens a comment in
+  # both YAML and the shell bodies, so one rule covers both.
+  code="$(grep -v '^[[:space:]]*#' "$guard")"
+
+  if grep -q 'blockedBy\.nodes\[\]?' <<<"$code"; then
+    fail "$name reads blockers with the fail-open \`.blockedBy.nodes[]?\`"
+  else
+    pass "$name does not infer 'unblocked' from a swallowed null"
+  fi
+
+  if grep -q 'dependencies/blocked_by' <<<"$code"; then
+    pass "$name reads blockers from the REST dependencies endpoint"
+  else
+    fail "$name no longer reads the dependencies endpoint"
+  fi
+done
+
+# The dashboard reads 500 issues in one call and cannot afford a request each,
+# so it reports the uncertainty instead of resolving it. What it must never do
+# is file an issue of unknown dependency state under "Ready to dispatch".
+if python3 - "$scripts" <<'PY'
+import importlib.util
+import sys
+
+sys.path.insert(0, sys.argv[1])
+spec = importlib.util.spec_from_file_location(
+    "render_dashboard", sys.argv[1] + "/render-dashboard.py"
+)
+dashboard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dashboard)
+
+READABLE = [
+    ("one open blocker", {"blockedBy": {"nodes": [{"number": 12, "state": "OPEN"}]}}, [12]),
+    ("blocker closed", {"blockedBy": {"nodes": [{"number": 12, "state": "CLOSED"}]}}, []),
+    ("genuinely none", {"blockedBy": {"nodes": []}}, []),
+]
+
+# Every shape that is not "a nodes list of {number, state}". Each one used to
+# read as "no blockers".
+UNREADABLE = [
+    ("field null", {"blockedBy": None}),
+    ("field absent", {}),
+    ("nodes is a bare list", {"blockedBy": [{"number": 12, "state": "OPEN"}]}),
+    ("node missing state", {"blockedBy": {"nodes": [{"number": 12}]}}),
+]
+
+failed = 0
+
+for name, issue, expected in READABLE:
+    blockers, readable = dashboard.open_blockers(issue)
+    if readable and [n["number"] for n in blockers] == expected:
+        print(f"  ok   — {name} reads cleanly")
+    else:
+        failed += 1
+        print(f"  FAIL — {name}: {blockers}, readable={readable}", file=sys.stderr)
+
+for name, issue in UNREADABLE:
+    _, readable = dashboard.open_blockers(issue)
+    if readable:
+        failed += 1
+        print(f"  FAIL — {name} was trusted as 'no blockers'", file=sys.stderr)
+        continue
+
+    state, detail = dashboard.classify_task(
+        {"state": "OPEN", "number": 5, **issue}, {}
+    )
+    if state == dashboard.NEEDS_ATTENTION:
+        print(f"  ok   — {name} is flagged, not filed as ready")
+    else:
+        failed += 1
+        print(f"  FAIL — {name} classified {state!r}", file=sys.stderr)
+
+sys.exit(1 if failed else 0)
+PY
+then
+  :
+else
+  failures=$((failures + 1))
+fi
+
 echo
 if [ "$failures" -eq 0 ]; then
   echo "All dependency checks passed."

@@ -1212,10 +1212,48 @@ table and a generated one are read by exactly the same grammar. That grammar
 also accepts the older `- Blocked by: #12` bullet form, so a sweep repairs the
 backlog filed before this existed.
 
-`.github/scripts/test-issue-dependencies.sh` pins both halves — the parser and
-the `gh` calls — against a stub CLI. It needs no Godot, credentials or
-network, and it is the check to run when touching any of this, because the
-failure mode is a green run that wired nothing.
+#### Reading the chain fails closed
+
+Creating the chain is half of it. Three places *read* it to decide whether
+work may start — `agent-02-execute.yml`'s refusal, `issue-linking.yml`'s
+warning, and the control plane's *Ready to dispatch* bucket — and all three
+inferred "unblocked" from an empty result without checking the result meant
+anything. The pattern was:
+
+```
+[.blockedBy.nodes[]? | select(.state == "OPEN") | "#\(.number)"]
+```
+
+The `?` suppresses jq's iterate-over-null error, so a `blockedBy` arriving
+null — a renamed field, a dependencies API hiccup, a `gh` reporting the field
+without populating it — yields an empty list byte-identical to "this task has
+no blockers". A paid executor session then runs against a task whose
+dependency has not landed, which is the outcome the guard exists to prevent.
+
+Note this is *not* the `gh` version floor: an unknown `--json` field makes
+`gh` exit non-zero, and under `set -euo pipefail` that fails the step loudly.
+The fail-open is narrower and worse — the field is accepted, and its emptiness
+is believed.
+
+The two enforcement points now read
+`/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by` instead: a known
+shape (a JSON array of issue objects), no version floor, and a failed read is
+fatal rather than empty. **Cannot tell must never resolve to go ahead.** Note
+REST spells the state lowercase where the GraphQL-backed `--json` output
+spells it upper, so both comparisons downcase first.
+
+The control plane reads 500 issues in one call and cannot afford a request
+each, so it reports the uncertainty rather than resolving it: an issue whose
+`blockedBy` is not a `nodes` list of `{number, state}` is filed under *Needs
+your attention* with `DEPENDENCIES UNREADABLE`, never under *Ready to
+dispatch*.
+
+`.github/scripts/test-issue-dependencies.sh` pins all of it — the parser, the
+`gh` calls against a stub CLI, and the read side, including a grep that fails
+if either enforcement point drifts back to `.blockedBy.nodes[]?`. It needs no
+Godot, credentials or network, and it is the check to run when touching any of
+this, because the failure mode throughout is a green run that wired or saw
+nothing.
 
 ### The control plane
 
@@ -1690,7 +1728,8 @@ Re-check these with the commands rather than trusting this table.
 | Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"mikeys_game_bones-rules-moba"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
 | `gh agent-task create` has no `--model` | `gh agent-task create --help` |
 | The `plan` queue is not stale | `gh issue list --label plan --json number,title,labels` — nothing here should also carry `planned` |
-| This `gh` can read dependencies in bulk | `gh issue list --json number,blockedBy --limit 1` — an "unknown JSON field" error means `gh` is older than 2.94.0, which only costs drift reporting |
+| This `gh` can read dependencies in bulk | `gh issue list --json number,blockedBy --limit 1` — an "unknown JSON field" error means `gh` is older than 2.94.0, which only costs drift reporting and the control plane's blocked bucket; neither enforcement point depends on it |
+| The shape of `blockedBy` | `gh issue list --json number,blockedBy --limit 5 --jq '.[].blockedBy'` — the control plane expects `{"nodes": [{"number", "state"}]}` and flags anything else rather than reading it as unblocked |
 | The dependency endpoint answers | `gh api repos/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/1/dependencies/blocked_by` |
 | The chain matches the tables | `.github/scripts/sync-issue-dependencies.py --sweep --dry-run` |
 | Derived state matches reality | `.github/scripts/render-dashboard.py --json` |
