@@ -155,10 +155,14 @@ has run, stop waiting. It has two causes and they do not mean the same thing
 — work out which one you are in and report that, rather than reporting "no
 checks" and leaving the reader to guess:
 
-- **Path filters.** `godot-ci-validation.yml` ignores `**.md`, `docs/**`
-  and `sim/**`; `gdscript-lint.yml` only fires on `**.gd` and its own
-  tooling. A PR touching none of the watched paths legitimately runs
-  nothing. This is green: say that no checks applied, and to which paths.
+- **Path filters.** `godot-ci-validation.yml` ignores prose, `sim/**`, and
+  the whole agent control plane — `.github/agents/**`, `.claude/**`,
+  `.gitignore`, the `agent-*` and `balance-*` workflows; `gdscript-lint.yml`
+  only fires on `**.gd`, `.gdlintrc` and its own tooling. A PR touching none
+  of the watched paths legitimately runs nothing. This is green: say that no
+  checks applied, and to which paths. Read the workflow's own list rather
+  than trusting this summary — it is a summary, and the list is the
+  authority.
 - **The PR's author cannot start workflows.** GitHub does not start
   `pull_request` runs for a PR opened by `GITHUB_TOKEN`, which is what a
   `claude:execute` run opens PRs as unless `AGENT_GITHUB_TOKEN` is set —

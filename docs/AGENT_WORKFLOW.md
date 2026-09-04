@@ -1625,8 +1625,9 @@ Six things about that loop are decisions rather than obvious consequences:
   which this one does not.
 - **An empty check list ends the wait, and is not automatically green.** CI
   here is path-filtered — `godot-ci-validation.yml` by `paths-ignore`,
-  `gdscript-lint.yml` by `paths` — so a docs-only PR legitimately runs
-  nothing, and that *is* green. A PR that changes `**.gd` and still has no
+  `gdscript-lint.yml` by `paths` — so a PR touching only prose or the agent
+  control plane legitimately runs nothing, and that *is* green. A PR that
+  changes `**.gd` and still has no
   checks is the other case: without `AGENT_GITHUB_TOKEN`, pull requests opened
   by `GITHUB_TOKEN` get no `pull_request` runs at all, and no approval step
   can rescue that because there is no parked run to approve. The gates did not

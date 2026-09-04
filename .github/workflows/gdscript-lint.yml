@@ -49,8 +49,15 @@ on:
     #     out of *its* ignore list.
     #   - run-copilot-session/: runs the gdlint auto-fix session.
     #   - validate-godot.sh: gates both auto-fix commits below.
+    #   - .gdlintrc: the rule set gdlint is checked against. Changing a
+    #     threshold here changes what passes, so it has to run the linter.
+    #     It was previously covered only by godot-ci-validation.yml's
+    #     fail-safe deny-list, which booted a Godot runner to answer a
+    #     question about lint style; that file now ignores it, so this is
+    #     where it has to be listed instead.
     paths:
       - '**.gd'
+      - '.gdlintrc'
       - '.github/actions/lint-gdscript/**'
       - '.github/actions/setup-godot/**'
       - '.github/actions/run-copilot-session/**'

@@ -66,6 +66,49 @@ on:
       - '.github/actions/extract-review-verdict/**'
       - '.github/actions/lint-gdscript/**'
 
+      # Claude Code control plane -- the counterpart of `.github/agents/**`
+      # for the other toolchain: subagent definitions, slash commands, and
+      # shared project settings. Ignored as a directory rather than left to
+      # `**.md`, because that only ever covered it by accident: everything
+      # under `.claude/` happened to be markdown until `settings.json`
+      # landed, and the day it did, a pure-infrastructure pull request booted
+      # a Godot runner. A prompt cannot stop the engine importing, and
+      # neither can a fallback-model chain.
+      - '.claude/**'
+
+      # Repository plumbing. `.gitignore` decides what git tracks, not what
+      # Godot loads.
+      - '.gitignore'
+
+      # gdlint configuration, read by `gdscript-lint.yml` and
+      # `.github/actions/lint-gdscript/` and never by `validate-godot.sh`.
+      # Style is a separate gate from whether the project imports and boots,
+      # and this file only moves the former. It is listed in that workflow's
+      # `paths` so it still runs the check it actually governs.
+      - '.gdlintrc'
+
+      # Task-scope helper for the planner. Control plane, like the other
+      # `.github/scripts` entries above.
+      - '.github/scripts/task_scope.py'
+
+      # The Python balance harness's own workflows. Note these DO install
+      # Godot (`setup-godot`), so the `sim/**` reasoning above is not why
+      # they are here -- they are here because this gate cannot say anything
+      # useful about them. It imports the Godot project; running it against
+      # an edited workflow proves the project still boots, which was never in
+      # question. `balance-fast.yml` meanwhile triggers on
+      # `.github/workflows/balance-*.yml`, so editing either file already
+      # runs the harness that actually exercises them.
+      - '.github/workflows/balance-*.yml'
+
+      # Dependency preparation for Copilot agent sessions. It provisions an
+      # agent's environment; it does not change the project.
+      - '.github/workflows/copilot-setup-steps.yml'
+
+      # Generated packaging metadata for the `sim/` package, committed but
+      # never read by the engine.
+      - 'sword_and_planet_sim.egg-info/**'
+
   # The escape hatch: run validation by hand against any branch, whatever the
   # filter above decided.
   workflow_dispatch:
