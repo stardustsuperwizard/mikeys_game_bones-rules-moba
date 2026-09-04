@@ -1,0 +1,19 @@
+[gd_scene load_steps=2 format=3]
+
+; Placeholder chest piece for the catalog id "basic_chest" (#377).
+;
+; A box, against leather_chest's prism: same slot, different primitive shape.
+
+[sub_resource type="BoxMesh" id="BoxMesh_basic_chest"]
+size = Vector3(0.7, 0.75, 0.45)
+
+[node name="BasicChest" type="Node3D"]
+
+[node name="Shape" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_basic_chest")
+
+[node name="IdLabel" type="Label3D" parent="."]
+text = "basic_chest"
+position = Vector3(0, 0.5, 0)
+pixel_size = 0.004
+billboard = 1

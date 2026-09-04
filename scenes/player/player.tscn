@@ -73,6 +73,15 @@ mesh = SubResource("BoxMesh_1")
 material_override = SubResource("StandardMaterial3D_1")
 position = Vector3(0, 1, -0.55)
 
+; Placement markers for the placeholder appearance pieces (#377). Empty Node3Ds:
+; ActorAppearance3D reads their local positions and hangs the chosen helm and
+; chest scenes there, so a body can move a slot without a script change.
+[node name="HelmAttachment" type="Node3D" parent="Body"]
+position = Vector3(0, 1.95, 0)
+
+[node name="ChestAttachment" type="Node3D" parent="Body"]
+position = Vector3(0, 1.15, 0)
+
 [node name="Controller" type="Node" parent="."]
 script = ExtResource("3")
 

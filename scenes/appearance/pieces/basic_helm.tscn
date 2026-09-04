@@ -1,0 +1,23 @@
+[gd_scene load_steps=2 format=3]
+
+; Placeholder helm piece for the catalog id "basic_helm" (#377).
+;
+; Deliberately crude programmer art: a primitive shape carrying its own id as
+; readable text. The shape -- a sphere -- is what distinguishes this helm from
+; iron_helm's cone, so the two stay tellable apart when a colour scheme tints
+; both the same. Real art replaces this scene without touching the id.
+
+[sub_resource type="SphereMesh" id="SphereMesh_basic_helm"]
+radius = 0.32
+height = 0.64
+
+[node name="BasicHelm" type="Node3D"]
+
+[node name="Shape" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_basic_helm")
+
+[node name="IdLabel" type="Label3D" parent="."]
+text = "basic_helm"
+position = Vector3(0, 0.45, 0)
+pixel_size = 0.004
+billboard = 1

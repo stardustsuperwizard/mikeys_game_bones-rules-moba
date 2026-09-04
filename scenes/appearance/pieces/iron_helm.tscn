@@ -1,0 +1,22 @@
+[gd_scene load_steps=2 format=3]
+
+; Placeholder helm piece for the catalog id "iron_helm" (#377).
+;
+; A cone, so it differs from basic_helm's sphere by primitive shape rather than
+; by colour or scale -- the colour scheme is free to tint both identically.
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_iron_helm"]
+top_radius = 0.0
+bottom_radius = 0.34
+height = 0.7
+
+[node name="IronHelm" type="Node3D"]
+
+[node name="Shape" type="MeshInstance3D" parent="."]
+mesh = SubResource("CylinderMesh_iron_helm")
+
+[node name="IdLabel" type="Label3D" parent="."]
+text = "iron_helm"
+position = Vector3(0, 0.5, 0)
+pixel_size = 0.004
+billboard = 1
