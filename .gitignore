@@ -56,9 +56,18 @@ env/
 # inventory from `git ls-files` precisely to avoid egg-info noise ("Tracked
 # files are exactly the ones a plan may target"), and tracking them defeated
 # the workaround.
+#
+# `*.egg-info/` stays unanchored: setuptools writes it wherever a build runs,
+# and no Godot path is named that. `build/` and `dist/` are anchored to the
+# two directories that can actually build -- the repo root and `sim/` -- so
+# they cannot silently swallow a future `scenes/build/` or an addon shipping
+# a `dist/`. There is no `export_presets.cfg` yet; when there is, an export
+# path will not collide with these.
 *.egg-info/
-build/
-dist/
+/build/
+/dist/
+/sim/build/
+/sim/dist/
 
 # Generated rules data (Python harness only)
 rules/data/generated/
