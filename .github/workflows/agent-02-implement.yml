@@ -157,10 +157,21 @@ jobs:
       # agent-01-planner.yml): the next candidate is only tried when a
       # model is unavailable to this identity, never after a real failure,
       # the same rule every other workflow here follows.
-      IMPLEMENTOR_MODELS: >-
-        ${{ vars.IMPLEMENTOR_MODELS
+      # One list per vendor. The ids do not transfer between them, so these
+      # are separate variables rather than one list reinterpreted.
+      COPILOT_IMPLEMENTOR_MODELS: >-
+        ${{ vars.COPILOT_IMPLEMENTOR_MODELS
         || 'claude-opus-5,claude-sonnet-5,claude-haiku-4.5' }}
+      CLAUDE_IMPLEMENTOR_MODELS: >-
+        ${{ vars.CLAUDE_IMPLEMENTOR_MODELS
+        || 'claude-opus-5,claude-sonnet-5,claude-haiku-4-5' }}
       IMPLEMENTOR_MAX_AI_CREDITS: "150"
+      IMPLEMENTOR_MAX_TURNS: "60"
+
+      # The label that triggered this run, or empty on workflow_dispatch.
+      # Every path that releases the label reads it, so it is defined once
+      # here rather than resolved at each site.
+      TRIGGER_LABEL: ${{ github.event.label.name }}
 
       # "Resolve Implementor Model Tier" below can put a planner's per-task
       # recommendation in front of that list. These two bound it.
@@ -170,7 +181,10 @@ jobs:
       # quietly overrule it. The expression above cannot tell the two cases
       # apart once it has collapsed to a value, so the emptiness of the
       # variable is captured separately here, before the `||`.
-      IMPLEMENTOR_MODELS_PINNED: ${{ vars.IMPLEMENTOR_MODELS != '' }}
+      # Captured per vendor, before the `||` above collapses "unset" and
+      # "set to the default" into the same value.
+      COPILOT_IMPLEMENTOR_PINNED: ${{ vars.COPILOT_IMPLEMENTOR_MODELS != '' }}
+      CLAUDE_IMPLEMENTOR_PINNED: ${{ vars.CLAUDE_IMPLEMENTOR_MODELS != '' }}
 
       # Lower bound on what a planner may ask for, so the cheap tier can be
       # taken out of circulation repository-wide without editing the
@@ -542,12 +556,6 @@ jobs:
         if: steps.context.outputs.ok == 'true'
         env:
           VENDOR: ${{ steps.route.outputs.vendor }}
-          # The list used when no per-task tier applies. Vendor-specific
-          # for the same reason tier_models is: the ids do not transfer.
-          DEFAULT_MODELS: >-
-            ${{ steps.route.outputs.vendor == 'claude'
-            && 'claude-haiku-4-5,claude-sonnet-5,claude-opus-5'
-            || 'claude-haiku-4.5,claude-sonnet-5,claude-opus-5' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -619,11 +627,25 @@ jobs:
             esac
           }
 
-          if [ "$IMPLEMENTOR_MODELS_PINNED" = "true" ]; then
-            MODELS="$DEFAULT_MODELS"
-            REASON="IMPLEMENTOR_MODELS is set for this repository; the operator list wins over any per-task tier."
+          # The operator's list for the vendor that is answering, and whether
+          # they actually set it. Both are per-vendor: an operator who pinned
+          # the Copilot list has said nothing about Claude.
+          case "$VENDOR" in
+            copilot)
+              OPERATOR_MODELS="$COPILOT_IMPLEMENTOR_MODELS"
+              PINNED="$COPILOT_IMPLEMENTOR_PINNED"
+              ;;
+            claude)
+              OPERATOR_MODELS="$CLAUDE_IMPLEMENTOR_MODELS"
+              PINNED="$CLAUDE_IMPLEMENTOR_PINNED"
+              ;;
+          esac
+
+          if [ "$PINNED" = "true" ]; then
+            MODELS="$OPERATOR_MODELS"
+            REASON="The $VENDOR implementor list is set for this repository; the operator list wins over any per-task tier."
           elif [ -z "$TIER" ]; then
-            MODELS="$DEFAULT_MODELS"
+            MODELS="$OPERATOR_MODELS"
             REASON="No model:* label on this Issue; using the default list."
           else
             MODELS="$(tier_models "$TIER")"

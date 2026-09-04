@@ -799,6 +799,23 @@ jobs:
       # arrive here as `plan.json is missing`, so this step names which one it
       # was, records it in planner-failure.json, and lets the failure reporter
       # say it on the Issue.
+      # `run-agent-session` writes agent-session-failure.json when no model
+      # produced usable output. The reporter below reads planner-failure.json,
+      # which the extraction step writes for parse and schema failures -- but
+      # a session that never returned text never reaches that step. Without
+      # this bridge, that whole class of failure reaches the reporter with no
+      # evidence and it says nothing useful on the Issue.
+      - name: Record Session Failure
+        if: failure() && steps.duplicate_check.outputs.already_planned != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f agent-session-failure.json ] && [ ! -f planner-failure.json ]; then
+            cp agent-session-failure.json planner-failure.json
+            echo "Bridged agent-session-failure.json to planner-failure.json."
+          fi
+
       - name: Extract and Validate Planner JSON
         if: steps.duplicate_check.outputs.already_planned != 'true'
         shell: python

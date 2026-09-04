@@ -110,11 +110,22 @@ jobs:
       # One list per vendor, selected by the label's vendor segment. The ids
       # are NOT interchangeable between vendors -- see the note in
       # agent-01-planner.yml.
+      # The original default is preserved exactly, including
+      # `claude-sonnet-4.5` -- the intermediate id the comment on the tier
+      # step says is deliberately kept, because a tier list does not contain
+      # it and dropping it would narrow the fallback walk for no reason.
       COPILOT_FIXER_MODELS: >-
-        ${{ vars.COPILOT_FIXER_MODELS || 'claude-sonnet-5,claude-opus-5,claude-opus-4.8' }}
+        ${{ vars.COPILOT_FIXER_MODELS
+        || 'claude-sonnet-5,claude-sonnet-4.5,claude-opus-5' }}
 
       CLAUDE_FIXER_MODELS: >-
-        ${{ vars.CLAUDE_FIXER_MODELS || 'claude-sonnet-5,claude-opus-5,claude-opus-4-8' }}
+        ${{ vars.CLAUDE_FIXER_MODELS
+        || 'claude-sonnet-5,claude-opus-5,claude-opus-4-8' }}
+
+      # Captured per vendor, before the `||` collapses "unset" and "set to
+      # the default" into the same value.
+      COPILOT_FIXER_PINNED: ${{ vars.COPILOT_FIXER_MODELS != '' }}
+      CLAUDE_FIXER_PINNED: ${{ vars.CLAUDE_FIXER_MODELS != '' }}
 
       # The label that triggered this run, or empty. Consumed at the end, so
       # it must be readable from every step.
@@ -126,7 +137,6 @@ jobs:
       # escalation below does not overrule it. Captured before the `||`
       # because the expression above cannot tell a set variable from its
       # own default once it has collapsed to a value.
-      FIXER_MODELS_PINNED: ${{ vars.FIXER_MODELS != '' }}
 
       # "Resolve Fixer Model Tier" below buys a stronger model when a pull
       # request keeps coming back. A task the planner called cheap and the
@@ -414,15 +424,27 @@ jobs:
         if: steps.build.outputs.verdict == 'FIX'
         env:
           VENDOR: ${{ steps.route.outputs.vendor }}
-          # The list used when no per-task tier applies. Vendor-specific
-          # for the same reason tier_models is: the ids do not transfer.
-          DEFAULT_MODELS: >-
-            ${{ steps.route.outputs.vendor == 'claude'
-            && 'claude-sonnet-5,claude-opus-5,claude-opus-4-8'
-            || 'claude-sonnet-5,claude-opus-5,claude-opus-4.8' }}
         shell: bash
         run: |
           set -euo pipefail
+
+          # Resolved first, because the pinned branch below reads both. The
+          # operator's list is per-vendor: pinning the Copilot list says
+          # nothing about what Claude should run.
+          case "$VENDOR" in
+            copilot)
+              FIXER_MODELS="$COPILOT_FIXER_MODELS"
+              FIXER_MODELS_PINNED="$COPILOT_FIXER_PINNED"
+              ;;
+            claude)
+              FIXER_MODELS="$CLAUDE_FIXER_MODELS"
+              FIXER_MODELS_PINNED="$CLAUDE_FIXER_PINNED"
+              ;;
+            *)
+              echo "::error::Unknown vendor '$VENDOR'."
+              exit 1
+              ;;
+          esac
 
           rank() {
             case "$1" in
@@ -443,7 +465,7 @@ jobs:
 
           if [ "$FIXER_MODELS_PINNED" = "true" ]; then
             echo "models=$FIXER_MODELS" >> "$GITHUB_OUTPUT"
-            echo "FIXER_MODELS is set for this repository; using it as-is." \
+            echo "The $VENDOR fixer list is set for this repository; using it as-is." \
                  "Per-task tier and escalation are both skipped."
             echo "Fixer model preference list: $FIXER_MODELS"
             exit 0
@@ -569,7 +591,7 @@ jobs:
           }
 
           if [ "$EFFECTIVE" -le "$BASE_RANK" ]; then
-            MODELS="$DEFAULT_MODELS"
+            MODELS="$FIXER_MODELS"
           else
             MODELS="$(tier_models "$TIER")"
           fi
