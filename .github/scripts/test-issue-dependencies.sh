@@ -462,7 +462,7 @@ echo "Reading the chain fails closed"
 # The two enforcement points now read the REST dependencies endpoint, which
 # has a known shape and no `gh` version floor. Pin that they do not drift back.
 for guard in \
-  "$repo_root/.github/workflows/agent-02-execute.yml" \
+  "$repo_root/.github/workflows/agent-02-implement.yml" \
   "$repo_root/.github/workflows/issue-linking.yml"
 do
   name="$(basename "$guard")"

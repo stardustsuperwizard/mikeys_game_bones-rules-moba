@@ -62,7 +62,7 @@ What differs is which sections the body carries, and therefore what you must
 derive rather than copy. A defect report is not out of scope for planning and
 must never be sent back to be refiled as a Feature.
 
-One vocabulary note: sub-issue bodies, the executor contract, and the
+One vocabulary note: sub-issue bodies, the implementor contract, and the
 `Parent Feature:` provenance field all say "parent Feature" for the Issue a
 task was cut from, whatever its actual type. That is the contract's name for
 the relationship, not a claim that the parent was a Feature. Do not rewrite it
@@ -153,9 +153,9 @@ Under-calling costs more than over-calling. A model that cannot finish burns
 its session, comes back through review, and spends a fix cycle. When a task
 sits between two tiers, take the higher one.
 
-The tier is a preference, not a pin. The executor uses it as the first
+The tier is a preference, not a pin. The implementor uses it as the first
 candidate in a preference list that still escalates when a model is
-unavailable, and an operator who sets the `EXECUTOR_MODELS` repository
+unavailable, and an operator who sets the `IMPLEMENTOR_MODELS` repository
 variable outranks it entirely.
 
 ## Procedure
@@ -187,7 +187,7 @@ For each Intake Issue:
 
    That comment plus the sub-issue bodies are the durable handoff contract.
    Execution sessions start cold and never see your reasoning, so anything an
-   executor needs must be written into the sub-issue itself, not left in the
+   implementor needs must be written into the sub-issue itself, not left in the
    plan comment and not assumed.
 
 8. Classify each implementation unit as either:
@@ -196,7 +196,7 @@ For each Intake Issue:
    - PROMOTED IMPLEMENTATION TASK.
 
 9. Keep INTERNAL TASKS inside the plan comment and delegate them directly to
-   the `executor` agent when appropriate.
+   the `implementor` agent when appropriate.
 
 10. For every PROMOTED IMPLEMENTATION TASK, create a GitHub Implementation
     Task Issue according to the Split-Session Sub-Issue Contract below.
@@ -213,7 +213,7 @@ For each Intake Issue:
     The feature may proceed toward completion.
 
     FIX:
-    Delegate the bounded correction to the executor. Do not reopen the
+    Delegate the bounded correction to the implementor. Do not reopen the
     architecture unless necessary.
 
     PLANNING FAILURE:

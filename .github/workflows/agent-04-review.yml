@@ -10,7 +10,7 @@ name: Agent - PR Review
 # Execute's own pre-PR pass, not as a sequential step in that flow.
 #
 # The actual work happens in three composite actions shared with
-# agent-02-execute.yml's pre-PR review gate and agent-05-fix.yml:
+# agent-02-implement.yml's pre-PR review gate and agent-05-fix.yml:
 #
 #   - build-review-request  -- pulls the PR/task/diff and writes the prompt
 #   - run-agent-session     -- runs the model, walking a fallback list

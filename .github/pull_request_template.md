@@ -39,8 +39,8 @@ Closes #<issue-number>
 
 <!-- Work found but deliberately not done.
 
-     An executor session working an [impl] Issue lists them here and does not
-     file them. The planner decides what becomes work; an executor filing its
+     An implementor session working an [impl] Issue lists them here and does not
+     file them. The planner decides what becomes work; an implementor filing its
      own discoveries is how scope creeps back in, one "while I was in there"
      Issue at a time.
 

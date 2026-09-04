@@ -13,7 +13,7 @@ of that list, and both are string matching rather than judgment:
   `.github/workflows/**` or `.github/actions/**` cannot be pushed by
   `GITHUB_TOKEN`, so the two workflows that push must refuse before paying
   for a session. That is what RESTRICTED_PREFIXES below is for. It is asked
-  from two directions: `agent-02-execute.yml` asks it of an Issue's declared
+  from two directions: `agent-02-implement.yml` asks it of an Issue's declared
   expected files, before there is any diff to look at (`evaluate`), and
   `agent-05-fix.yml` asks it of a pull request's actual changed files
   (`evaluate_paths`). Intent versus fact -- same prefix list either way.
@@ -30,7 +30,7 @@ rejected at the remote:
        permission)
 
 The failure is clean but expensive: it lands at the *push*, after a full
-executor session has already been paid for and produced a complete
+implementor session has already been paid for and produced a complete
 implementation, and it is only diagnosable by reading the run log. #167's
 decomposition hit it three times.
 
@@ -49,10 +49,10 @@ Usage:
     gh issue view 168 --json body --jq .body | task_scope.py
 
     {
-      "executor_eligible": false,
+      "implementor_eligible": false,
       "reason": "workflow_scope",
-      "expected_paths": [".github/workflows/agent-02-execute.yml"],
-      "restricted_paths": [".github/workflows/agent-02-execute.yml"]
+      "expected_paths": [".github/workflows/agent-02-implement.yml"],
+      "restricted_paths": [".github/workflows/agent-02-implement.yml"]
     }
 
     task_scope.py --paths-file pr-files.txt      # one path per line
@@ -77,14 +77,14 @@ import sys
 EXPECTED_FILES_HEADING = "Files or Subsystems Expected to Change"
 
 # Paths GITHUB_TOKEN cannot write. Keep in step with the prose in
-# agent-01-planner.yml's not-executor-eligible run block and
-# agent-02-execute.yml's workflow_scope guard message.
+# agent-01-planner.yml's not-implementor-eligible run block and
+# agent-02-implement.yml's workflow_scope guard message.
 RESTRICTED_PREFIXES = (
     ".github/workflows/",
     ".github/actions/",
 )
 
-# Paths where a weak or unknown model is a bad bet, but which the executor can
+# Paths where a weak or unknown model is a bad bet, but which the implementor can
 # still push. Advisory only.
 DELICATE_SUFFIXES = (".tscn", ".tres")
 DELICATE_NAMES = ("project.godot",)
@@ -208,14 +208,14 @@ def restricted_paths(paths: set[str]) -> list[str]:
 
 
 def evaluate(body: str) -> dict:
-    """Decide whether `agent-02-execute.yml` can run this Issue.
+    """Decide whether `agent-02-implement.yml` can run this Issue.
 
     `reason` is empty when eligible, so a caller can branch on either field.
     """
     paths = expected_paths(body)
     restricted = restricted_paths(paths)
     return {
-        "executor_eligible": not restricted,
+        "implementor_eligible": not restricted,
         "reason": "workflow_scope" if restricted else "",
         "expected_paths": sorted(paths),
         "restricted_paths": restricted,
@@ -227,12 +227,12 @@ def evaluate_paths(paths) -> dict:
     """Decide whether a workflow-token push can carry these paths.
 
     The companion to `evaluate()`, for the caller that has a *diff* rather
-    than an Issue. `agent-02-execute.yml` asks about a task's declared
+    than an Issue. `agent-02-implement.yml` asks about a task's declared
     expected files, which are a statement of intent and can be wrong or
     missing; `agent-05-fix.yml` asks about a pull request's actual changed
     files, which are exactly what its push will carry. Same restriction, same
     prefix list, different question -- hence `pushable` rather than
-    `executor_eligible`.
+    `implementor_eligible`.
 
     No parsing here: these arrive as literal paths from the pull request's
     file list, not quoted out of prose. They are still normalized, so a
@@ -268,7 +268,7 @@ def main() -> int:
         help=(
             "File holding one changed path per line, as from "
             "`gh api .../pulls/N/files --jq '.[].filename'`. Reports "
-            "pushability instead of executor eligibility."
+            "pushability instead of implementor eligibility."
         ),
     )
     args = parser.parse_args()

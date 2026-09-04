@@ -49,7 +49,7 @@ Newerth kept `hon_shared` separate from `hon_client` and `hon_server`, and it is
   It requires no edit to `scripts/action_runner.gd` or `scripts/authority.gd`, and no command
   registry, command-kind enum, or dispatch table. `ActionRunner.run()` routes every `Action`
   through `Authority.can_perform()` uniformly; each command type is a new `Action` subclass,
-  not a new branch in an executor. Demonstrated by
+  not a new branch in an implementor. Demonstrated by
   `rules/tests/command_taxonomy_contract_test.gd`.
 
 ## Naming

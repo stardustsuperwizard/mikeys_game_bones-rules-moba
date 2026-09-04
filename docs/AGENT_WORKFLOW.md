@@ -16,7 +16,7 @@ IDEs, Eclipse, or Xcode."
 
 On github.com the model comes from the **picker at task kickoff**, and that
 single model covers the whole session — the parent agent and every subagent
-it delegates to. A planner that delegates to `executor` in-session
+it delegates to. A planner that delegates to `implementor` in-session
 runs the implementer on the planner's expensive model.
 
 Consequence: per-role model routing on github.com requires **separate
@@ -31,13 +31,13 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 | Role | Model | Where the model is set |
 | --- | --- | --- |
 | Planner | Claude Opus 5, then fallbacks | `PLANNER_MODELS` env / `vars.PLANNER_MODELS` in `agent-01-planner.yml` |
-| Executor — native cloud agent | Claude Haiku 4.5 | The picker, when **you** dispatch — see *Four entry points* below. |
-| Executor — scripted (`agent:execute`) | Per task, from the Issue's `model:*` label; Claude Opus 5, then Sonnet 5, then Haiku 4.5 when unlabelled | `model:*` label → `agent-02-execute.yml`'s *Resolve Executor Model Tier*; default and override in `EXECUTOR_MODELS` env / `vars.EXECUTOR_MODELS`. See *The executor's tier is chosen per task* below |
-| Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-04-review.yml` (also used by `agent-02-execute.yml`'s pre-PR self-review) |
-| Fixer | Claude Sonnet 5, then fallbacks — climbing a tier per repeat round | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-execute.yml`'s pre-PR self-fix); escalation in its *Resolve Fixer Model Tier* step |
+| Implementor — native cloud agent | Claude Haiku 4.5 | The picker, when **you** dispatch — see *Four entry points* below. |
+| Implementor — scripted (`agent:execute`) | Per task, from the Issue's `model:*` label; Claude Opus 5, then Sonnet 5, then Haiku 4.5 when unlabelled | `model:*` label → `agent-02-implement.yml`'s *Resolve Implementor Model Tier*; default and override in `IMPLEMENTOR_MODELS` env / `vars.IMPLEMENTOR_MODELS`. See *The implementor's tier is chosen per task* below |
+| Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-04-review.yml` (also used by `agent-02-implement.yml`'s pre-PR self-review) |
+| Fixer | Claude Sonnet 5, then fallbacks — climbing a tier per repeat round | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-implement.yml`'s pre-PR self-fix); escalation in its *Resolve Fixer Model Tier* step |
 | Lint fixer | Claude Haiku 4.5, then Sonnet 5 | `LINT_FIXER_MODELS` env / `vars.LINT_FIXER_MODELS` in `gdscript-lint.yml` |
 
-Planner, the scripted executor, reviewer, and fixer are all Copilot CLI
+Planner, the scripted implementor, reviewer, and fixer are all Copilot CLI
 sessions, so each one's model is a string in version control rather than a
 dropdown someone has to remember. All four are overridable with a repository
 variable, so changing one does not need a commit. Only the native cloud
@@ -56,7 +56,7 @@ without a human decision first.
 
 ### All four are lists, because CLI availability is per-identity
 
-`PLANNER_MODELS`, `EXECUTOR_MODELS`, `REVIEWER_MODELS`, and `FIXER_MODELS`
+`PLANNER_MODELS`, `IMPLEMENTOR_MODELS`, `REVIEWER_MODELS`, and `FIXER_MODELS`
 are comma-separated preference lists, resolved the same way for all four.
 Planner and reviewer default to the strong tier:
 
@@ -64,9 +64,9 @@ Planner and reviewer default to the strong tier:
 claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5
 ```
 
-Executor and fixer default to a cheaper tier instead — bounded,
+Implementor and fixer default to a cheaper tier instead — bounded,
 contract-driven work doesn't need the top model the way blind planning or
-review does. See `agent-02-execute.yml` and `agent-05-fix.yml` for their
+review does. See `agent-02-implement.yml` and `agent-05-fix.yml` for their
 exact lists.
 
 ### Claude Code gets one fallback chain, not four lists
@@ -86,11 +86,11 @@ session**, applied to every subagent in it:
 ```
 
 **The chain only ever escalates, and that is the whole design.** A chain is
-session-wide, so the same list that catches an unavailable Haiku executor also
+session-wide, so the same list that catches an unavailable Haiku implementor also
 catches an unavailable Opus reviewer. A natural-looking
 `["claude-sonnet-5", "claude-haiku-4-5"]` would quietly hand a Haiku model the
 review of a pull request the planner deliberately tiered to Opus — the exact
-outcome `EXECUTOR_MODELS` refuses when its `haiku` tier falls *up* through
+outcome `IMPLEMENTOR_MODELS` refuses when its `haiku` tier falls *up* through
 `claude-sonnet-5` to `claude-opus-5` rather than down. Escalate-only is the
 one shape a single shared chain can take without contradicting the tiering
 everything else in this document is built on. It costs more only when a model
@@ -111,7 +111,7 @@ Three things about it are easy to get wrong.
   purpose: it is the personal override, and a personal override that reached
   cloud sessions would not be one.
 - **These are Claude Code model IDs, and they use dashes.** `claude-opus-4-8`,
-  not the `claude-opus-4.8` that appears in `EXECUTOR_MODELS` above — that is
+  not the `claude-opus-4.8` that appears in `IMPLEMENTOR_MODELS` above — that is
   the Copilot CLI spelling. This is the same two-namespace hazard
   *`model:` in an agent file takes a display name* describes for agent files
   and `--model`, and the failure is quiet: an unreachable entry is skipped and
@@ -138,10 +138,10 @@ failure, because a cheap retry after a genuine failure defeats whichever tier
 the caller chose. Claude Code caps the chain at three after removing
 duplicates, and a switch lasts one turn.
 
-### The executor's tier is chosen per task
+### The implementor's tier is chosen per task
 
 Every other role in the table gets one list for the whole repository. The
-executor gets a starting point per Issue, because the tasks it runs are not
+implementor gets a starting point per Issue, because the tasks it runs are not
 alike: adding a field and its accessor is not the same work as changing how
 authority is resolved, and paying the same model for both wastes money on one
 and risks the other.
@@ -167,10 +167,10 @@ warns elsewhere against copying one spelling into the other. An Issue that
 named an id would bind the task to whichever pipeline used that namespace. A
 tier is meaningful to both, and each workflow maps it to its own ids.
 
-Both pipelines do. `agent-02-execute.yml` maps the tier to Copilot CLI ids;
+Both pipelines do. `agent-02-implement.yml` maps the tier to Copilot CLI ids;
 `agent-06-claude.yml`'s *Apply Per-Task Model Tier* step maps the same label
 to Claude Code ids for `claude:execute` and `claude:fix`. One decision, made
-once by the planner, read by whichever executor the label happens to summon.
+once by the planner, read by whichever implementor the label happens to summon.
 `claude:plan` and `claude:review` keep their configured models — planning and
 review are repository-wide judgements, not per-task ones.
 
@@ -181,7 +181,7 @@ pull request fixed once by one pipeline therefore escalates on the other,
 which is the point of sharing a marker rather than each keeping its own tally.
 
 The two bounds that hold on the Copilot side hold here as well, and for the
-same reasons. Setting `vars.CLAUDE_EXECUTOR_MODEL` or `vars.CLAUDE_FIXER_MODEL`
+same reasons. Setting `vars.CLAUDE_IMPLEMENTOR_MODEL` or `vars.CLAUDE_FIXER_MODEL`
 skips tier resolution entirely for that role: an operator naming a model has
 made a decision about this repository, and neither a planner's guess about one
 task nor an escalation counter overrules it. And `claude:fix` treats its
@@ -202,12 +202,12 @@ Four rules bound what the recommendation can do:
   while a tier is a floor someone chose, and falling below it would silently
   run a task on less model than was asked for. Unavailability should cost
   money, not correctness.
-- **An operator outranks the planner.** Setting `vars.EXECUTOR_MODELS` is a
+- **An operator outranks the planner.** Setting `vars.IMPLEMENTOR_MODELS` is a
   deliberate decision about this repository; a planner's guess about one task
-  does not overrule it. `vars.EXECUTOR_TIER_FLOOR` (default `haiku`) raises
+  does not overrule it. `vars.IMPLEMENTOR_TIER_FLOOR` (default `haiku`) raises
   the lower bound instead, without editing the rubric or relabelling anything.
-  `vars.CLAUDE_EXECUTOR_TIER_FLOOR` is its counterpart on the Claude
-  pipeline. Both bind the executor only: the fixers already have a floor in
+  `vars.CLAUDE_IMPLEMENTOR_TIER_FLOOR` is its counterpart on the Claude
+  pipeline. Both bind the implementor only: the fixers already have a floor in
   the model they are configured with, and a floor bounds a recommendation
   rather than inventing one, so an Issue carrying no tier at all is not
   raised to it — it takes the configured default as before.
@@ -221,9 +221,9 @@ The three labels do have to exist for the hint to land: create `model:haiku`,
 `model:sonnet` and `model:opus` once. Until then, planning and execution both
 work, and the planner logs each label it could not apply.
 
-**What this leans on.** A cheaper executor is only safe because a strong
+**What this leans on.** A cheaper implementor is only safe because a strong
 reviewer follows it — the reasoning this document already gives for the
-executor's tier being cheaper than the planner's. This change leans harder on
+implementor's tier being cheaper than the planner's. This change leans harder on
 that, so the reviewer staying on the strong tier stops being a preference and
 becomes the thing holding the arrangement up.
 
@@ -246,7 +246,7 @@ Three properties are worth stating, because each one is a decision:
 
 - **It only ever raises.** The base is `FIXER_BASE_TIER` (default `sonnet`),
   and the Issue's `model:*` tier applies only when it is *higher* than that. A
-  cheap executor is a cost decision made before the code existed; the fixer is
+  cheap implementor is a cost decision made before the code existed; the fixer is
   a correction responding to a reviewer who has read the code, and spending
   less on it than this repository already does would be a regression wearing a
   feature's clothes. So `model:haiku` never produces a cheaper fixer — but
@@ -266,7 +266,7 @@ id in `FIXER_MODELS`, so that retuning that list later does not silently move
 where the climb starts.
 
 An explicitly set `vars.FIXER_MODELS` skips all of it, the same way it does on
-the executor side: if you name the list, you own it, including on the fourth
+the implementor side: if you name the list, you own it, including on the fourth
 round. And the ceiling is real — once a pull request is at `opus`, further
 rounds cannot buy anything, and the run log says so. A fix that keeps failing
 at the top tier is telling you the finding is not a model problem.
@@ -299,7 +299,7 @@ elsewhere would burn credits reproducing the same failure.
 
 **Every entry in the planner's and reviewer's lists stays in the strong
 tier.** A silent fallback to Haiku would defeat the reason planning and
-review are paid for at all. Executor and fixer default to the cheap tier
+review are paid for at all. Implementor and fixer default to the cheap tier
 deliberately, for the opposite reason — see *Model routing* above. Whichever
 tier a role's list draws from, if the whole list is refused the job fails
 loudly with the list it tried rather than downgrading out of tier.
@@ -334,10 +334,10 @@ serialization is unforgiving.
 
 That constraint is specific to the cloud agent's assignment API, though — it
 doesn't block automation in general, only automation that goes through that
-API. `agent-02-execute.yml` sidesteps it by not using that API at all: it
+API. `agent-02-implement.yml` sidesteps it by not using that API at all: it
 runs Copilot CLI directly inside Actions, the same trick `agent-01-planner.yml`
 and `agent-04-review.yml` already use, driven by a preference list
-(`EXECUTOR_MODELS`) instead of a picker. There was once an `agent:execute`
+(`IMPLEMENTOR_MODELS`) instead of a picker. There was once an `agent:execute`
 label that dispatched the cloud agent blind onto Auto; that version was
 removed. The current `agent:execute` is a different mechanism entirely — a
 scripted CLI session, not a cloud-agent assignment — and is very much
@@ -347,10 +347,10 @@ So there are four ways in, across two products:
 
 | Entry point | Model | Custom agent | Linked to the Issue |
 | --- | --- | --- | --- |
-| **Desktop agents panel** — start a session | **your choice** | `executor` | via the Run This Task block |
+| **Desktop agents panel** — start a session | **your choice** | `implementor` | via the Run This Task block |
 | **GitHub Mobile** — new agent session | **your choice**, *or* a custom agent — never both | either, not both | via the Run This Task block |
 | Issue → assign Copilot | **your choice** | no | yes |
-| `agent:execute` label — scripted, not the cloud agent | preference list, led by the Issue's `model:*` tier (`EXECUTOR_MODELS` otherwise) | n/a — not a custom-agent session | yes, `Closes #n` written by the workflow itself |
+| `agent:execute` label — scripted, not the cloud agent | preference list, led by the Issue's `model:*` tier (`IMPLEMENTOR_MODELS` otherwise) | n/a — not a custom-agent session | yes, `Closes #n` written by the workflow itself |
 
 Only the desktop panel offers both pickers at once among the three
 cloud-agent entry points. Mobile makes them exclusive: choose Copilot Agent
@@ -359,7 +359,7 @@ disappears — which, per the documentation quoted above, means Auto. The
 assignee screen offers a model and no agent anywhere.
 
 **For the three cloud-agent entry points: take the model, every time.** The
-`executor` profile is worth nothing to a cloud session: its `tools:` list is
+`implementor` profile is worth nothing to a cloud session: its `tools:` list is
 ignored because the cloud agent's toolset is fixed, its `model:` line is
 ignored because you just picked one, and its prose is mirrored into
 *Executing an Implementation Task* in `.github/copilot-instructions.md`,
@@ -390,7 +390,7 @@ All three agent files carry a `model:` line again:
 | File | `model:` |
 | --- | --- |
 | `01-planner.agent.md` | `Claude Opus 5` |
-| `02-executor.agent.md` | `Claude Haiku 4.5` |
+| `02-implementor.agent.md` | `Claude Haiku 4.5` |
 | `03-reviewer.agent.md` | `Claude Opus 5` |
 
 They were removed once on the theory that `Claude Haiku 4.5` is a display
@@ -465,7 +465,7 @@ Two consequences:
 1. **Claude Haiku 4.5 and Claude Opus 5 are both pickable** for the cloud
    agent. Reading the Auto table alone suggests otherwise; it is not an
    availability list.
-2. **Claude Sonnet 5 is in neither.** For the executor the Anthropic choice is
+2. **Claude Sonnet 5 is in neither.** For the implementor the Anthropic choice is
    Haiku 4.5 or Opus 5 — cheap or 5×, with nothing in between. Sonnet 4.6 is
    reachable only by taking Auto, which means accepting a random draw from a
    pool that is three-quarters non-Anthropic.
@@ -506,7 +506,7 @@ authoritative. Four spend AI credits (planner, execute, review, fix); two are
 plumbing and cost nothing (dashboard, rollup). The seventh,
 `agent-06-claude.yml`, is the Claude Code side of the same four roles and
 spends a Claude subscription or Claude API tokens rather than AI credits; the
-diagram below covers the Copilot path only, and *Two executors* covers that
+diagram below covers the Copilot path only, and *Two implementors* covers that
 one. `agent-00-dashboard.yml` no
 longer runs on every event — it renders on demand now. See *Issue views* and
 *The control plane* below.
@@ -543,7 +543,7 @@ Implementation Task
         │                             │  agent.)                  │
         ▼                             ▼
 ┌─────────────────────────────┐  Copilot Cloud Agent
-│ agent-02-execute.yml        │       │
+│ agent-02-implement.yml        │       │
 │ Copilot CLI, spends AI      │       ▼
 │ credits: implements,        │  draft PR
 │ opens a draft PR, then      │
@@ -619,7 +619,7 @@ points, two different products* above.
 | `agent:plan` label | You | `agent-01-planner.yml` | This Issue is ready to be planned |
 | **a pasted agent session** | You | — | Run this task via the native cloud agent, on the model you picked |
 | **assigning Copilot** | You | — | Run this task via the native cloud agent, on the model you picked |
-| `agent:execute` label | You | `agent-02-execute.yml` | Implement this Task via the scripted CLI executor — no live picker; walks a preference list, opens the PR, then self-reviews and self-fixes against it |
+| `agent:execute` label | You | `agent-02-implement.yml` | Implement this Task via the scripted CLI implementor — no live picker; walks a preference list, opens the PR, then self-reviews and self-fixes against it |
 | `agent:review` label | You | `agent-04-review.yml` | Re-review this PR |
 | `agent:fix` label | You | `agent-05-fix.yml` | Apply the bounded correction the last `FIX` verdict asked for |
 | `planned` label | Planner | — | Intake Issue has been decomposed |
@@ -669,10 +669,10 @@ depends on the color. Checked live against the repository on 2026-08-22:
 | `machine` | `#70A8BD` | `agent-01-planner.yml` |
 | `human-credentials` | `#D4C5F9` | `agent-01-planner.yml` |
 | `blocker` | `#B23F00` | `agent-01-planner.yml` and `sync-issue-dependencies.py` (duplicated, not shared) |
-| `review:pass` | `#0E8A16` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
-| `review:fix` | `#D93F0B` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
-| `review:planning-failure` | `#B60205` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
-| `review:design-ambiguity` | `#FBCA04` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
+| `review:pass` | `#0E8A16` | `agent-04-review.yml` and `agent-02-implement.yml` (duplicated, not shared) |
+| `review:fix` | `#D93F0B` | `agent-04-review.yml` and `agent-02-implement.yml` (duplicated, not shared) |
+| `review:planning-failure` | `#B60205` | `agent-04-review.yml` and `agent-02-implement.yml` (duplicated, not shared) |
+| `review:design-ambiguity` | `#FBCA04` | `agent-04-review.yml` and `agent-02-implement.yml` (duplicated, not shared) |
 | `dashboard` | `#5319E7` | `agent-00-dashboard.yml` |
 | `dashboard:update` | `#5319E7` | `agent-00-dashboard.yml` |
 
@@ -704,7 +704,7 @@ The fix is not better prose. It is removing the capability:
 Planner and reviewer therefore run as Copilot CLI sessions inside Actions,
 where tools can be taken away entirely — `agent-01-planner.yml` and
 `agent-04-review.yml` both exclude everything but reading. The scripted
-executor (`agent-02-execute.yml`) and the fixer (`agent-05-fix.yml`) are
+implementor (`agent-02-implement.yml`) and the fixer (`agent-05-fix.yml`) are
 Copilot CLI sessions too, but keep `edit`/`execute` — only `task` and
 `write_agent` (sub-agent spawning) are excluded — because writing code and
 committing is exactly their job. The one role that still runs *with* the
@@ -836,7 +836,7 @@ paste. `issue-linking.yml` handles the closing-reference bookkeeping this
 path needs, since a pasted session gets a free-text description instead of a
 form.
 
-**The scripted executor, `agent-02-execute.yml`.** Add the `agent:execute`
+**The scripted implementor, `agent-02-implement.yml`.** Add the `agent:execute`
 label instead (works from GitHub Mobile) and the workflow does the rest with
 no picker involved:
 
@@ -845,7 +845,7 @@ no picker involved:
    push (see *Paths the agent workflows cannot push*), and has no pull
    request already open for it — any failure gets a comment explaining which,
    and the label removed, not a red run.
-2. Runs a Copilot CLI session (`EXECUTOR_MODELS`) against the Issue body plus
+2. Runs a Copilot CLI session (`IMPLEMENTOR_MODELS`) against the Issue body plus
    `AGENTS.md` and `.github/copilot-instructions.md`.
 3. Requires an actual commit to exist afterward — not just a session that
    talked as if it finished — then immediately opens the pull request
@@ -894,7 +894,7 @@ push is rejected at the remote:
 ```
 
 That rejection lands at the *last* step of an execution run. Before this
-check existed, a task expecting those paths ran a full executor session on
+check existed, a task expecting those paths ran a full implementor session on
 `claude-opus-5`, produced a complete implementation, and lost all of it at
 `Push Branch and Open Pull Request` — diagnosable only by reading the run
 log, and priced at a whole session either way. #167's decomposition did it
@@ -907,9 +907,9 @@ out of `.github/scripts/task_scope.py`:
 
 - **The planner** marks such a task when it generates it — `human-credentials`
   alongside `implementation` and `machine`, and a **Run This Task** block
-  that says the task is not runnable by the Copilot executor and what to do
+  that says the task is not runnable by the Copilot implementor and what to do
   instead, in place of the usual paste-this-into-a-session instructions.
-- **The executor** refuses it. The `workflow_scope` guard sits with the other
+- **The implementor** refuses it. The `workflow_scope` guard sits with the other
   pre-flight checks in `Resolve Implementation Task Issue`, so a hand-written
   `[impl]` Issue the planner never saw is caught too. Adding `agent:execute`
   gets a comment naming the restriction and the alternative, and the label
@@ -920,8 +920,8 @@ out of `.github/scripts/task_scope.py`:
 - **The control plane** prints 🔑 against it, because *Ready to dispatch*
   otherwise tells you to paste it into a Copilot session.
 
-The executor and the fixer ask the same question from opposite directions,
-and the difference matters. The executor runs before any diff exists, so it
+The implementor and the fixer ask the same question from opposite directions,
+and the difference matters. The implementor runs before any diff exists, so it
 asks about the Issue's *declared expected files* — a statement of intent,
 which can be wrong, vague, or absent. The fixer has a pull request in hand,
 so it asks about its *actual changed files*, which are exactly what the push
@@ -943,12 +943,12 @@ also that the REST key is `filename` where GraphQL's is `path`; the wrong
 one yields an empty list rather than an error. The same module supplies the
 delicate-paths rule behind the control plane's ⚠️.
 
-The fixer's exposure is the one the executor guard could not close. Since
-the executor now refuses a workflow-scoped Issue outright, no `agent-exec/*`
+The fixer's exposure is the one the implementor guard could not close. Since
+the implementor now refuses a workflow-scoped Issue outright, no `agent-exec/*`
 branch touching those paths is ever produced by automation — but a pull
 request authored by a human-credentialed session carries exactly those edits,
 goes through the same reviewer, and can collect a `FIX` verdict like any
-other. Its failure was also the worse of the two: the executor's rejected
+other. Its failure was also the worse of the two: the implementor's rejected
 push left no branch behind, whereas the fixer commits onto an existing
 branch that already carries work, so the correction lived only on the runner
 and the pull request was left untouched.
@@ -978,11 +978,11 @@ the same whether a session validated, skipped validation and said so, or
 merely claimed a run it never made — all three have happened.
 
 So the body leads with a `## Workflow-verified validation` section that only
-`agent-02-execute.yml` writes, and the pull request stays a draft until that
-run passes. **A draft executor PR is one no verified validation stands
+`agent-02-implement.yml` writes, and the pull request stays a draft until that
+run passes. **A draft implementor PR is one no verified validation stands
 behind.** Read the section, not the report.
 
-This is load-bearing on one specific path. An executor is told not to commit
+This is load-bearing on one specific path. An implementor is told not to commit
 work it has not validated, and one that follows that rule leaves the tree
 dirty; `Commit Leftover Changes` then commits it anyway, so the work is not
 thrown away. That is the right trade — but it manufactures the very "a
@@ -1015,7 +1015,7 @@ different claim from "this commit validates".
 So both workflows that push agent-authored commits end with a separate
 `needs:`-gated job, `validate-pushed-commit`, that no session touches:
 
-- `agent-02-execute.yml` → `Independent Validation (agent push)`, check run
+- `agent-02-implement.yml` → `Independent Validation (agent push)`, check run
   `Godot Validation (agent-02 execute)`
 - `agent-05-fix.yml` → `Independent Validation (agent fix)`, check run
   `Godot Validation (agent-05 fix)`
@@ -1033,7 +1033,7 @@ callers:
 | Caller | Ref checked out | `head-sha` |
 | --- | --- | --- |
 | `godot-ci-validation.yml` | the caller's default (the PR merge ref) | none |
-| `agent-02-execute.yml` | the executor's pushed SHA | that SHA |
+| `agent-02-implement.yml` | the implementor's pushed SHA | that SHA |
 | `agent-05-fix.yml` | the fixer's pushed SHA | that SHA |
 
 `godot-ci-validation.yml` still owns the human-authored `pull_request` path,
@@ -1065,14 +1065,14 @@ pull request is a decision for a human.
 Run it by hand against any Issue number to re-check:
 
 ```bash
-gh workflow run agent-02-execute.yml -f issue_number=68
+gh workflow run agent-02-implement.yml -f issue_number=68
 ```
 
 ### Step 3 — Review
 
 `agent-04-review.yml` runs automatically when a `copilot/*` branch's PR is
 marked ready for review, or any time you add **`agent:review`**. Only the
-native cloud agent's branches match `copilot/*` — the scripted executor's
+native cloud agent's branches match `copilot/*` — the scripted implementor's
 `agent-exec/*` branches and a Claude Code PR's branch don't, so both need the
 manual label.
 
@@ -1121,7 +1121,7 @@ refusal is not a malfunction.
 The equivalent local path is `/fixer <pr-number>` or the
 `fixer` Claude Code agent; commenting `@copilot` on the PR still works too,
 outside this repository's scripted path. A fix push gets the same
-independent check run an executor push does — see *The independent
+independent check run an implementor push does — see *The independent
 validation gate*.
 
 If a task takes more than two `FIX` cycles, that is a planning problem, not an
@@ -1175,7 +1175,7 @@ Each implementation sub-issue:
   adds and a pre-applied trigger is a spent one;
 - records sibling ordering in its `## Dependencies` table, which becomes a
   GitHub issue dependency;
-- is the only Issue assigned to the executor; and
+- is the only Issue assigned to the implementor; and
 - is closed by its own implementation PR.
 
 The parent Feature stays open while its sub-issues are implemented.
@@ -1289,7 +1289,7 @@ backlog filed before this existed.
 #### Reading the chain fails closed
 
 Creating the chain is half of it. Three places *read* it to decide whether
-work may start — `agent-02-execute.yml`'s refusal, `issue-linking.yml`'s
+work may start — `agent-02-implement.yml`'s refusal, `issue-linking.yml`'s
 warning, and the control plane's *Ready to dispatch* bucket — and all three
 inferred "unblocked" from an empty result without checking the result meant
 anything. The pattern was:
@@ -1301,7 +1301,7 @@ anything. The pattern was:
 The `?` suppresses jq's iterate-over-null error, so a `blockedBy` arriving
 null — a renamed field, a dependencies API hiccup, a `gh` reporting the field
 without populating it — yields an empty list byte-identical to "this task has
-no blockers". A paid executor session then runs against a task whose
+no blockers". A paid implementor session then runs against a task whose
 dependency has not landed, which is the outcome the guard exists to prevent.
 
 Note this is *not* the `gh` version floor: an unknown `--json` field makes
@@ -1363,7 +1363,7 @@ task's expected-files section by `.github/scripts/task_scope.py` rather than
 from any label: ⚠️ for a task expected to touch `.tscn`, `.tres`,
 `project.godot` or `addons/`, where Auto is a bad bet; and 🔑 for one
 expected to touch `.github/workflows/` or `.github/actions/`, which no
-automated path can push at all — see *Tasks the scripted executor cannot
+automated path can push at all — see *Tasks the scripted implementor cannot
 run*. The 🔑 matters here specifically because the bucket's own instruction
 is to paste the task into a Copilot session, and for those tasks that
 instruction is wrong.
@@ -1374,7 +1374,7 @@ bounded correction that answers it. Testing draft-ness first is what stops
 every in-flight fix from showing as waiting on you.
 
 `validation:failed` is tested *ahead* of draft-ness, and that ordering is the
-whole reason the label exists. `agent-02-execute.yml` marks a pull request
+whole reason the label exists. `agent-02-implement.yml` marks a pull request
 ready only after its own `validate-godot.sh` run passes, so draft is no
 longer only a transient "a session is mid-flight" state — a branch that fails
 validation stays draft until a human intervenes. Left to the draft rule alone
@@ -1497,8 +1497,8 @@ execution session can read:
 | The `[impl]` sub-issue body | Objective, scope, expected files, architecture constraints, acceptance criteria, out of scope, dependencies |
 | The plan comment on the Feature | Plan summary, architecture notes, the task list with Issue numbers |
 
-The sub-issue is authoritative. The executor is given exactly one Issue and
-never sees the planner's session, so **anything an executor needs must be in
+The sub-issue is authoritative. The implementor is given exactly one Issue and
+never sees the planner's session, so **anything an implementor needs must be in
 the sub-issue body** — not in the plan comment, and not in the parent Feature.
 The parent is context only and does not expand scope.
 
@@ -1519,16 +1519,16 @@ Claude Code at those same files rather than duplicating them, so there is one
 contract, not two to keep in sync.
 
 `.claude/agents/*.md` and `.claude/commands/*.md` are local Claude Code
-counterparts of the four roles, invoked as `/planner`, `/executor`,
+counterparts of the four roles, invoked as `/planner`, `/implementor`,
 `/reviewer`, and `/fixer`, or their matching subagents (`planner`,
-`executor`, `reviewer`, `fixer`). The command names match the agent names
+`implementor`, `reviewer`, `fixer`). The command names match the agent names
 one-for-one, because the only thing each command does is guard its inputs and
 run that agent:
 
 | Role | GitHub-side | Claude Code-side |
 | --- | --- | --- |
 | Plan | `agent-01-planner.yml` / `.github/agents/01-planner.agent.md` | `.claude/commands/planner.md` / `.claude/agents/planner.md` |
-| Execute | `agent-02-execute.yml` / `.github/agents/02-executor.agent.md` | `.claude/commands/executor.md` / `.claude/agents/executor.md` |
+| Execute | `agent-02-implement.yml` / `.github/agents/02-implementor.agent.md` | `.claude/commands/implementor.md` / `.claude/agents/implementor.md` |
 | Review | `agent-04-review.yml` / `.github/agents/03-reviewer.agent.md` | `.claude/commands/reviewer.md` / `.claude/agents/reviewer.md` |
 | Fix | `agent-05-fix.yml` / `.github/agents/05-fixer.agent.md` | `.claude/commands/fixer.md` / `.claude/agents/fixer.md` |
 
@@ -1541,7 +1541,7 @@ files is written out twice, once per surface, and the section opens with a
 one-line probe (`command -v gh`) that settles which to use before any call.
 
 Spelling both forms out is the same reasoning that spelled the `gh` commands
-out in the first place. `executor` runs on Haiku; a cheap model given "fetch
+out in the first place. `implementor` runs on Haiku; a cheap model given "fetch
 the Issue" will spend its budget discovering an API instead of implementing
 the task, and a cheap model that cannot find `gh` will try to install it. So
 the files say *use this exact call*, and say it for both surfaces, rather than
@@ -1571,7 +1571,7 @@ The four roles are four contracts, but they are not four things a human wants
 to sit and trigger in sequence. `/execute-task` is the fifth command, and the
 only one that is not a role: it invokes the other four and keeps going.
 
-It runs `/executor` on the Issue, subscribes to the pull request that comes
+It runs `/implementor` on the Issue, subscribes to the pull request that comes
 back, waits for CI on the pushed commit, hands the CI outcome to `/reviewer`
 along with the diff, and routes on the `review:*` label it applies. `FIX` goes to `/fixer`, whose push re-runs CI and
 sends the loop round again; `DESIGN AMBIGUITY` and `PLANNING FAILURE` stop
@@ -1599,16 +1599,16 @@ Six things about that loop are decisions rather than obvious consequences:
   describing the previous cycle.
 
 - **The fixer's model climbs.** The first fix cycle runs at the tier the
-  executor built the code at — a model a tier below the one that wrote the
+  implementor built the code at — a model a tier below the one that wrote the
   code is being asked to understand something it could not have written. Every
   cycle after the first runs at `opus`, because a second cycle on the same PR
   is evidence the first was not enough. This is the local shape of the
   escalation `agent-06-claude.yml`'s tier step already runs for `claude:fix`,
   and it keeps that step's floor rule: the fixer never runs below its
   configured model.
-- **The executor's model comes from the Issue.** `/executor` reads the
+- **The implementor's model comes from the Issue.** `/implementor` reads the
   planner's `model:*` label and passes it as the subagent's model, which
-  overrides `executor.md`'s `model: haiku` frontmatter. An Issue with no tier
+  overrides `implementor.md`'s `model: haiku` frontmatter. An Issue with no tier
   label gets `sonnet`, not `haiku` — the planner's own rule is that `sonnet`
   is the answer when the tier is unclear, and an absent label is the most
   unclear a tier gets. Without this the planner's tiering, which is the one
@@ -1668,14 +1668,14 @@ a session's reach and neither is fixed by an approval:
 
 The identity is what separates the two, and it is not the agent doing the
 work. A subagent runs inside its parent session, on the same credentials and
-the same GitHub connection, so the executor subagent opens a pull request as
+the same GitHub connection, so the implementor subagent opens a pull request as
 exactly the same account the session would. What differs is the surface: a
 session carries a user token, and a workflow carries `GITHUB_TOKEN` unless
 `AGENT_GITHUB_TOKEN` is set.
 
 `/execute-task` has one reader, and that is deliberate. `agent-06-claude.yml`
-routes `claude:execute` to `/executor`, not here: a headless run is bounded by
-`--max-turns 60`, the executor step alone can consume most of it, and a run
+routes `claude:execute` to `/implementor`, not here: a headless run is bounded by
+`--max-turns 60`, the implementor step alone can consume most of it, and a run
 truncated inside the third fix cycle is worse than one that stopped at a place
 it chose. A label is a single role. The orchestrator is a human in a session.
 
@@ -1724,7 +1724,7 @@ The two sides share the Issue and PR graph, not a runtime. A PR opened by
 Claude Code doesn't land on a `copilot/*` branch, so it won't trigger
 `agent-04-review.yml`'s automatic `ready_for_review` review — add
 `agent:review` by hand (works from GitHub Mobile) to put it through the same
-reviewer, same as the scripted executor's own `agent-exec/*` branches
+reviewer, same as the scripted implementor's own `agent-exec/*` branches
 already require.
 
 `issue-linking.yml` cuts the other way, and the asymmetry is worth stating
@@ -1747,7 +1747,7 @@ dashboard — reads the Issue graph the same way regardless of which tool
 produced the diff, so switching tools mid-Feature, or per task, doesn't
 require picking one system and discarding the other.
 
-### Two executors
+### Two implementors
 
 `agent-06-claude.yml` gives the Claude Code roles the same label-driven entry
 point the Copilot roles have, for the reason *Mostly label-driven, on purpose*
@@ -1757,7 +1757,7 @@ included. Four labels, one per role:
 | Label | Target | Prompt | Model |
 | --- | --- | --- | --- |
 | `claude:plan` | intake Issue | `.claude/commands/planner.md` | `vars.CLAUDE_PLANNER_MODEL`, default Opus 5 |
-| `claude:execute` | `[impl]` Issue | `.claude/commands/executor.md` | `vars.CLAUDE_EXECUTOR_MODEL`, default Haiku 4.5 |
+| `claude:execute` | `[impl]` Issue | `.claude/commands/implementor.md` | `vars.CLAUDE_IMPLEMENTOR_MODEL`, default Haiku 4.5 |
 | `claude:review` | pull request | `.claude/commands/reviewer.md` | `vars.CLAUDE_REVIEWER_MODEL`, default Opus 5 |
 | `claude:fix` | pull request | `.claude/commands/fixer.md` | `vars.CLAUDE_FIXER_MODEL`, default Sonnet 5 |
 
@@ -1768,7 +1768,7 @@ to `--model`. The `CLAUDE_*` variable names keep the two namespaces from being
 confused, which *`model:` in an agent file takes a display name* warns about
 in the other direction.
 
-So the repository now has two executors, and the label namespaces are separate
+So the repository now has two implementors, and the label namespaces are separate
 so that a choice between them is always explicit. `agent:execute` and
 `claude:execute` do the same job through different products, and **nothing
 stops both being added to one Issue.** They would race: two sessions, two
@@ -1799,7 +1799,7 @@ One further secret is optional, and only matters for the roles that push.
 Unset, the session acts as `GITHUB_TOKEN`, and GitHub starts no workflow run
 from a pull request authored by that identity — so `godot-ci-validation.yml`
 and `gdscript-lint.yml`, both of which trigger on `pull_request`, would never
-run on a `claude:execute` PR. `agent-02-execute.yml` pushes the same way and
+run on a `claude:execute` PR. `agent-02-implement.yml` pushes the same way and
 has the same gap, so this is a repository-wide condition rather than one this
 workflow introduces. Setting `AGENT_GITHUB_TOKEN` — a PAT or App installation
 token with `contents: write` and `pull-requests: write` — makes the session act
@@ -1812,9 +1812,9 @@ is a prompt path and a model, so the roles are a `case` statement rather than
 four files sharing one guard to keep in sync.
 
 Its prompts are the same `.claude/commands/*.md` files a human invokes as
-`/planner`, `/executor`, `/reviewer` and `/fixer` — one contract per role, not
+`/planner`, `/implementor`, `/reviewer` and `/fixer` — one contract per role, not
 a workflow copy that drifts from the interactive one. `claude:execute` routes
-to `/executor` rather than to `/execute-task`: one label is one role, and the
+to `/implementor` rather than to `/execute-task`: one label is one role, and the
 orchestrator's fix loop does not fit the `--max-turns 60` budget. It addresses them by path rather than as slash commands,
 because a slash command resolving inside the action is an assumption the
 workflow does not need to make; reading a checked-out file is not.
@@ -1860,7 +1860,7 @@ load rather than degrade gracefully:
   only on a feature branch is not selectable.
 - Filenames may contain only `.`, `-`, `_`, `a-z`, `A-Z`, `0-9`.
 - The prompt body caps at **30,000 characters**. All three files are well
-  under: planner ~9k, executor ~4.6k, reviewer ~1.5k.
+  under: planner ~9k, implementor ~4.6k, reviewer ~1.5k.
 - Valid `tools` aliases are `execute`, `read`, `edit`, `search`, `agent`,
   `web`, `todo`, `*`, `[]`, plus `server-name/tool-name` for MCP. Unrecognised
   plain names are ignored, but `01-planner.agent.md` references `github/*`,
@@ -1876,25 +1876,25 @@ are custom agents and MCP servers.
 | --- | --- |
 | `.github/workflows/agent-00-dashboard.yml` | Rewrites the pinned control plane Issue from derived state, on `dashboard:update` or dispatch |
 | `.github/workflows/agent-01-planner.yml` | Decomposes an intake Issue of any type into `[impl]` sub-issues |
-| `.github/workflows/agent-02-execute.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:execute`; ends with an independent validation job on the pushed SHA |
+| `.github/workflows/agent-02-implement.yml` | Scripted implementer: implements, opens the PR, then validates, formats, self-reviews, and self-fixes against it, on `agent:execute`; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
 | `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix`; refuses fork PRs and diffs it cannot push before spending a session; ends with an independent validation job on the pushed SHA |
 | `.github/workflows/issue-dependencies.yml` | Turns an Issue's `## Dependencies` table into GitHub dependencies, on the `blocker` label or a dispatch; `sweep` rebuilds the whole chain |
-| `.github/workflows/godot-validation.yml` | The one reusable validation job (`workflow_call`); called by `godot-ci-validation.yml`, `agent-02-execute.yml`, and `agent-05-fix.yml` |
+| `.github/workflows/godot-validation.yml` | The one reusable validation job (`workflow_call`); called by `godot-ci-validation.yml`, `agent-02-implement.yml`, and `agent-05-fix.yml` |
 | `.github/workflows/godot-ci-validation.yml` | Human-authored `pull_request` validation gate (`paths-ignore` deny-list) plus a manual dispatch; calls `godot-validation.yml` |
-| `.github/actions/build-review-request` | Shared by `agent-04-review.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the reviewer prompt |
-| `.github/actions/build-fix-request` | Shared by `agent-05-fix.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the fixer prompt |
+| `.github/actions/build-review-request` | Shared by `agent-04-review.yml` and `agent-02-implement.yml`'s pre-PR pass: builds the reviewer prompt |
+| `.github/actions/build-fix-request` | Shared by `agent-05-fix.yml` and `agent-02-implement.yml`'s pre-PR pass: builds the fixer prompt |
 | `.github/actions/run-agent-session` | The one place a vendor difference lives. Runs one agent session -- Copilot CLI or Claude Code, chosen by its `vendor` input -- walking a model preference list and classifying how the session ended into a shared outcome schema. Not yet shared by the planner, which still carries its own copy of the loop |
 | `.github/actions/extract-review-verdict` | Turns a review session's text into a machine-readable `VERDICT` |
-| `.github/actions/lint-gdscript` | Diff-scoped `gdformat` check/fix, used by `agent-02-execute.yml` and `gdscript-lint.yml` |
+| `.github/actions/lint-gdscript` | Diff-scoped `gdformat` check/fix, used by `agent-02-implement.yml` and `gdscript-lint.yml` |
 | `.github/scripts/render-dashboard.py` | Derives every task and Feature state from the repository graph |
 | `.github/scripts/issue_dependencies.py` | The dependency-table grammar, shared by the planner, the sync script and the tests — the one definition of what `Blocked by` and `Blocks` mean |
 | `.github/scripts/sync-issue-dependencies.py` | The only writer of GitHub issue dependencies: reads tables, POSTs the relationships, applies `blocker`, reports drift |
 | `.github/scripts/test-issue-dependencies.sh` | Pins the parser and the sync's `gh` calls against a stub CLI; no Godot, credentials or network |
-| `.github/scripts/task_scope.py` | The one path rule the pushing workflows share: the ⚠️ delicate-paths flag, executor eligibility from an Issue's expected files (`agent-01-planner.yml`, `agent-02-execute.yml`, the control plane), and pushability from a pull request's changed files (`agent-05-fix.yml`) |
+| `.github/scripts/task_scope.py` | The one path rule the pushing workflows share: the ⚠️ delicate-paths flag, implementor eligibility from an Issue's expected files (`agent-01-planner.yml`, `agent-02-implement.yml`, the control plane), and pushability from a pull request's changed files (`agent-05-fix.yml`) |
 | `.github/agents/01-planner.agent.md` | Planner role, Issue promotion criteria |
-| `.github/agents/02-executor.agent.md` | Executor role, scope boundaries |
+| `.github/agents/02-implementor.agent.md` | Implementor role, scope boundaries |
 | `.github/agents/03-reviewer.agent.md` | Reviewer role, verdict classification |
 | `.github/agents/05-fixer.agent.md` | Fixer role, bounded-correction contract |
 | `.github/scripts/validate-godot.sh` | Single source of truth for validation; CI and agents call it |

@@ -1,5 +1,5 @@
 ---
-name: executor
+name: implementor
 description: executes implementation tasks for Mikey's Game Bones MOBA Rules
 model: Claude Haiku 4.5
 tools: ["read", "search", "edit", "execute"]
@@ -12,22 +12,22 @@ Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 
 > **This file loads in two different places, and they behave differently.**
 >
-> 1. Locally, as the `executor` VS Code profile — a human runs it directly.
-> 2. As text embedded into the prompt built by `agent-02-execute.yml`'s
->    "Build Executor Request" step, the same way `03-reviewer.agent.md` and
+> 1. Locally, as the `implementor` VS Code profile — a human runs it directly.
+> 2. As text embedded into the prompt built by `agent-02-implement.yml`'s
+>    "Build Implementor Request" step, the same way `03-reviewer.agent.md` and
 >    `05-fixer.agent.md` are embedded into their own workflows. That
 >    workflow runs the Copilot **CLI** (`--model`, `--allow-all-tools`,
 >    etc.), not the Copilot **cloud agent** you get from assigning an Issue
 >    — those are different products. `tools:`/`model:` above are honored by
 >    neither path in practice: the CLI path takes its model from
->    `agent-02-execute.yml`'s `EXECUTOR_MODELS` preference list, not this
+>    `agent-02-implement.yml`'s `IMPLEMENTOR_MODELS` preference list, not this
 >    front matter.
 >
 > Assigning an Issue to Copilot from the Issues UI still does not load this
 > file — that screen has no agent picker, and on GitHub Mobile picking a
 > custom agent removes the model picker, which is a worse trade than
 > skipping the profile. That manual path remains available for when you
-> want to hand-pick a model or intervene live; `agent-02-execute.yml` (the
+> want to hand-pick a model or intervene live; `agent-02-implement.yml` (the
 > `agent:execute` Issue label) is the scripted alternative when you don't.
 >
 > This contract is also mirrored in `.github/copilot-instructions.md` under
@@ -35,7 +35,7 @@ Follow `AGENTS.md` and `.github/copilot-instructions.md`.
 > **Implementation Agent Contract** section of every `[impl]` Issue.
 > **Keep all three in sync.** The mirror is what nearly every session reads.
 >
-> ## When invoked by `agent-02-execute.yml`
+> ## When invoked by `agent-02-implement.yml`
 >
 > The workflow has already checked out a fresh branch and supplied the
 > Implementation Task Issue as context. Two differences from running this
@@ -166,7 +166,7 @@ When running locally, report:
 5. **Unresolved issues** — any ambiguity, failure, or requirement that
    prevented complete implementation, or `None`.
 
-When invoked by `agent-02-execute.yml`, end your final message with exactly
+When invoked by `agent-02-implement.yml`, end your final message with exactly
 these headings, in this order — the workflow inserts this verbatim into the
 pull request body (`.github/pull_request_template.md`'s shape), so match it
 exactly and write nothing before or after:

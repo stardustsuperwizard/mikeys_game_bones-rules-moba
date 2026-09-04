@@ -9,7 +9,7 @@ unimplemented Issue to a `PASS` verdict on green CI, without stopping to ask
 along the way.
 
 **This command is the unattended one.** The four role commands —
-`/planner`, `/executor`, `/reviewer`, `/fixer` — each run one agent once and
+`/planner`, `/implementor`, `/reviewer`, `/fixer` — each run one agent once and
 hand back to you. This one runs them in sequence and keeps going. It is the
 only command here that decides on your behalf what to do with a verdict, and
 the only one that escalates a model tier without asking.
@@ -44,29 +44,29 @@ Repository is always `owner="stardustsuperwizard"`,
 ## The pipeline
 
 ```text
-/executor -> subscribe -> CI -> /reviewer -> /fixer -> back to CI
+/implementor -> subscribe -> CI -> /reviewer -> /fixer -> back to CI
                                 ^                         |
                                 +----- up to 4 cycles -----+
 ```
 
 Each numbered step below invokes a role command rather than restating its
-contract. Invoke them through the `Skill` tool by name — `executor`,
+contract. Invoke them through the `Skill` tool by name — `implementor`,
 `reviewer`, `fixer` — so there is one contract per role and this file cannot
 drift from it. Where a step needs something the role command does not take as
 an argument (a model tier, the CI outcome), pass it as context on the call.
 
 ### 1. Execute
 
-Invoke the `executor` command with the Issue number.
+Invoke the `implementor` command with the Issue number.
 
 It runs the Issue guards, reads the `model:*` label, delegates to the
-`executor` subagent at that tier, and reports a PR URL. Note the tier it
+`implementor` subagent at that tier, and reports a PR URL. Note the tier it
 reports — step 5 needs it.
 
 If you have lost it (a long wait, a summarised context, a wake event hours
 later), do not guess and do not ask: re-read the Issue's `model:*` label,
-which is where `/executor` got it and which is still there. An Issue with no
-tier label resolves to `sonnet`, by the same rule `/executor` applies. This
+which is where `/implementor` got it and which is still there. An Issue with no
+tier label resolves to `sonnet`, by the same rule `/implementor` applies. This
 pipeline holds nothing in its head that GitHub cannot tell it again.
 
 If it reports no PR — an ambiguity, or in-scope validation that failed —
@@ -174,7 +174,7 @@ checks" and leaving the reader to guess:
 The two are told apart by the diff: a PR that changes `**.gd` and has no
 check runs at all is the second case, never the first.
 
-The executor already ran `.github/scripts/validate-godot.sh` locally, and
+The implementor already ran `.github/scripts/validate-godot.sh` locally, and
 CI runs that same script. CI is not a second opinion; it is that script run
 against the commit that was actually pushed. If CI is red where the local
 run was green, the difference is the commit or the environment — find out
@@ -270,24 +270,24 @@ it, and you pass the result as the `model` parameter on the subagent call.
 
 | Fix cycle | Model |
 | --- | --- |
-| 1st | the tier the executor ran at, recorded in step 1 |
+| 1st | the tier the implementor ran at, recorded in step 1 |
 | 2nd, 3rd, 4th | `opus` |
 
-The first cycle matches the executor because the fix is a correction to that
-executor's own work, in a codebase it just built. A model a tier below the
+The first cycle matches the implementor because the fix is a correction to that
+implementor's own work, in a codebase it just built. A model a tier below the
 one that wrote the code is being asked to understand something it could not
 have written.
 
 Every later cycle is `opus`, because a second cycle on the same PR is
 evidence the first one was not enough. Escalate on the second call even when
-the executor ran at `haiku` or `sonnet` — that is the case the rule exists
-for. If the executor already ran at `opus`, there is nothing to escalate to
+the implementor ran at `haiku` or `sonnet` — that is the case the rule exists
+for. If the implementor already ran at `opus`, there is nothing to escalate to
 and every cycle stays there.
 
 This is the local shape of the escalation `agent-06-claude.yml`'s tier step
 runs for `claude:fix`, and it obeys the same floor rule: the fixer never runs
 below its configured model. Locally that floor is `fixer.md`'s `haiku`, so the
-executor's tier always clears it. If you ever raise that frontmatter, the
+implementor's tier always clears it. If you ever raise that frontmatter, the
 floor wins over the table above for the first cycle.
 
 State the model you used at the top of each cycle's report. A pipeline that

@@ -3,7 +3,7 @@ description: >-
   Parses a review session's assistant text into a VERDICT line plus
   Markdown report, refusing to publish a verdict whose reasoning was cut
   short. Shared by agent-04-review.yml (reviewing an existing pull
-  request) and agent-02-execute.yml (reviewing a diff before one is
+  request) and agent-02-implement.yml (reviewing a diff before one is
   opened) so both apply the exact same completeness rule.
 
 inputs:

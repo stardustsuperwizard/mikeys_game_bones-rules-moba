@@ -2,7 +2,7 @@ name: Agent - AW02 Execute Task
 
 # Implements a GitHub Implementation Task Issue end to end using the
 # Copilot CLI: opens the pull request that closes the Issue as soon as the
-# executor's commit exists, then applies gdformat to whatever GDScript it
+# implementor's commit exists, then applies gdformat to whatever GDScript it
 # touched, reviews its own diff, and applies one bounded fix pass if that
 # review says FIX -- all as best-effort follow-ups pushed onto the branch
 # behind the pull request that is already open by then.
@@ -19,7 +19,7 @@ name: Agent - AW02 Execute Task
 # draft state is what carries the difference: draft means no verified run
 # stands behind this pull request yet.
 #
-# This matters most on the path where the executor deliberately did *not*
+# This matters most on the path where the implementor deliberately did *not*
 # commit. "Commit Leftover Changes" rescues that work rather than
 # discarding it, which is right -- but it manufactures the very signal
 # "Check For Commit" says it trusts, so an unvalidated session's work can
@@ -73,7 +73,7 @@ name: Agent - AW02 Execute Task
 # just because an Issue exists or gets assigned. A human decides when to
 # spend it by adding `agent:execute` (works from GitHub Mobile).
 #
-# The pull request opens as soon as the executor's commit exists --
+# The pull request opens as soon as the implementor's commit exists --
 # immediately after "Check For Commit" below, before validation,
 # formatting, or the pre-PR review-and-fix pass ever run. Everything from
 # "Re-run Validation" onward is a best-effort follow-up against that
@@ -143,25 +143,25 @@ jobs:
       # agent-01-planner.yml): the next candidate is only tried when a
       # model is unavailable to this identity, never after a real failure,
       # the same rule every other workflow here follows.
-      EXECUTOR_MODELS: >-
-        ${{ vars.EXECUTOR_MODELS
+      IMPLEMENTOR_MODELS: >-
+        ${{ vars.IMPLEMENTOR_MODELS
         || 'claude-opus-5,claude-sonnet-5,claude-haiku-4.5' }}
-      EXECUTOR_MAX_AI_CREDITS: "150"
+      IMPLEMENTOR_MAX_AI_CREDITS: "150"
 
-      # "Resolve Executor Model Tier" below can put a planner's per-task
+      # "Resolve Implementor Model Tier" below can put a planner's per-task
       # recommendation in front of that list. These two bound it.
       #
-      # An operator who sets EXECUTOR_MODELS has made a deliberate choice
+      # An operator who sets IMPLEMENTOR_MODELS has made a deliberate choice
       # about this repository; a planner's guess about one task must not
       # quietly overrule it. The expression above cannot tell the two cases
       # apart once it has collapsed to a value, so the emptiness of the
       # variable is captured separately here, before the `||`.
-      EXECUTOR_MODELS_PINNED: ${{ vars.EXECUTOR_MODELS != '' }}
+      IMPLEMENTOR_MODELS_PINNED: ${{ vars.IMPLEMENTOR_MODELS != '' }}
 
       # Lower bound on what a planner may ask for, so the cheap tier can be
       # taken out of circulation repository-wide without editing the
       # planner's rubric or relabelling any Issue.
-      EXECUTOR_TIER_FLOOR: ${{ vars.EXECUTOR_TIER_FLOOR || 'haiku' }}
+      IMPLEMENTOR_TIER_FLOOR: ${{ vars.IMPLEMENTOR_TIER_FLOOR || 'haiku' }}
 
       # Same variables and defaults as agent-04-review.yml / agent-05-fix.yml
       # -- deliberately, so tuning one repository variable affects the
@@ -206,7 +206,7 @@ jobs:
 
           # Computed here, not down in "Prepare Diff and Draft Title", so it
           # exists before the branch-existence check below and doesn't
-          # require a fresh executor run to produce. Implementation Task
+          # require a fresh implementor run to produce. Implementation Task
           # Issues are titled "[impl] <description>"; the pull request tag
           # is "[<n>] <description>" instead.
           TITLE_RAW=$(jq -r '.title' issue.json)
@@ -237,7 +237,7 @@ jobs:
           # error, so a `blockedBy` that arrives null -- a renamed field, a
           # dependencies API hiccup, a `gh` that reports the field without
           # populating it -- yields an empty list, which is byte-identical to
-          # "this task is unblocked". The workflow then spends a full executor
+          # "this task is unblocked". The workflow then spends a full implementor
           # session implementing a task whose dependency has not landed, which
           # is the exact outcome the guard exists to prevent. "Cannot tell"
           # must never resolve to "go ahead".
@@ -283,7 +283,7 @@ jobs:
           # `workflow` OAuth scope, deliberately, so that a compromised
           # workflow cannot rewrite its own CI. Without this check the run
           # gets all the way to `Push Branch and Open Pull Request` before
-          # the remote rejects it, having already paid for a full executor
+          # the remote rejects it, having already paid for a full implementor
           # session that produced a complete implementation. That happened
           # three times on #167's decomposition (#168, #169, #170); the work
           # was hand-authored afterwards as #172, #173 and #174.
@@ -300,12 +300,12 @@ jobs:
               --body-file issue-body.md > task-scope.json
           then
             echo "::warning::task_scope.py did not run; treating this Issue" \
-              "as executor-eligible."
-            echo '{"executor_eligible": true, "restricted_paths": []}' \
+              "as implementor-eligible."
+            echo '{"implementor_eligible": true, "restricted_paths": []}' \
               > task-scope.json
           fi
 
-          if [ "$(jq -r '.executor_eligible' task-scope.json)" = "false" ]; then
+          if [ "$(jq -r '.implementor_eligible' task-scope.json)" = "false" ]; then
             echo "ok=false" >> "$GITHUB_OUTPUT"
             echo "reason=workflow_scope" >> "$GITHUB_OUTPUT"
             echo "restricted_paths=$(
@@ -371,7 +371,7 @@ jobs:
               # step's YAML block scalar, and indenting it to stay inside the
               # block would put ten leading spaces into the comment, which
               # GitHub renders as a code block.
-              MSG="This task expects to change $RESTRICTED_PATHS, and the scripted executor cannot push those paths."
+              MSG="This task expects to change $RESTRICTED_PATHS, and the scripted implementor cannot push those paths."
               MSG="$MSG"$'\n\n'"\`GITHUB_TOKEN\` is not allowed to create or update files under \`.github/workflows/\` or \`.github/actions/\`. No \`permissions:\` key grants it: GitHub reserves workflow edits for credentials carrying the \`workflow\` OAuth scope, so that a compromised workflow cannot rewrite its own CI. The restriction is deliberate and this workflow respects it rather than working around it."
               MSG="$MSG"$'\n\n'"Refused before any session starts, because the push is the *last* step of an execution run. Without this check the run implements the task in full and then loses all of it at the push, having spent the credits either way."
               MSG="$MSG"$'\n\n'"**Run this task from a human-credentialed session instead.** A Claude Code session -- terminal, desktop, web, or Remote Control -- pushes with your own credentials and can write these paths. It reads the same contract this Issue encodes: see *Claude Code as an additional environment* in \`docs/AGENT_WORKFLOW.md\`, and \`CLAUDE.md\` at the repository root. Open the pull request with \`Closes #$ISSUE_NUMBER\`, and add \`agent:review\` to it by hand so it goes through the same review gate everything else does."
@@ -405,7 +405,7 @@ jobs:
       # request onto it (e.g. `gh pr create` itself failed after the push --
       # see the comment on that failure in "Push Branch and Open Pull
       # Request" below). Re-adding `agent:execute` today would blow that
-      # branch away with `git checkout -B` and pay for a whole new executor
+      # branch away with `git checkout -B` and pay for a whole new implementor
       # session to reproduce a commit that already exists. Checking here,
       # before Godot setup or any Copilot session, means a hit skips the
       # entire expensive part of this job.
@@ -471,7 +471,7 @@ jobs:
             echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           fi
 
-      # Needed before the executor session even starts: the executor's own
+      # Needed before the implementor session even starts: the implementor's own
       # hard rules (below) tell it to run `validate-godot.sh` itself, and
       # the outer "Re-run Validation" / "Apply GDScript Formatting" /
       # "Evaluate Pre-PR Fix" steps all shell out to it later too. Every
@@ -500,7 +500,7 @@ jobs:
       # someone chose, and falling below it would silently run a task on
       # less model than was asked for. Unavailability should cost money,
       # not correctness.
-      - name: Resolve Executor Model Tier
+      - name: Resolve Implementor Model Tier
         id: tier
         if: steps.context.outputs.ok == 'true'
         shell: bash
@@ -542,25 +542,25 @@ jobs:
             fi
           done < <(jq -r '.labels[].name' issue.json)
 
-          FLOOR_RANK="$(rank "$EXECUTOR_TIER_FLOOR")"
+          FLOOR_RANK="$(rank "$IMPLEMENTOR_TIER_FLOOR")"
 
           if [ "$FLOOR_RANK" -eq 0 ]; then
-            echo "::warning::EXECUTOR_TIER_FLOOR is" \
-                 "'$EXECUTOR_TIER_FLOOR', which is not a tier. Ignoring it."
+            echo "::warning::IMPLEMENTOR_TIER_FLOOR is" \
+                 "'$IMPLEMENTOR_TIER_FLOOR', which is not a tier. Ignoring it."
             FLOOR_RANK=0
           fi
 
           if [ -n "$TIER" ] && [ "$BEST" -lt "$FLOOR_RANK" ]; then
             echo "Raising model:$TIER to the repository floor" \
-                 "'$EXECUTOR_TIER_FLOOR'."
-            TIER="$EXECUTOR_TIER_FLOOR"
+                 "'$IMPLEMENTOR_TIER_FLOOR'."
+            TIER="$IMPLEMENTOR_TIER_FLOOR"
           fi
 
-          if [ "$EXECUTOR_MODELS_PINNED" = "true" ]; then
-            MODELS="$EXECUTOR_MODELS"
-            REASON="EXECUTOR_MODELS is set for this repository; the operator list wins over any per-task tier."
+          if [ "$IMPLEMENTOR_MODELS_PINNED" = "true" ]; then
+            MODELS="$IMPLEMENTOR_MODELS"
+            REASON="IMPLEMENTOR_MODELS is set for this repository; the operator list wins over any per-task tier."
           elif [ -z "$TIER" ]; then
-            MODELS="$EXECUTOR_MODELS"
+            MODELS="$IMPLEMENTOR_MODELS"
             REASON="No model:* label on this Issue; using the default list."
           else
             case "$TIER" in
@@ -581,9 +581,9 @@ jobs:
           echo "tier=$TIER" >> "$GITHUB_OUTPUT"
 
           echo "$REASON"
-          echo "Executor model preference list: $MODELS"
+          echo "Implementor model preference list: $MODELS"
 
-      - name: Build Executor Request
+      - name: Build Implementor Request
         if: >-
           steps.context.outputs.ok == 'true' &&
           steps.branch-check.outputs.exists != 'true'
@@ -598,16 +598,16 @@ jobs:
 
           sections = []
 
-          # Same file the local `executor` VS Code profile loads -- kept in
+          # Same file the local `implementor` VS Code profile loads -- kept in
           # sync by hand, the way every agent role file here is.
-          role = root / ".github/agents/02-executor.agent.md"
+          role = root / ".github/agents/02-implementor.agent.md"
 
           if role.exists():
               sections.append(
-                  "# EXECUTOR ROLE DEFINITION\n\n" + role.read_text(errors="replace")
+                  "# IMPLEMENTOR ROLE DEFINITION\n\n" + role.read_text(errors="replace")
               )
           else:
-              raise RuntimeError("Missing .github/agents/02-executor.agent.md")
+              raise RuntimeError("Missing .github/agents/02-implementor.agent.md")
 
           for filename in ("AGENTS.md", ".github/copilot-instructions.md"):
               path = root / filename
@@ -656,11 +656,11 @@ jobs:
           {context}
           """
 
-          pathlib.Path("executor-prompt.txt").write_text(prompt)
+          pathlib.Path("implementor-prompt.txt").write_text(prompt)
 
           print(f"Prompt built: {len(prompt)} chars")
 
-      - name: Run Executor Session
+      - name: Run Implementor Session
         if: >-
           steps.context.outputs.ok == 'true' &&
           steps.branch-check.outputs.exists != 'true'
@@ -670,9 +670,9 @@ jobs:
           # Explicit for now. Stage 3 replaces this literal with the vendor
           # segment of the `agent:{role}:{vendor}` label that triggered the run.
           vendor: copilot
-          prompt-file: executor-prompt.txt
+          prompt-file: implementor-prompt.txt
           models: ${{ steps.tier.outputs.models }}
-          max-ai-credits: ${{ env.EXECUTOR_MAX_AI_CREDITS }}
+          max-ai-credits: ${{ env.IMPLEMENTOR_MAX_AI_CREDITS }}
           # Needs to edit, run shell commands, and commit -- same tool set
           # as the fixer. Only sub-agent spawning stays excluded.
           capability: write
@@ -683,7 +683,7 @@ jobs:
       # or simply forgot the hard rule above). Without this, that work is
       # discarded entirely: "Check For Commit" below treats any leftover
       # working-tree changes as a hard failure so a half-finished, unreviewed
-      # diff never becomes a pull request under the executor's name. Folding
+      # diff never becomes a pull request under the implementor's name. Folding
       # it into a commit here instead means that work survives and gets
       # reviewed like any other implementation, while a session that
       # committed nothing at all is unaffected (git commit is a no-op there,
@@ -695,10 +695,10 @@ jobs:
           set -euo pipefail
 
           if [ -n "$(git status --porcelain)" ]; then
-            echo "::warning::The executor left uncommitted changes;" \
+            echo "::warning::The implementor left uncommitted changes;" \
                  "committing them so the work is not discarded."
             git add -A
-            git commit -m "Apply uncommitted executor changes"
+            git commit -m "Apply uncommitted implementor changes"
           fi
 
       # Whether a commit exists is the only signal trusted here -- not the
@@ -713,15 +713,15 @@ jobs:
           set -euo pipefail
 
           if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::The executor left uncommitted changes instead of" \
+            echo "::error::The implementor left uncommitted changes instead of" \
                  "either committing a complete implementation or making no" \
                  "changes at all."
             git status --porcelain
 
             echo '{"reason":"uncommitted_changes",' \
-                 '"headline":"The executor left uncommitted changes instead of committing or making no changes",' \
+                 '"headline":"The implementor left uncommitted changes instead of committing or making no changes",' \
                  '"guidance":"This is a session-behavior fault, not a budget or availability one. Re-adding agent:execute retries from a clean branch."}' \
-              > executor-failure.json
+              > implementor-failure.json
 
             echo "made=false" >> "$GITHUB_OUTPUT"
             echo "reason=uncommitted_changes" >> "$GITHUB_OUTPUT"
@@ -731,7 +731,7 @@ jobs:
           NEW_SHA=$(git rev-parse HEAD)
 
           if [ "$NEW_SHA" = "$BASE_SHA" ]; then
-            echo "::warning::No commit was made. The executor did not" \
+            echo "::warning::No commit was made. The implementor did not" \
                  "produce an implementation."
             echo "made=false" >> "$GITHUB_OUTPUT"
             echo "reason=no_commit" >> "$GITHUB_OUTPUT"
@@ -740,11 +740,11 @@ jobs:
 
           echo "made=true" >> "$GITHUB_OUTPUT"
 
-      # Runs immediately after the executor's commit is confirmed, before
+      # Runs immediately after the implementor's commit is confirmed, before
       # validation, formatting, or the pre-PR review-and-fix pass -- see the
       # rationale block at the top of this file.
       #
-      # The pull request body only ever carries the executor's own
+      # The pull request body only ever carries the implementor's own
       # completion report -- the same shape a human-run or cloud-agent
       # session's body would have. The review verdict is NOT written here;
       # it goes to a comment in "Publish Pre-PR Review" further down, the
@@ -757,7 +757,7 @@ jobs:
         shell: python
         env:
           EXEC_TEXT_FILE: ${{ steps.exec-session.outputs.final-text-file }}
-          EXECUTOR_MODEL: ${{ steps.exec-session.outputs.resolved-model }}
+          IMPLEMENTOR_MODEL: ${{ steps.exec-session.outputs.resolved-model }}
           BRANCH_RESUMED: ${{ steps.branch-check.outputs.exists }}
         run: |
           import json
@@ -775,7 +775,7 @@ jobs:
               p = pathlib.Path(path) if path else None
               return p.read_text(errors="replace").strip() if p and p.exists() else ""
 
-          # When resumed, "Run Executor Session" never ran this pass -- the
+          # When resumed, "Run Implementor Session" never ran this pass -- the
           # implementation commit and its report belong to whichever earlier
           # run pushed $BRANCH. Say that plainly instead of falling back to
           # the generic "no final report" wording, which would read as if
@@ -783,22 +783,22 @@ jobs:
           if resumed:
               exec_report = (
                   "Resumed from a branch already pushed by a previous run of"
-                  " this workflow -- the executor session was skipped this"
+                  " this workflow -- the implementor session was skipped this"
                   " time. The implementation commit and its completion"
                   " report belong to that earlier run; see its log for"
                   " details."
               )
           else:
               exec_report = read(os.environ.get("EXEC_TEXT_FILE")) or (
-                  "The executor pushed a commit but produced no final report."
+                  "The implementor pushed a commit but produced no final report."
                   " Inspect the diff directly."
               )
 
-          executor_model = os.environ.get("EXECUTOR_MODEL") or (
+          implementor_model = os.environ.get("IMPLEMENTOR_MODEL") or (
               "unknown (resumed from a previous run)" if resumed else ""
           )
 
-          # The executor's completion report is the session's own account
+          # The implementor's completion report is the session's own account
           # of what it did, and nothing downstream verifies its claims --
           # a session that skipped validation and said so, or one that
           # claimed a passing run it never made, both produce a body that
@@ -812,12 +812,12 @@ jobs:
               "## Workflow-verified validation",
               "",
               "**Not yet recorded.** This pull request opened as a draft"
-              " immediately after the executor's commit, before the"
+              " immediately after the implementor's commit, before the"
               " workflow ran `.github/scripts/validate-godot.sh` itself."
               " It is marked ready for review only once that run passes.",
               "",
               "Nothing below this section is evidence that validation ran:"
-              " the completion report is the executor session's own"
+              " the completion report is the implementor session's own"
               " account, unverified.",
               "<!-- /agent-execute-validation-record -->",
           ])
@@ -847,10 +847,10 @@ jobs:
           ).stdout.strip()
 
           # Opened as a draft on purpose. The commit behind it may be one
-          # the executor itself refused to make: "Commit Leftover Changes"
+          # the implementor itself refused to make: "Commit Leftover Changes"
           # above deliberately rescues an unfinished session's work rather
           # than discarding it, which means the pull request can exist for
-          # code the executor stopped short of validating -- exactly the
+          # code the implementor stopped short of validating -- exactly the
           # case its own hard rules tell it not to commit. Draft is how
           # that distinction survives into something a human can see:
           # "Record Verified Validation" marks it ready only after this
@@ -894,7 +894,7 @@ jobs:
           # that hides the one thing worth knowing (gh's actual stderr,
           # e.g. "GitHub Actions is not permitted to create or approve
           # pull requests" when the repo's Actions settings disallow it)
-          # behind a bare traceback, and leaves `executor-failure.json`
+          # behind a bare traceback, and leaves `implementor-failure.json`
           # unwritten so "Report Execution Failure" below falls back to
           # "unknown". Print gh's own output and fail the same
           # diagnosable way every other step in this job does.
@@ -910,7 +910,7 @@ jobs:
                   "Actions to create pull requests)."
               )
 
-              pathlib.Path("executor-failure.json").write_text(
+              pathlib.Path("implementor-failure.json").write_text(
                   json.dumps({
                       "reason": "pr_create_failed",
                       "headline": "gh pr create failed after the branch was pushed",
@@ -938,8 +938,8 @@ jobs:
           subprocess.run(
               ["gh", "issue", "comment", issue_number, "--repo", repo,
                "--body",
-               f"Opened {pr_url} via `.github/agents/02-executor.agent.md`"
-               f" on `{executor_model}`."],
+               f"Opened {pr_url} via `.github/agents/02-implementor.agent.md`"
+               f" on `{implementor_model}`."],
               check=True,
           )
 
@@ -989,7 +989,7 @@ jobs:
       # Best-effort, like the review-and-fix section below: a lint-tooling
       # hiccup must degrade to "skip formatting" rather than fail the job.
       # Runs before "Prepare Diff and Draft Title" so IMPL_SHA and
-      # execute-diff.txt both include any formatting commit -- the pre-PR
+      # implement-diff.txt both include any formatting commit -- the pre-PR
       # review sees the final, formatted diff, and a later FIX-but-not-
       # applied reset lands back on formatted code, not unformatted code.
       - name: List Changed GDScript Files
@@ -1035,7 +1035,7 @@ jobs:
             git reset --hard HEAD~1
           else
             # The pull request already exists by this point (it opened
-            # right after the executor's commit, before this formatting
+            # right after the implementor's commit, before this formatting
             # pass ran) -- push the formatting commit so the branch behind
             # it actually reflects it, instead of leaving it stranded on
             # the runner's local clone.
@@ -1060,7 +1060,7 @@ jobs:
 
           echo "IMPL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-          git diff "$BASE_SHA" HEAD > execute-diff.txt
+          git diff "$BASE_SHA" HEAD > implement-diff.txt
 
       # continue-on-error throughout this whole review-and-fix section:
       # every step in it is best-effort. A hiccup anywhere here (not just a
@@ -1077,7 +1077,7 @@ jobs:
         with:
           mode: diff
           issue-number: ${{ env.ISSUE_NUMBER }}
-          diff-file: execute-diff.txt
+          diff-file: implement-diff.txt
           pr-title: ${{ env.PR_TITLE }}
           pr-branch: ${{ env.BRANCH }}
           max-diff-chars: ${{ env.MAX_DIFF_CHARS }}
@@ -1146,7 +1146,7 @@ jobs:
         with:
           mode: diff
           issue-number: ${{ env.ISSUE_NUMBER }}
-          diff-file: execute-diff.txt
+          diff-file: implement-diff.txt
           verdict-file: ${{ steps.review-verdict.outputs.review-file }}
           pr-title: ${{ env.PR_TITLE }}
           pr-branch: ${{ env.BRANCH }}
@@ -1206,7 +1206,7 @@ jobs:
 
           if .github/scripts/validate-godot.sh > fix-validate-output.txt 2>&1; then
             # The pull request is already open (it opened right after the
-            # executor's commit, long before this fix pass ran) -- push the
+            # implementor's commit, long before this fix pass ran) -- push the
             # fix commit so the branch behind it actually reflects the fix
             # instead of leaving it stranded on the runner's local clone.
             git push origin "HEAD:$BRANCH"
@@ -1223,8 +1223,8 @@ jobs:
       # The one place a validation result reaches the pull request as
       # fact rather than as an agent's claim.
       #
-      # Every other statement about validation on an executor pull request
-      # is a session talking about itself: the executor's completion
+      # Every other statement about validation on an implementor pull request
+      # is a session talking about itself: the implementor's completion
       # report becomes the body verbatim, and the pre-PR review and fix
       # comments are written by sessions too. None of that is checked
       # against anything. A session that skipped validation, a session
@@ -1236,7 +1236,7 @@ jobs:
       # commit the remote branch actually points at, and writes the exit
       # status into the body slot reserved for it. Deliberately a fresh
       # run rather than a reuse of `steps.validate.outputs.status`: that
-      # one measured the executor's commit, and formatting and the pre-PR
+      # one measured the implementor's commit, and formatting and the pre-PR
       # fix pass can both have moved the branch since.
       #
       # Runs under `always()` because a validation failure upstream skips
@@ -1378,7 +1378,7 @@ jobs:
               "",
               "</details>",
               "",
-              "Written by `agent-02-execute.yml` itself, not by an agent"
+              "Written by `agent-02-implement.yml` itself, not by an agent"
               " session. Every other account of validation on this pull"
               " request -- the completion report included -- comes from a"
               " session describing its own work, and none of it was"
@@ -1478,7 +1478,7 @@ jobs:
       #
       # Read from the remote rather than `git rev-parse HEAD`, and read here
       # rather than earlier, because the branch moves up to three times in
-      # this job: the executor's commit, a gdformat commit, and a pre-PR fix
+      # this job: the implementor's commit, a gdformat commit, and a pre-PR fix
       # commit. Two of those can also be rolled back locally (`git reset
       # --hard`) after a failed re-validation, so the runner's HEAD and the
       # remote tip are not reliably the same thing. The commit a reviewer
@@ -1514,7 +1514,7 @@ jobs:
           echo "sha=$remote_sha" >> "$GITHUB_OUTPUT"
 
       # Best-effort: the pull request is already open by this point (it
-      # opened right after the executor's commit, well before this step),
+      # opened right after the implementor's commit, well before this step),
       # so anything failing here must never turn into a job failure -- the
       # pull request itself is unaffected either way.
       #
@@ -1625,7 +1625,7 @@ jobs:
                   f"{read(os.environ['REVIEW_FILE'])}{note}\n\n"
                   "---\n\n"
                   "Reviewed by `.github/agents/03-reviewer.agent.md` via"
-                  f" `agent-02-execute.yml`'s pre-PR pass on"
+                  f" `agent-02-implement.yml`'s pre-PR pass on"
                   f" `{reviewer_model}`.\n"
                   "Re-run by adding the `agent:review` label."
               )
@@ -1688,7 +1688,7 @@ jobs:
             echo ""
             echo "## Automated execution produced no implementation"
             echo ""
-            echo "The executor session completed without committing anything."
+            echo "The implementor session completed without committing anything."
             echo "It may have stopped on an unresolved requirement or"
             echo "ambiguity -- check the session log for its explanation:"
             echo ""
@@ -1704,7 +1704,7 @@ jobs:
             --remove-label "agent:execute" || true
 
       # The pull request already exists by this point (opened right after
-      # the executor's commit, before validation ever ran), so this posts
+      # the implementor's commit, before validation ever ran), so this posts
       # to the pull request itself rather than the Issue -- that's where
       # someone picking this up will be working, and it's the same place
       # "Publish Pre-PR Review" would have posted to had validation
@@ -1758,7 +1758,7 @@ jobs:
       # a silent red run with no trace anywhere.
       #
       # A pull request can already exist by the time this fires: it opens
-      # right after the executor's commit, well before validation,
+      # right after the implementor's commit, well before validation,
       # formatting, or review ever run, and one of those steps (e.g.
       # "Prepare Diff and Draft Title", which has no continue-on-error)
       # failing outright still fails the job. PR_URL distinguishes that
@@ -1787,7 +1787,7 @@ jobs:
 
           failure = {}
 
-          for candidate in ("executor-failure.json", "agent-session-failure.json"):
+          for candidate in ("implementor-failure.json", "agent-session-failure.json"):
               path = pathlib.Path(candidate)
 
               if path.exists():

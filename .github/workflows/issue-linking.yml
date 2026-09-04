@@ -241,7 +241,7 @@ jobs:
       #
       # This step repairs that omission. Its primary, deterministic source is
       # the "[NN] ..." title tag every planner-generated task prompt asks the
-      # executor to use: if the title starts with a bracketed number naming
+      # implementor to use: if the title starts with a bracketed number naming
       # an open Issue labeled `implementation`, that is authoritative.
       #
       # When the title tag is missing or invalid -- a human-authored PR, or
@@ -293,7 +293,7 @@ jobs:
           }
 
           # Primary, deterministic source: every planner-generated task
-          # prompt asks the executor to title the pull request "[NN] ...".
+          # prompt asks the implementor to title the pull request "[NN] ...".
           # When the title honors that convention and NN is a valid open
           # Implementation Task, that is authoritative and the fuzzy scan
           # below never runs -- there is nothing to disambiguate.

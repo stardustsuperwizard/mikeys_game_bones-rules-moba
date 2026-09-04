@@ -5,7 +5,7 @@ description: >-
   Works either against an existing pull request's most recent
   `<!-- agent-review-verdict -->` comment (agent-05-fix.yml) or against a
   verdict just produced in the same job, before any pull request exists
-  (agent-02-execute.yml's pre-PR review-and-fix gate).
+  (agent-02-implement.yml's pre-PR review-and-fix gate).
 
 inputs:
   mode:

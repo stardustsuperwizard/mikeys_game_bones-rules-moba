@@ -30,8 +30,8 @@ from datetime import datetime, timezone
 
 # Same directory as this script, which is already sys.path[0] when it is run
 # as a script. Both readings of a task's expected-files section live there --
-# the delicate-paths flag this dashboard prints, and the executor-eligibility
-# rule agent-02-execute.yml refuses on -- so the board and the guard cannot
+# the delicate-paths flag this dashboard prints, and the implementor-eligibility
+# rule agent-02-implement.yml refuses on -- so the board and the guard cannot
 # disagree about what a task expects to touch.
 import task_scope
 from task_scope import expected_paths, is_delicate
@@ -55,7 +55,7 @@ VERDICT_ADVERSE = {
     "review:design-ambiguity": "DESIGN AMBIGUITY",
 }
 
-# Applied by agent-02-execute.yml when its own validate-godot.sh run does not
+# Applied by agent-02-implement.yml when its own validate-godot.sh run does not
 # pass, and removed by the same step when a later run does. Distinct from the
 # review:* vocabulary on purpose: those record a judgment about the code, this
 # records that the build is broken, and the two are independent -- a PASS
@@ -140,7 +140,7 @@ def open_blockers(issue: dict):
     to `[]` makes "no blockers" and "could not tell" identical, and the board
     then files a blocked task under *Ready to dispatch* — which is the one
     answer it exists to give and the one that costs a wasted session. The two
-    enforcement points (`agent-02-execute.yml`, `issue-linking.yml`) read the
+    enforcement points (`agent-02-implement.yml`, `issue-linking.yml`) read the
     REST dependencies endpoint instead and fail closed; this board reads 500
     issues in one call and cannot afford a request each, so it reports the
     uncertainty rather than resolving it.
@@ -193,7 +193,7 @@ def classify_task(issue: dict, prs: dict[int, dict]) -> tuple[str, dict]:
 
     # Checked before the draft short-circuit below, and deliberately so.
     # Draft used to mean only "a session is mid-flight" -- a state that
-    # always resolved on its own. Since agent-02-execute.yml started holding
+    # always resolved on its own. Since agent-02-implement.yml started holding
     # a pull request in draft until its own validation passes, draft is also
     # a *terminal* state: one that failed validation stays draft until a
     # human intervenes. Letting the draft rule win there would file a broken

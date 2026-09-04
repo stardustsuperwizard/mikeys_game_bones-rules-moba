@@ -77,7 +77,7 @@ That direction matters, because everything downstream reads the relationship
 and none of it reads the table: the control plane orders dispatch by it,
 `agent:execute` refuses a task whose blockers are open, and `issue-linking.yml`
 warns when work starts on a blocked task anyway. An edge that exists only in
-someone's head is an executor implementing step three before step one exists.
+someone's head is an implementor implementing step three before step one exists.
 
 Three rules follow from that:
 
@@ -103,7 +103,7 @@ standard still sync.
 
 This section applies whenever you are working an Issue titled `[impl]`, or
 any Issue carrying the `implementation` label. It is the same contract as
-`.github/agents/02-executor.agent.md`, restated here because almost no cloud
+`.github/agents/02-implementor.agent.md`, restated here because almost no cloud
 session loads that file: assigning Copilot from an Issue offers no agent
 picker, and on GitHub Mobile choosing a custom agent gives up the model
 picker. This file is read on every session regardless, which makes it — not
