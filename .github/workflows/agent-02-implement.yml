@@ -242,8 +242,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # workflow_dispatch has no label, and the legacy label has no vendor
-          # segment. Both mean copilot, which is what they have always meant.
+          # workflow_dispatch has no label to read, so it falls back to the
+          # dispatch input, which defaults to copilot.
           case "$LABEL" in
             agent:implementor:claude)  VENDOR=claude ;;
             agent:implementor:copilot) VENDOR=copilot ;;
@@ -439,13 +439,13 @@ jobs:
               MSG="This Issue is not open. Nothing to execute."
               ;;
             not_implementation_task)
-              MSG="This Issue is not labeled \`implementation\`. \`agent:implementor:copilot\` only runs against Implementation Task Issues."
+              MSG="This Issue is not labeled \`implementation\`. \`${TRIGGER_LABEL:-agent:implementor:copilot}\` only runs against Implementation Task Issues."
               ;;
             blocked)
-              MSG="This Issue is blocked by: **${{ steps.context.outputs.blockers }}**. Resolve those first, then re-add \`agent:implementor:copilot\`."
+              MSG="This Issue is blocked by: **${{ steps.context.outputs.blockers }}**. Resolve those first, then re-add \`${TRIGGER_LABEL:-agent:implementor:copilot}\`."
               ;;
             pr_exists)
-              MSG="A pull request already exists for this Issue: ${{ steps.context.outputs.existing_pr_url }}. \`agent:implementor:copilot\` is for starting fresh implementation, not correcting existing work -- use the \`agent:fixer:copilot\` label on that pull request instead."
+              MSG="A pull request already exists for this Issue: ${{ steps.context.outputs.existing_pr_url }}. \`${TRIGGER_LABEL:-agent:implementor:copilot}\` is for starting fresh implementation, not correcting existing work -- use \`agent:fixer:copilot\` or \`agent:fixer:claude\` on that pull request instead."
               ;;
             workflow_scope)
               # Built by appending rather than written as one multi-line
@@ -1967,7 +1967,7 @@ jobs:
               )
           else:
               retry_line = (
-                  "The trigger label has been removed, so re-adding it is a"
+                  "Any trigger label has been released, so re-adding it is a"
                   " clean retry."
               )
 

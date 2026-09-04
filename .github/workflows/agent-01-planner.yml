@@ -2166,7 +2166,7 @@ jobs:
           lines += [
               f"Full run log: {run_url}",
               "",
-              "The trigger label has been removed and `plan` was left in place, so"
+              "Any trigger label has been released and `plan` was left in place, so"
               " this Issue is back in the awaiting-planning view. Re-add"
               " it to retry.",
           ]

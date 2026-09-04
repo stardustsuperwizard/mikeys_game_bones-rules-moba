@@ -23,8 +23,8 @@ command -v gh >/dev/null 2>&1 && echo ENV=LOCAL || echo ENV=CLOUD
 Every call site below gives you both forms, written out in full. Use them
 verbatim. Never translate one form into the other yourself, and never guess
 a tool name. The `CLOUD` tools may need their schema loaded first — if one
-is not already callable, run `ToolSearch` once with `select:<tool-name>`, then
-call it.
+is not already callable, run `ToolSearch` once with `select:<tool-name>`,
+then call it.
 
 Repository is always `owner="stardustsuperwizard"`,
 `repo="mikeys_game_bones-rules-moba"`.
@@ -45,8 +45,9 @@ CLOUD — two calls to mcp__github__issue_read, same arguments except
 `method`:
   method="get"           -> title, body, milestone, url, labels
   method="get_comments"  -> the comments (paginate with page/perPage)
-owner="stardustsuperwizard"
-  repo="mikeys_game_bones-rules-moba" issue_number=$ARGUMENTS
+  owner="stardustsuperwizard"
+  repo="mikeys_game_bones-rules-moba"
+  issue_number=$ARGUMENTS
 ```
 
 Stop and say so, rather than proceeding, if the Issue:

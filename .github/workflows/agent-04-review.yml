@@ -444,7 +444,7 @@ jobs:
           lines += [
               f"Full run log: {run_url}",
               "",
-              "The trigger label has been removed, so re-adding it is a clean"
+              "Any trigger label has been released, so re-adding it is a clean"
               " retry.",
           ]
 
