@@ -273,15 +273,18 @@ jobs:
             esac
           }
 
-          # The inverse, so the configured default can be compared against a
-          # tier. An id this does not recognise ranks 0 and is treated as
-          # "leave it alone unless escalation genuinely climbs past it".
+          # Rank back to a tier name, for the log lines that report what a
+          # floor or an escalation did.
           name_for() {
             case "$1" in
               1) echo haiku ;; 2) echo sonnet ;; 3) echo opus ;;
             esac
           }
 
+          # The inverse of id_for, so the configured default can be compared
+          # against a tier. An id this does not recognise ranks 0 and is
+          # treated as "leave it alone unless escalation genuinely climbs
+          # past it".
           rank_of_id() {
             case "$1" in
               claude-haiku-4-5-20251001) echo 1 ;;
