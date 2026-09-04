@@ -671,9 +671,13 @@ depends on the color. Checked live against the repository on 2026-08-22:
 | Label | Color | Bootstrapped by |
 | --- | --- | --- |
 | `agent:planner:copilot` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:planner:claude` | `#1D76DB` | — not created by any workflow; must already exist |
 | `agent:implementor:copilot` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:implementor:claude` | `#1D76DB` | — not created by any workflow; must already exist |
 | `agent:reviewer:copilot` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:reviewer:claude` | `#1D76DB` | — not created by any workflow; must already exist |
 | `agent:fixer:copilot` | `#1D76DB` | — not created by any workflow; must already exist |
+| `agent:fixer:claude` | `#1D76DB` | — not created by any workflow; must already exist |
 | `plan` | `#0E8A16` | `agent-01-planner.yml` |
 | `planned` | `#0E8A16` | `agent-01-planner.yml` |
 | `implementation` | `#1D76DB` | `agent-01-planner.yml` |
@@ -690,10 +694,10 @@ depends on the color. Checked live against the repository on 2026-08-22:
 "Bootstrapped by" only matters if the label is ever deleted: whichever
 workflow's `ensure_label` guard runs next recreates it, from that workflow's
 own hardcoded color, because the guard only checks whether the name exists —
-never whether the color or description still match. The four `agent:*`
-labels have no such guard anywhere in `.github/`: if one of them is ever
-deleted, nothing recreates it, and every trigger keyed on that name silently
-stops firing until it's added back by hand.
+never whether the color or description still match. The eight
+`agent:{role}:{vendor}` labels have no such guard anywhere in `.github/`: if
+one of them is ever deleted, nothing recreates it, and every trigger keyed on
+that name silently stops firing until it's added back by hand.
 
 `plan`'s color and description drifted from `agent-01-planner.yml`'s
 `ensure_label "plan"` call at some point after the label was created; both
