@@ -121,8 +121,15 @@ Three things about it are easy to get wrong.
   failure the chain covers ended the subagent instead of failing it over. On
   an older build the file is harmless but does nothing for the four roles,
   which is the only place it matters here.
+- **It does not reach CI.** The agent workflows run Claude with `--bare`,
+  which does not read `.claude/settings.json`, so this chain applies to
+  interactive and cloud sessions only. In CI the `models` preference list on
+  `run-agent-session` is the fallback, per role rather than per session --
+  the same mechanism the Copilot side has always used. Two fallback systems
+  that happened to agree would be harder to reason about than one that
+  plainly owns the job.
 
-The trigger conditions match `run-copilot-session`'s rule closely enough to
+The trigger conditions match `run-agent-session`'s rule closely enough to
 be worth stating: Claude Code switches when the primary is overloaded,
 unavailable, or returns another non-retryable server error, and never on
 authentication, billing, rate-limit, request-size, transport, or policy
@@ -185,7 +192,7 @@ back untouched rather than replaced by a tier's idea of it.
 
 Four rules bound what the recommendation can do:
 
-- **It prepends, it does not replace.** `run-copilot-session` advances through
+- **It prepends, it does not replace.** `run-agent-session` advances through
   the list only when a model is unavailable to the calling identity, never
   after a real failure, so the list is what keeps an availability gap from
   ending the run. A single id would turn every such gap into a dead job.
@@ -1878,7 +1885,7 @@ are custom agents and MCP servers.
 | `.github/workflows/godot-ci-validation.yml` | Human-authored `pull_request` validation gate (`paths-ignore` deny-list) plus a manual dispatch; calls `godot-validation.yml` |
 | `.github/actions/build-review-request` | Shared by `agent-04-review.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the reviewer prompt |
 | `.github/actions/build-fix-request` | Shared by `agent-05-fix.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the fixer prompt |
-| `.github/actions/run-copilot-session` | Shared by planner, executor, reviewer, and fixer: walks a model preference list, enforces the credit cap |
+| `.github/actions/run-agent-session` | The one place a vendor difference lives. Runs one agent session -- Copilot CLI or Claude Code, chosen by its `vendor` input -- walking a model preference list and classifying how the session ended into a shared outcome schema. Not yet shared by the planner, which still carries its own copy of the loop |
 | `.github/actions/extract-review-verdict` | Turns a review session's text into a machine-readable `VERDICT` |
 | `.github/actions/lint-gdscript` | Diff-scoped `gdformat` check/fix, used by `agent-02-execute.yml` and `gdscript-lint.yml` |
 | `.github/scripts/render-dashboard.py` | Derives every task and Feature state from the repository graph |

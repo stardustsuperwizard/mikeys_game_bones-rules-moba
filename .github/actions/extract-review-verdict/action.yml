@@ -8,10 +8,10 @@ description: >-
 
 inputs:
   assistant-text-file:
-    description: Path to the joined assistant text (run-copilot-session's assistant-text-file output)
+    description: Path to the joined assistant text (run-agent-session's assistant-text-file output)
     required: true
   outcome-file:
-    description: Path to the classify-copilot-outcome.py verdict (run-copilot-session's outcome-file output)
+    description: Path to the vendor classifier's verdict (run-agent-session's outcome-file output)
     required: true
 
 outputs:
@@ -118,7 +118,7 @@ runs:
                 "no_assistant_output",
                 "The session returned no assistant message",
                 "The session ended without saying anything. Check the event"
-                " counts in the run-copilot-session job log.",
+                " counts in the run-agent-session job log.",
             )
 
         if text.startswith("```"):

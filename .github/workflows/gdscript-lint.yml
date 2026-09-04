@@ -25,7 +25,7 @@ name: GDScript Lint
 #      agent-05-fix.yml: that workflow's prompt is built from a PR's
 #      `<!-- agent-review-verdict -->` comment and full diff, which doesn't
 #      exist yet here and shouldn't be faked just to reuse it. It shares
-#      only the generic `run-copilot-session` action, with its own prompt,
+#      only the generic `run-agent-session` action, with its own prompt,
 #      its own (cheap, capped) model list, and its own validation gate.
 #
 # This is a deliberate, narrow exception to the rule elsewhere in this repo
@@ -47,7 +47,7 @@ on:
     #   - setup-godot/: installs the engine `validate-godot.sh` needs below
     #     -- same reasoning godot-ci-validation.yml gives for keeping it
     #     out of *its* ignore list.
-    #   - run-copilot-session/: runs the gdlint auto-fix session.
+    #   - run-agent-session/: runs the gdlint auto-fix session.
     #   - validate-godot.sh: gates both auto-fix commits below.
     #   - .gdlintrc: the rule set gdlint is checked against. Changing a
     #     threshold here changes what passes, so it has to run the linter.
@@ -60,7 +60,7 @@ on:
       - '.gdlintrc'
       - '.github/actions/lint-gdscript/**'
       - '.github/actions/setup-godot/**'
-      - '.github/actions/run-copilot-session/**'
+      - '.github/actions/run-agent-session/**'
       - '.github/scripts/validate-godot.sh'
       - '.github/workflows/gdscript-lint.yml'
 
@@ -81,11 +81,37 @@ env:
   # as EXECUTOR_MODELS in agent-02-execute.yml. Overridable via the
   # LINT_FIXER_MODELS repository variable (comma-separated).
   LINT_FIXER_MODELS: >-
-    ${{ vars.LINT_FIXER_MODELS || 'claude-haiku-4.5,claude-sonnet-5' }}
+    ${{ vars.LINT_FIXER_MODELS
+    || (vars.LINT_FIXER_VENDOR == 'claude'
+        && 'claude-haiku-4-5,claude-sonnet-5'
+        || 'claude-haiku-4.5,claude-sonnet-5') }}
+
+  # Which company answers. This job is not one of the four labelled roles --
+  # it has no `agent:{role}:{vendor}` label to read a vendor from, because it
+  # is a status check that fires on `**.gd`, not something a human labels. So
+  # the vendor is a repository variable instead.
+  #
+  # It is the best role in the repository to try a vendor against, which is
+  # why it is switchable at all: the task is narrow, the output is verified
+  # by `gdlint` rather than by anyone's judgment, and a bad answer costs one
+  # re-run rather than a wrong verdict on someone's pull request.
+  #
+  # NOTE the model ids differ per vendor and are NOT interchangeable. Copilot
+  # CLI spells Haiku 4.5 `claude-haiku-4.5`; Claude Code spells the same model
+  # `claude-haiku-4-5`. Setting LINT_FIXER_VENDOR without also setting
+  # LINT_FIXER_MODELS picks the right default list for you; setting both is
+  # your responsibility to keep matched.
+  LINT_FIXER_VENDOR: ${{ vars.LINT_FIXER_VENDOR || 'copilot' }}
 
   # The Copilot CLI rejects anything below 30 -- a floor, not a tuning
-  # choice. A single-file lint fix doesn't need more.
+  # choice. A single-file lint fix doesn't need more. Ignored when the vendor
+  # is claude, which is bounded by turns rather than credits.
   LINT_FIXER_MAX_AI_CREDITS: "30"
+
+  # Claude's equivalent bound. A single-file lint fix is a handful of edits;
+  # a session that needs more than this has misunderstood the task rather
+  # than found more work.
+  LINT_FIXER_MAX_TURNS: "20"
 
   # gdlint rules that cannot be resolved by editing the file the finding is
   # reported in. The fix session is bounded to exactly that file and
@@ -399,11 +425,26 @@ jobs:
           steps.pr.outputs.fork != 'true' && steps.lint.outputs.clean != 'true' &&
           steps.build-prompt.outputs.has-fixable == 'true'
         id: fix-session
-        uses: ./.github/actions/run-copilot-session
+        uses: ./.github/actions/run-agent-session
         with:
+          # Not one of the four labelled roles, so the vendor comes from a
+          # repository variable rather than from a label. See the
+          # LINT_FIXER_VENDOR comment above for why this job is the one worth
+          # making switchable.
+          vendor: ${{ env.LINT_FIXER_VENDOR }}
+          # Was relying on the old action's "task,write_agent" default. That
+          # default is gone: capability is stated, not inherited.
+          capability: write
           prompt-file: lint-fix-prompt.txt
           models: ${{ env.LINT_FIXER_MODELS }}
           max-ai-credits: ${{ env.LINT_FIXER_MAX_AI_CREDITS }}
+          max-turns: ${{ env.LINT_FIXER_MAX_TURNS }}
+          # Only read when LINT_FIXER_VENDOR is claude, and empty is fine
+          # otherwise. Passed unconditionally because a composite action
+          # cannot read `secrets` itself: a key set on the repository but not
+          # threaded through here never reaches the process, which is a
+          # failure mode with no symptom until the vendor is switched.
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           step-label: "Auto-fixing lint"
 
       # The session was told not to touch anything outside the targeted

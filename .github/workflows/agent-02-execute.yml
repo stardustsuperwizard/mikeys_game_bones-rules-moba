@@ -53,7 +53,7 @@ name: Agent - AW02 Execute Task
 #     judgment call.
 #
 # The self-review step and `agent-04-review.yml` share three composite
-# actions (`build-review-request`, `run-copilot-session`,
+# actions (`build-review-request`, `run-agent-session`,
 # `extract-review-verdict`) so both apply the exact same completeness
 # rule and the exact same reviewer contract -- the only difference is
 # whether the diff is already a pull request or still local. Likewise the
@@ -488,7 +488,7 @@ jobs:
       # The planner recommends a tier per task; this turns that into the
       # model preference list the session actually walks.
       #
-      # It PREPENDS rather than replaces. `run-copilot-session` advances
+      # It PREPENDS rather than replaces. `run-agent-session` advances
       # through the list only when a model is unavailable to the calling
       # identity -- never after a real failure -- so a list is what keeps an
       # unavailable model from ending the run. A single id here would turn
@@ -665,14 +665,17 @@ jobs:
           steps.context.outputs.ok == 'true' &&
           steps.branch-check.outputs.exists != 'true'
         id: exec-session
-        uses: ./.github/actions/run-copilot-session
+        uses: ./.github/actions/run-agent-session
         with:
+          # Explicit for now. Stage 3 replaces this literal with the vendor
+          # segment of the `agent:{role}:{vendor}` label that triggered the run.
+          vendor: copilot
           prompt-file: executor-prompt.txt
           models: ${{ steps.tier.outputs.models }}
           max-ai-credits: ${{ env.EXECUTOR_MAX_AI_CREDITS }}
           # Needs to edit, run shell commands, and commit -- same tool set
           # as the fixer. Only sub-agent spawning stays excluded.
-          excluded-tools: "task,write_agent"
+          capability: write
           step-label: "Executing"
 
       # Safety net for a session that made real changes but stopped short
@@ -1089,12 +1092,15 @@ jobs:
         if: steps.prep.outcome == 'success'
         id: review-session
         continue-on-error: true
-        uses: ./.github/actions/run-copilot-session
+        uses: ./.github/actions/run-agent-session
         with:
+          # Explicit for now. Stage 3 replaces this literal with the vendor
+          # segment of the `agent:{role}:{vendor}` label that triggered the run.
+          vendor: copilot
           prompt-file: ${{ steps.review-build.outputs.prompt-file }}
           models: ${{ env.REVIEWER_MODELS }}
           max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
-          excluded-tools: "bash,powershell,apply_patch,create,edit,task,write_agent"
+          capability: read-only
           step-label: "Reviewing (pre-PR)"
 
       - name: Extract Pre-PR Review Verdict
@@ -1154,12 +1160,15 @@ jobs:
         if: steps.fix-build.outcome == 'success'
         id: fix-session
         continue-on-error: true
-        uses: ./.github/actions/run-copilot-session
+        uses: ./.github/actions/run-agent-session
         with:
+          # Explicit for now. Stage 3 replaces this literal with the vendor
+          # segment of the `agent:{role}:{vendor}` label that triggered the run.
+          vendor: copilot
           prompt-file: ${{ steps.fix-build.outputs.prompt-file }}
           models: ${{ env.FIXER_MODELS }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
-          excluded-tools: "task,write_agent"
+          capability: write
           step-label: "Fixing (pre-PR)"
 
       # A single bounded pass, exactly like agent-05-fix.yml: this either
@@ -1778,7 +1787,7 @@ jobs:
 
           failure = {}
 
-          for candidate in ("executor-failure.json", "copilot-session-failure.json"):
+          for candidate in ("executor-failure.json", "agent-session-failure.json"):
               path = pathlib.Path(candidate)
 
               if path.exists():

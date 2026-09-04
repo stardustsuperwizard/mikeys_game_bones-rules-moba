@@ -50,6 +50,7 @@ on:
       - '.github/workflows/issue-dependencies.yml'
       - '.github/scripts/render-dashboard.py'
       - '.github/scripts/classify-copilot-outcome.py'
+      - '.github/scripts/classify-claude-outcome.py'
       # Issue bookkeeping. These read Issue bodies and call `gh`; they have
       # their own check in `test-issue-dependencies.sh`, which needs no Godot.
       - '.github/scripts/issue_dependencies.py'
@@ -62,7 +63,7 @@ on:
       # run validation.
       - '.github/actions/build-review-request/**'
       - '.github/actions/build-fix-request/**'
-      - '.github/actions/run-copilot-session/**'
+      - '.github/actions/run-agent-session/**'
       - '.github/actions/extract-review-verdict/**'
       - '.github/actions/lint-gdscript/**'
 

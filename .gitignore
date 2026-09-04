@@ -72,18 +72,37 @@ env/
 # Generated rules data (Python harness only)
 rules/data/generated/
 
-# Scratch files written at repo root by the planner/executor/reviewer/fixer
+# Scratch files written at repo root by the planner/implementor/reviewer/fixer
 # GitHub Actions pipeline (.github/workflows/agent-*.yml, .github/actions/).
 # These are ephemeral CI-run artifacts, never meant to be committed -- but
 # an agent session running with repo-root as its cwd can see them and sweep
 # them into its own `git add -A` if they aren't ignored, which trips the
-# "Check For Commit" clean-tree gate. See run-copilot-session/action.yml.
+# "Check For Commit" clean-tree gate. See run-agent-session/action.yml.
+#
+# THIS LIST IS LOAD-BEARING AND IS MATCHED BY LITERAL NAME. Renaming an
+# artifact without renaming its entry here does not fail a check -- it means
+# agent-02-execute.yml's "committing them so the work is not discarded" step
+# sweeps the runner's own scratch into somebody's pull request. Grep for the
+# name before you change it.
+
+# Written by run-agent-session, whichever vendor answered.
+agent-error.txt
+agent-outcome.json
+agent-assistant-text.txt
+agent-final-text.txt
+agent-session-failure.json
+
+# Written only by the claude branch of run-agent-session.
+claude-output.json
+
+# Written by the copilot branch of run-agent-session, and by
+# agent-01-planner.yml, which still carries its own copy of the session loop
+# instead of calling the shared action. When the planner is migrated, the two
+# entries that only it still writes -- copilot-error.txt and
+# copilot-outcome.json -- go with it.
 copilot-output.jsonl
 copilot-error.txt
 copilot-outcome.json
-copilot-assistant-text.txt
-copilot-final-text.txt
-copilot-session-failure.json
 model-help.txt
 executor-prompt.txt
 planner-prompt.txt
