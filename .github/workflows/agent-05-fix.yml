@@ -450,6 +450,18 @@ jobs:
             )
           fi
 
+          # A typo in a repository variable should warn, not fail the run.
+          # The tier names are already tolerated this way; an unquoted
+          # non-integer here would abort the step inside $(( )) under set -e.
+          case "$FIXER_ESCALATE_AFTER" in
+            ''|*[!0-9]*)
+              echo "::warning::FIXER_ESCALATE_AFTER is" \
+                   "'$FIXER_ESCALATE_AFTER', which is not a whole number." \
+                   "Falling back to 1."
+              FIXER_ESCALATE_AFTER=1
+              ;;
+          esac
+
           BASE_RANK="$(rank "$FIXER_BASE_TIER")"
 
           if [ "$BASE_RANK" -eq 0 ]; then

@@ -1508,10 +1508,10 @@ jobs:
                   )
 
               return (
-                  "Set by the planner as the executor session's starting "
-                  "model. It is a preference, not a pin -- an unavailable "
-                  "model escalates rather than failing the run, and an "
-                  "operator who sets the `EXECUTOR_MODELS` repository "
+                  f"The planner judged this task `{tier}` work. That is the "
+                  "executor session's starting model, not a pin -- an "
+                  "unavailable model escalates rather than failing the run, "
+                  "and an operator who sets the `EXECUTOR_MODELS` repository "
                   "variable outranks it. Relabel this Issue "
                   "`model:haiku|sonnet|opus` to overrule it."
               )

@@ -111,6 +111,16 @@ climbs a tier per round past `CLAUDE_FIXER_ESCALATE_AFTER` (default `1`). A
 pull request fixed once by one pipeline therefore escalates on the other,
 which is the point of sharing a marker rather than each keeping its own tally.
 
+The two bounds that hold on the Copilot side hold here as well, and for the
+same reasons. Setting `vars.CLAUDE_EXECUTOR_MODEL` or `vars.CLAUDE_FIXER_MODEL`
+skips tier resolution entirely for that role: an operator naming a model has
+made a decision about this repository, and neither a planner's guess about one
+task nor an escalation counter overrules it. And `claude:fix` treats its
+configured model as a **floor** rather than a starting point to overwrite —
+the Issue's tier applies only when it is higher, and when nothing has raised
+the fixer above where it is configured to run, the configured id is handed
+back untouched rather than replaced by a tier's idea of it.
+
 Four rules bound what the recommendation can do:
 
 - **It prepends, it does not replace.** `run-copilot-session` advances through

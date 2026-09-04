@@ -240,6 +240,14 @@ jobs:
           NUMBER: ${{ steps.route.outputs.number }}
           DEFAULT_MODEL: ${{ steps.route.outputs.model }}
           ESCALATE_AFTER: ${{ vars.CLAUDE_FIXER_ESCALATE_AFTER || '1' }}
+
+          # Whether an operator named the model for this role. Captured before
+          # the `||` default in the route step, because once that expression
+          # has collapsed to a value there is no way to tell a deliberate
+          # choice from a fallback -- the same reason agent-02-execute.yml
+          # carries EXECUTOR_MODELS_PINNED.
+          EXEC_PINNED: ${{ vars.CLAUDE_EXECUTOR_MODEL != '' }}
+          FIX_PINNED: ${{ vars.CLAUDE_FIXER_MODEL != '' }}
         run: |
           set -euo pipefail
 
@@ -256,6 +264,47 @@ jobs:
               3) echo "claude-opus-5" ;;
             esac
           }
+
+          # The inverse, so the configured default can be compared against a
+          # tier. An id this does not recognise ranks 0 and is treated as
+          # "leave it alone unless escalation genuinely climbs past it".
+          rank_of_id() {
+            case "$1" in
+              claude-haiku-4-5-20251001) echo 1 ;;
+              claude-sonnet-5) echo 2 ;;
+              claude-opus-5) echo 3 ;;
+              *) echo 0 ;;
+            esac
+          }
+
+          # An operator who names a model for this role has made a decision
+          # about this repository; a planner's guess about one task does not
+          # overrule it, and neither does escalation. Same precedence the
+          # Copilot workflows enforce, and what AGENT_WORKFLOW.md promises.
+          if [ "$ROLE" = "execute" ]; then
+            PINNED="$EXEC_PINNED"
+          else
+            PINNED="$FIX_PINNED"
+          fi
+
+          if [ "$PINNED" = "true" ]; then
+            echo "model=$DEFAULT_MODEL" >> "$GITHUB_OUTPUT"
+            echo "An operator set this role's model variable;" \
+                 "using $DEFAULT_MODEL and skipping tier resolution."
+            exit 0
+          fi
+
+          # A typo in a repository variable should warn, not fail the run --
+          # the tier names are already tolerated this way, and an unquoted
+          # non-integer here would abort the step inside $(( )) under set -e.
+          case "$ESCALATE_AFTER" in
+            ''|*[!0-9]*)
+              echo "::warning::CLAUDE_FIXER_ESCALATE_AFTER is" \
+                   "'$ESCALATE_AFTER', which is not a whole number." \
+                   "Falling back to 1."
+              ESCALATE_AFTER=1
+              ;;
+          esac
 
           # `execute` is labelled on the Issue it targets. `fix` targets a
           # pull request, so the tier comes from the Issue that pull request
@@ -300,14 +349,32 @@ jobs:
             )
           fi
 
-          # The fixer never goes below where it already runs -- it answers a
-          # reviewer who has read the code, and a cheap executor's tier is a
-          # bet placed before the code existed. It does climb: one step per
-          # round past ESCALATE_AFTER, capped at opus. Same rule
-          # FIXER_ESCALATE_AFTER applies on the Copilot side.
-          if [ "$ROLE" = "fix" ]; then
-            if [ "$TIER_RANK" -lt 2 ]; then
-              TIER_RANK=2
+          if [ "$ROLE" = "execute" ]; then
+            if [ "$TIER_RANK" -eq 0 ]; then
+              echo "model=$DEFAULT_MODEL" >> "$GITHUB_OUTPUT"
+              echo "No model:* tier on #$ISSUE;" \
+                   "using the configured default $DEFAULT_MODEL."
+              exit 0
+            fi
+
+            EFFECTIVE="$TIER_RANK"
+          else
+            # The fixer never runs below where it is configured to run -- it
+            # answers a reviewer who has read the code, where a cheap
+            # executor's tier is a bet placed before the code existed. So the
+            # configured model is a FLOOR, not a starting point to overwrite:
+            # the Issue's tier applies only when it is higher, and escalation
+            # climbs from whichever of the two won.
+            BASE_RANK="$(rank_of_id "$DEFAULT_MODEL")"
+
+            if [ "$BASE_RANK" -eq 0 ]; then
+              BASE_RANK=2
+            fi
+
+            START="$BASE_RANK"
+
+            if [ "$TIER_RANK" -gt "$START" ]; then
+              START="$TIER_RANK"
             fi
 
             STEPS_UP=$(( PRIOR - ESCALATE_AFTER + 1 ))
@@ -316,34 +383,29 @@ jobs:
               STEPS_UP=0
             fi
 
-            TIER_RANK=$(( TIER_RANK + STEPS_UP ))
+            EFFECTIVE=$(( START + STEPS_UP ))
 
-            if [ "$TIER_RANK" -gt 3 ]; then
-              TIER_RANK=3
+            if [ "$EFFECTIVE" -gt 3 ]; then
+              EFFECTIVE=3
+            fi
+
+            echo "Fix round $(( PRIOR + 1 )) ($PRIOR completed);" \
+                 "escalating after $ESCALATE_AFTER."
+
+            # Nothing raised this above where it already runs, so hand back
+            # the configured id untouched rather than a tier's idea of it.
+            if [ "$EFFECTIVE" -le "$BASE_RANK" ]; then
+              echo "model=$DEFAULT_MODEL" >> "$GITHUB_OUTPUT"
+              echo "Nothing raised the fixer above its configured model;" \
+                   "using $DEFAULT_MODEL."
+              exit 0
             fi
           fi
 
-          if [ "$TIER_RANK" -eq 0 ]; then
-            echo "model=$DEFAULT_MODEL" >> "$GITHUB_OUTPUT"
-            echo "No model:* tier for #${ISSUE:-$NUMBER};" \
-                 "using the configured default $DEFAULT_MODEL."
-            exit 0
-          fi
-
-          RESOLVED="$(id_for "$TIER_RANK")"
+          RESOLVED="$(id_for "$EFFECTIVE")"
           echo "model=$RESOLVED" >> "$GITHUB_OUTPUT"
-
-          if [ "$ROLE" = "fix" ]; then
-            echo "Fix round $(( PRIOR + 1 )) ($PRIOR completed);" \
-                 "escalating after $ESCALATE_AFTER."
-          fi
-
           echo "Resolved model for $ROLE on #$NUMBER: $RESOLVED"
 
-      # Consume the label before the session runs, not after. A run that
-      # crashes mid-session must still leave the label removed, or re-adding
-      # it -- the retry gesture every other workflow here relies on -- cannot
-      # retrigger anything.
       - name: Consume The Label
         if: steps.route.outputs.label != ''
         env:
