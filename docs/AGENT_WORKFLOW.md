@@ -167,14 +167,15 @@ warns elsewhere against copying one spelling into the other. An Issue that
 named an id would bind the task to whichever pipeline used that namespace. A
 tier is meaningful to both, and each workflow maps it to its own ids.
 
-Both pipelines do. `agent-02-implement.yml` maps the tier to Copilot CLI ids;
-`agent-06-claude.yml`'s *Apply Per-Task Model Tier* step maps the same label
-to Claude Code ids for `claude:execute` and `claude:fix`. One decision, made
-once by the planner, read by whichever implementor the label happens to summon.
-`claude:plan` and `claude:review` keep their configured models — planning and
-review are repository-wide judgements, not per-task ones.
+Both vendors do, from one place. `agent-02-implement.yml`'s
+*Resolve Implementor Model Tier* step resolves the tier through a
+`tier_models` helper that spells it for whichever vendor the label named —
+`claude-haiku-4.5` for Copilot CLI, `claude-haiku-4-5` for Claude Code. One
+decision, made once by the planner, read by whichever implementor the label
+summons. The planner and reviewer keep their configured per-vendor lists:
+planning and review are repository-wide judgements, not per-task ones.
 
-The Claude side escalates too, on the same signal: `claude:fix` counts the
+The escalation runs per vendor on the same signal: a fix cycle counts the
 same `<!-- agent-fix-applied -->` comments `agent-05-fix.yml` counts, and
 climbs a tier per round past `CLAUDE_FIXER_ESCALATE_AFTER` (default `1`). A
 pull request fixed once by one pipeline therefore escalates on the other,
@@ -184,7 +185,7 @@ The two bounds that hold on the Copilot side hold here as well, and for the
 same reasons. Setting `vars.CLAUDE_IMPLEMENTOR_MODEL` or `vars.CLAUDE_FIXER_MODEL`
 skips tier resolution entirely for that role: an operator naming a model has
 made a decision about this repository, and neither a planner's guess about one
-task nor an escalation counter overrules it. And `claude:fix` treats its
+task nor an escalation counter overrules it. And the fix cycle treats its
 configured model as a **floor** rather than a starting point to overwrite —
 the Issue's tier applies only when it is higher, and when nothing has raised
 the fixer above where it is configured to run, the configured id is handed
@@ -502,12 +503,10 @@ Seven workflows in `.github/workflows/`, `agent-00` through `agent-06`. The
 number no longer maps to file purpose one-to-one — `agent-03-rollup.yml` and
 `agent-04-review.yml` swapped which number carries which role after
 `agent-05-fix.yml` was added — so treat the filename, not the number, as
-authoritative. Four spend AI credits (planner, execute, review, fix); two are
-plumbing and cost nothing (dashboard, rollup). The seventh,
-`agent-06-claude.yml`, is the Claude Code side of the same four roles and
-spends a Claude subscription or Claude API tokens rather than AI credits; the
-diagram below covers the Copilot path only, and *Two implementors* covers that
-one. `agent-00-dashboard.yml` no
+authoritative. Four spend model budget (planner, implement, review, fix); two
+are plumbing and cost nothing (dashboard, rollup). Each of the four runs
+either vendor, chosen by its label's third segment — see *One workflow per
+role, two vendors*. `agent-00-dashboard.yml` no
 longer runs on every event — it renders on demand now. See *Issue views* and
 *The control plane* below.
 
@@ -1603,8 +1602,8 @@ Six things about that loop are decisions rather than obvious consequences:
   code is being asked to understand something it could not have written. Every
   cycle after the first runs at `opus`, because a second cycle on the same PR
   is evidence the first was not enough. This is the local shape of the
-  escalation `agent-06-claude.yml`'s tier step already runs for `claude:fix`,
-  and it keeps that step's floor rule: the fixer never runs below its
+  escalation `agent-05-fix.yml`'s *Resolve Fixer Model Tier* step already
+  runs, and it keeps that step's floor rule: the fixer never runs below its
   configured model.
 - **The implementor's model comes from the Issue.** `/implementor` reads the
   planner's `model:*` label and passes it as the subagent's model, which
@@ -1673,11 +1672,12 @@ exactly the same account the session would. What differs is the surface: a
 session carries a user token, and a workflow carries `GITHUB_TOKEN` unless
 `AGENT_GITHUB_TOKEN` is set.
 
-`/execute-task` has one reader, and that is deliberate. `agent-06-claude.yml`
-routes `claude:execute` to `/implementor`, not here: a headless run is bounded by
-`--max-turns 60`, the implementor step alone can consume most of it, and a run
-truncated inside the third fix cycle is worse than one that stopped at a place
-it chose. A label is a single role. The orchestrator is a human in a session.
+`/execute-task` has one reader, and that is deliberate. No workflow runs it:
+`agent:implementor:{vendor}` drives `agent-02-implement.yml`, which is the
+single role, not the orchestrator. A headless run is bounded, the implementor
+step alone can consume most of that bound, and a run truncated inside the
+third fix cycle is worse than one that stopped at a place it chose. A label is
+a single role. The orchestrator is a human in a session.
 
 ### `/feature-status` — where does this feature stand?
 
@@ -1747,83 +1747,58 @@ dashboard — reads the Issue graph the same way regardless of which tool
 produced the diff, so switching tools mid-Feature, or per task, doesn't
 require picking one system and discarding the other.
 
-### Two implementors
+### One workflow per role, two vendors
 
-`agent-06-claude.yml` gives the Claude Code roles the same label-driven entry
-point the Copilot roles have, for the reason *Mostly label-driven, on purpose*
-gives: adding a label is something every GitHub client can do, a phone
-included. Four labels, one per role:
+Each role is one workflow, and which company answers is the label's third
+segment. `agent:reviewer:copilot` and `agent:reviewer:claude` run the same
+`agent-04-review.yml` against the same prompt and publish the same verdict
+comment; the only difference is which CLI produced the text in between.
 
-| Label | Target | Prompt | Model |
+| Label | Target | Workflow | Models |
 | --- | --- | --- | --- |
-| `claude:plan` | intake Issue | `.claude/commands/planner.md` | `vars.CLAUDE_PLANNER_MODEL`, default Opus 5 |
-| `claude:execute` | `[impl]` Issue | `.claude/commands/implementor.md` | `vars.CLAUDE_IMPLEMENTOR_MODEL`, default Haiku 4.5 |
-| `claude:review` | pull request | `.claude/commands/reviewer.md` | `vars.CLAUDE_REVIEWER_MODEL`, default Opus 5 |
-| `claude:fix` | pull request | `.claude/commands/fixer.md` | `vars.CLAUDE_FIXER_MODEL`, default Sonnet 5 |
+| `agent:planner:{vendor}` | intake Issue | `agent-01-planner.yml` | `vars.{VENDOR}_PLANNER_MODELS` |
+| `agent:implementor:{vendor}` | `[impl]` Issue | `agent-02-implement.yml` | per-task tier, resolved to the vendor's ids |
+| `agent:reviewer:{vendor}` | pull request | `agent-04-review.yml` | `vars.{VENDOR}_REVIEWER_MODELS` |
+| `agent:fixer:{vendor}` | pull request | `agent-05-fix.yml` | per-cycle tier, resolved to the vendor's ids |
 
-The tiers mirror the Copilot routing table above, for the same reason. The ids
-do not: these are Claude Code model ids (`claude-opus-5`,
-`claude-haiku-4-5-20251001`), not the Copilot CLI ids the other workflows pass
-to `--model`. The `CLAUDE_*` variable names keep the two namespaces from being
-confused, which *`model:` in an agent file takes a display name* warns about
-in the other direction.
+This replaces an earlier arrangement in which the Copilot roles and the Claude
+roles were separate workflows — `agent-06-claude.yml` held the whole Claude
+side — and the two drifted, because nothing forced them to agree. A verdict
+published by one had a different envelope from the other's; a tier meant one
+thing here and another there. Deleting that file is most of what this
+standardisation *is*.
 
-So the repository now has two implementors, and the label namespaces are separate
-so that a choice between them is always explicit. `agent:execute` and
-`claude:execute` do the same job through different products, and **nothing
-stops both being added to one Issue.** They would race: two sessions, two
-branches, two pull requests closing the same task. Nothing in either workflow
-detects the other, deliberately — a cross-check would couple them and give
-each a way to suppress the other. Adding one label at a time is the contract.
+**The vendor swaps in exactly one place.** `run-agent-session` takes a
+`vendor` input, runs the matching CLI, and writes one outcome file and one
+text file. Everything upstream builds a prompt; everything downstream parses a
+verdict and publishes it. Neither end knows who answered.
 
-Which to reach for:
+**A tier is semantic; the spelling is the vendor's.** The planner's
+`model:haiku` label means "this task is mechanical", not "use
+`claude-haiku-4.5`". Each workflow's `tier_models` helper resolves the tier to
+the answering vendor's ids, because the two spellings are not interchangeable:
+Copilot CLI writes `claude-haiku-4.5`, Claude Code writes `claude-haiku-4-5`.
+A list copied between vendors does not fail loudly — it walks every candidate
+and then reports that no model was available, which points the reader at
+entitlements rather than at a typo.
 
-- **`agent:*`** — the default. Copilot AI credits, a mature pipeline, and the
-  reviewer and rollup wired to it already.
-- **`claude:*`** — when the work wants a Claude Code session specifically:
-  a Claude subscription rather than AI credits, the `.claude/` subagents, or
-  a model the Copilot CLI will not resolve for the Actions identity. Also the
-  path that keeps working when a Copilot catalogue regression takes every
-  Anthropic model off the CLI, as it did in August 2026.
+**A label is a button, and the button that was pressed is the one released.**
+Each workflow consumes its own trigger label rather than a hardcoded one, so
+re-adding `agent:fixer:claude` is a clean retry of *that vendor* rather than a
+silent fallback to Copilot.
 
-`agent-06-claude.yml` is inert until someone completes the setup block at the
-top of the file: the Claude GitHub App installed, one of
-`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` added as a repository secret,
-and the four labels created. Without a secret it comments on the target saying
-which one is missing and then fails the run deliberately — the comment so the
-cause is readable from a phone, the failure so a request that never ran is not
-sitting in the checks list looking like one that did. What it avoids is the
-bare authentication error that says neither.
+**The Claude path needs `ANTHROPIC_API_KEY`.** A composite action cannot read
+`secrets` itself, so every workflow threads it into `run-agent-session`'s
+`api-key` input. `--bare` — the mode these runs use, so a run does not vary
+with whatever hooks or `CLAUDE.md` sit on the runner — never reads OAuth
+credentials, so `CLAUDE_CODE_OAUTH_TOKEN` does not authenticate this path
+whatever it is set to. A missing key fails before the model loop with that
+sentence, rather than walking every candidate and blaming availability.
 
-One further secret is optional, and only matters for the roles that push.
-Unset, the session acts as `GITHUB_TOKEN`, and GitHub starts no workflow run
-from a pull request authored by that identity — so `godot-ci-validation.yml`
-and `gdscript-lint.yml`, both of which trigger on `pull_request`, would never
-run on a `claude:execute` PR. `agent-02-implement.yml` pushes the same way and
-has the same gap, so this is a repository-wide condition rather than one this
-workflow introduces. Setting `AGENT_GITHUB_TOKEN` — a PAT or App installation
-token with `contents: write` and `pull-requests: write` — makes the session act
-as that identity instead, and its pull requests do start CI.
+**The legacy `agent:plan`, `agent:execute`, `agent:review` and `agent:fix`
+labels still work** and mean Copilot, which is what they have always meant.
+They are retired separately rather than broken mid-migration.
 
-It is one file where the Copilot side is five, because
-`anthropics/claude-code-action` performs the branch, commit, push, pull
-request and comment plumbing that those five hand-roll. What remains per role
-is a prompt path and a model, so the roles are a `case` statement rather than
-four files sharing one guard to keep in sync.
-
-Its prompts are the same `.claude/commands/*.md` files a human invokes as
-`/planner`, `/implementor`, `/reviewer` and `/fixer` — one contract per role, not
-a workflow copy that drifts from the interactive one. `claude:execute` routes
-to `/implementor` rather than to `/execute-task`: one label is one role, and the
-orchestrator's fix loop does not fit the `--max-turns 60` budget. It addresses them by path rather than as slash commands,
-because a slash command resolving inside the action is an assumption the
-workflow does not need to make; reading a checked-out file is not.
-
-**What has not been proven.** This workflow has never run. It was written and
-reviewed but not executed, because it needs a secret only the repository owner
-can add. The first run should be a `claude:review` on a pull request that is
-already reviewed by other means, where a wrong verdict costs nothing — not a
-`claude:execute` on real work.
 
 ## Running in VS Code
 

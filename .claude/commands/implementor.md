@@ -91,10 +91,10 @@ the subagent call, which takes precedence over the frontmatter.
 
 An untiered Issue gets `sonnet`, not `haiku` — the planner's own rule is that
 `sonnet` is the answer when the tier is unclear, and a missing label is the
-most unclear a tier gets. (The headless `claude:execute` path already
-resolves the same label into the session's own `--model` before this file is
-read — see the tier step in `agent-06-claude.yml` — so there you are agreeing
-with a decision already made, not making a second one.) Say in your report which tier you used and whether
+most unclear a tier gets. (`agent-02-implement.yml` resolves the same label
+in its *Resolve Implementor Model Tier* step, so the CI path reaches this
+answer without reading this file. The two agreeing is the point; they are the
+same rule written for two surfaces.) Say in your report which tier you used and whether
 it came from a label or from that default; the fix cycle in `/execute-task`
 reads it back, and "whatever the implementor used" has to mean something
 specific.

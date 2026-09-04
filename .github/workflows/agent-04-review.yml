@@ -44,6 +44,18 @@ on:
         required: true
         type: number
 
+      vendor:
+        description: >
+          Which company answers. A labelled run takes this from the label's
+          third segment instead; this input exists because workflow_dispatch
+          has no label to read.
+        required: false
+        type: choice
+        options:
+          - copilot
+          - claude
+        default: copilot
+
 permissions:
   contents: read
   issues: write
@@ -64,7 +76,9 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
-       github.event.label.name == 'agent:review') ||
+       (github.event.label.name == 'agent:reviewer:copilot' ||
+        github.event.label.name == 'agent:reviewer:claude' ||
+        github.event.label.name == 'agent:review')) ||
       (github.event.action == 'ready_for_review' &&
        (startsWith(github.event.pull_request.head.ref, 'copilot/') ||
         startsWith(github.event.pull_request.head.ref, 'claude/')))
@@ -83,10 +97,24 @@ jobs:
       # Every entry stays in the strong tier; a cheap reviewer is worse than
       # no reviewer. Overridable via the REVIEWER_MODELS repository variable
       # (comma-separated); the older REVIEWER_MODEL is honoured first if set.
-      REVIEWER_MODELS: >-
-        ${{ vars.REVIEWER_MODELS
-        || vars.REVIEWER_MODEL
+      # One list per vendor, selected by the label's vendor segment. The ids
+      # are NOT interchangeable -- Copilot spells Opus 4.8 `claude-opus-4.8`,
+      # Claude Code spells it `claude-opus-4-8` -- so copying one list into
+      # the other variable walks every candidate and then blames availability.
+      COPILOT_REVIEWER_MODELS: >-
+        ${{ vars.COPILOT_REVIEWER_MODELS
         || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
+
+      CLAUDE_REVIEWER_MODELS: >-
+        ${{ vars.CLAUDE_REVIEWER_MODELS
+        || 'claude-opus-5,claude-opus-4-8,claude-sonnet-5' }}
+
+      # The label that triggered this run, or empty. Consumed at the end, so
+      # it must be readable from every step.
+      TRIGGER_LABEL: ${{ github.event.label.name }}
+
+      # Claude's bound. Review reads a lot and writes one verdict.
+      REVIEWER_MAX_TURNS: "40"
 
       # Soft cap for this review session. The Copilot CLI rejects any
       # value below 30 before it starts work, so 30 is the floor, not a
@@ -98,6 +126,41 @@ jobs:
       MAX_DIFF_CHARS: "150000"
 
     steps:
+      # The vendor comes from the label's third segment. Everything after
+      # this step reads one outcome file and one text file and never learns
+      # which company answered.
+      - name: Route Vendor
+        id: route
+        shell: bash
+        env:
+          LABEL: ${{ github.event.label.name }}
+          DISPATCH_VENDOR: ${{ inputs.vendor }}
+        run: |
+          set -euo pipefail
+
+          # A `ready_for_review` run and a workflow_dispatch have no label to
+          # read, and the legacy `agent:review` label has no vendor segment. All
+          # three mean copilot, which is what they have always meant. Stage 4
+          # retires the legacy label.
+          case "$LABEL" in
+            agent:reviewer:claude)  VENDOR=claude ;;
+            agent:reviewer:copilot) VENDOR=copilot ;;
+            *)                    VENDOR="${DISPATCH_VENDOR:-copilot}" ;;
+          esac
+
+          case "$VENDOR" in
+            copilot) MODELS="$COPILOT_REVIEWER_MODELS" ;;
+            claude)  MODELS="$CLAUDE_REVIEWER_MODELS" ;;
+            *)
+              echo "::error::Unknown vendor '$VENDOR'."
+              exit 1
+              ;;
+          esac
+
+          echo "vendor=$VENDOR" >> "$GITHUB_OUTPUT"
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          echo "Running as $VENDOR; candidates: $MODELS"
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -140,10 +203,12 @@ jobs:
         with:
           # Explicit for now. Stage 3 replaces this literal with the vendor
           # segment of the `agent:{role}:{vendor}` label that triggered the run.
-          vendor: copilot
+          vendor: ${{ steps.route.outputs.vendor }}
           prompt-file: ${{ steps.build.outputs.prompt-file }}
-          models: ${{ env.REVIEWER_MODELS }}
+          models: ${{ steps.route.outputs.models }}
           max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
+          max-turns: ${{ env.REVIEWER_MAX_TURNS }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Same capability-removal posture as the planner: the reviewer
           # can read the checkout but holds no tool that can change it.
           capability: read-only
@@ -222,7 +287,7 @@ jobs:
           # The label is consumed so re-adding it is a clean re-review signal.
           gh pr edit "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:review" || true
+            --remove-label "${TRIGGER_LABEL:-agent:review}" || true
 
       # Until now a failed review said nothing at all: the run went red, the
       # pull request looked un-reviewed, and `agent:review` stayed attached --

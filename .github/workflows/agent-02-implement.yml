@@ -96,9 +96,21 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Implementation Task Issue number to execute"
+        description: "Implementation Task Issue number to implement"
         required: true
         type: number
+
+      vendor:
+        description: >
+          Which company answers. A labelled run takes this from the label's
+          third segment instead; this input exists because workflow_dispatch
+          has no label to read.
+        required: false
+        type: choice
+        options:
+          - copilot
+          - claude
+        default: copilot
 
 permissions:
   contents: write
@@ -128,7 +140,9 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' &&
-       github.event.label.name == 'agent:execute')
+       (github.event.label.name == 'agent:implementor:copilot' ||
+        github.event.label.name == 'agent:implementor:claude' ||
+        github.event.label.name == 'agent:execute'))
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -187,6 +201,29 @@ jobs:
       BRANCH: agent-exec/${{ inputs.issue_number || github.event.issue.number }}
 
     steps:
+      # The vendor comes from the label's third segment. Everything after
+      # this step reads one outcome file and one text file and never learns
+      # which company answered.
+      - name: Route Vendor
+        id: route
+        shell: bash
+        env:
+          LABEL: ${{ github.event.label.name }}
+          DISPATCH_VENDOR: ${{ inputs.vendor }}
+        run: |
+          set -euo pipefail
+
+          # workflow_dispatch has no label, and the legacy label has no vendor
+          # segment. Both mean copilot, which is what they have always meant.
+          case "$LABEL" in
+            agent:implementor:claude)  VENDOR=claude ;;
+            agent:implementor:copilot) VENDOR=copilot ;;
+            *)                  VENDOR="${DISPATCH_VENDOR:-copilot}" ;;
+          esac
+
+          echo "vendor=$VENDOR" >> "$GITHUB_OUTPUT"
+          echo "Running as $VENDOR"
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -396,7 +433,7 @@ jobs:
 
           gh issue edit "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:execute" || true
+            --remove-label "${TRIGGER_LABEL:-agent:execute}" || true
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -503,6 +540,14 @@ jobs:
       - name: Resolve Implementor Model Tier
         id: tier
         if: steps.context.outputs.ok == 'true'
+        env:
+          VENDOR: ${{ steps.route.outputs.vendor }}
+          # The list used when no per-task tier applies. Vendor-specific
+          # for the same reason tier_models is: the ids do not transfer.
+          DEFAULT_MODELS: >-
+            ${{ steps.route.outputs.vendor == 'claude'
+            && 'claude-haiku-4-5,claude-sonnet-5,claude-opus-5'
+            || 'claude-haiku-4.5,claude-sonnet-5,claude-opus-5' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -556,24 +601,32 @@ jobs:
             TIER="$IMPLEMENTOR_TIER_FLOOR"
           fi
 
+          # A tier names a capability level; each vendor spells it its own
+          # way. Copilot CLI: `claude-haiku-4.5`. Claude Code: the same model
+          # is `claude-haiku-4-5`. Resolving the spelling here keeps the
+          # escalation logic above vendor-blind, and keeps a `:claude` run
+          # from walking a list of Copilot ids and then reporting that every
+          # model was unavailable.
+          tier_models() {
+            case "$1:$VENDOR" in
+              haiku:copilot)  echo "claude-haiku-4.5,claude-sonnet-5,claude-opus-5" ;;
+              haiku:claude)   echo "claude-haiku-4-5,claude-sonnet-5,claude-opus-5" ;;
+              sonnet:copilot) echo "claude-sonnet-5,claude-opus-5" ;;
+              sonnet:claude)  echo "claude-sonnet-5,claude-opus-5" ;;
+              opus:copilot)   echo "claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5" ;;
+              opus:claude)    echo "claude-opus-5,claude-opus-4-8,claude-sonnet-5" ;;
+              *)              echo "" ;;
+            esac
+          }
+
           if [ "$IMPLEMENTOR_MODELS_PINNED" = "true" ]; then
-            MODELS="$IMPLEMENTOR_MODELS"
+            MODELS="$DEFAULT_MODELS"
             REASON="IMPLEMENTOR_MODELS is set for this repository; the operator list wins over any per-task tier."
           elif [ -z "$TIER" ]; then
-            MODELS="$IMPLEMENTOR_MODELS"
+            MODELS="$DEFAULT_MODELS"
             REASON="No model:* label on this Issue; using the default list."
           else
-            case "$TIER" in
-              haiku)
-                MODELS="claude-haiku-4.5,claude-sonnet-5,claude-opus-5"
-                ;;
-              sonnet)
-                MODELS="claude-sonnet-5,claude-opus-5"
-                ;;
-              opus)
-                MODELS="claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5"
-                ;;
-            esac
+            MODELS="$(tier_models "$TIER")"
             REASON="Planner recommended model:$TIER for this task."
           fi
 
@@ -669,7 +722,8 @@ jobs:
         with:
           # Explicit for now. Stage 3 replaces this literal with the vendor
           # segment of the `agent:{role}:{vendor}` label that triggered the run.
-          vendor: copilot
+          vendor: ${{ steps.route.outputs.vendor }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: implementor-prompt.txt
           models: ${{ steps.tier.outputs.models }}
           max-ai-credits: ${{ env.IMPLEMENTOR_MAX_AI_CREDITS }}
@@ -945,7 +999,7 @@ jobs:
 
           subprocess.run(
               ["gh", "issue", "edit", issue_number, "--repo", repo,
-               "--remove-label", "agent:execute"],
+               "--remove-label", os.environ.get("TRIGGER_LABEL") or "agent:execute"],
               check=False,
           )
 
@@ -1096,7 +1150,8 @@ jobs:
         with:
           # Explicit for now. Stage 3 replaces this literal with the vendor
           # segment of the `agent:{role}:{vendor}` label that triggered the run.
-          vendor: copilot
+          vendor: ${{ steps.route.outputs.vendor }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: ${{ steps.review-build.outputs.prompt-file }}
           models: ${{ env.REVIEWER_MODELS }}
           max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
@@ -1164,7 +1219,8 @@ jobs:
         with:
           # Explicit for now. Stage 3 replaces this literal with the vendor
           # segment of the `agent:{role}:{vendor}` label that triggered the run.
-          vendor: copilot
+          vendor: ${{ steps.route.outputs.vendor }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: ${{ steps.fix-build.outputs.prompt-file }}
           models: ${{ env.FIXER_MODELS }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
@@ -1701,7 +1757,7 @@ jobs:
 
           gh issue edit "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --remove-label "agent:execute" || true
+            --remove-label "${TRIGGER_LABEL:-agent:execute}" || true
 
       # The pull request already exists by this point (opened right after
       # the implementor's commit, before validation ever ran), so this posts
