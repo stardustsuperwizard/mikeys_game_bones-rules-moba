@@ -186,7 +186,10 @@ static func _test_scheme_change_updates_multiplier_live(tree: SceneTree) -> Arra
 	var result_gamepad := action_gamepad.execute()
 	if not result_gamepad.success:
 		violations.append(
-			"scheme_change: gamepad-scheme activation should succeed, got %s" % result_gamepad.reason
+			(
+				"scheme_change: gamepad-scheme activation should succeed, got %s"
+				% result_gamepad.reason
+			)
 		)
 	var gamepad_angle := raw_direction.angle_to(context_gamepad.aim_direction)
 

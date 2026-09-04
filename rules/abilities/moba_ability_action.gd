@@ -263,9 +263,7 @@ static func _resolve_hard_lock_direction(context: MobaCastContext, caster: Node)
 		var anchor := MobaTargeting._get_spatial_anchor(context.locked_target)
 		if anchor != null:
 			resolved_target = anchor
-	return MobaAimAssist.resolve_direction(
-		context.aim_direction, resolved_target, caster_pos, 1.0
-	)
+	return MobaAimAssist.resolve_direction(context.aim_direction, resolved_target, caster_pos, 1.0)
 
 
 ## Look up the caster's MobaInputScheme (if any) and map its live scheme to the

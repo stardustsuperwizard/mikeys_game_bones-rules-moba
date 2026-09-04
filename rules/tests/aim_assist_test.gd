@@ -401,10 +401,13 @@ static func _test_shipped_magnetism_never_exceeds_one_with_any_device() -> Array
 					var multiplier := MobaAimAssist.get_device_multiplier(device)
 					var raw_product: float = ability.magnetism * multiplier
 					if raw_product > 1.0:
-						violations.append(
-							(
-								"Shipped magnetism: %s magnetism %.3f x %s multiplier %.3f exceeds 1.0"
-								% [file_name, ability.magnetism, device, multiplier]
+						(
+							violations
+							. append(
+								(
+									"Shipped magnetism: %s magnetism %.3f x %s multiplier %.3f exceeds 1.0"
+									% [file_name, ability.magnetism, device, multiplier]
+								)
 							)
 						)
 		file_name = dir.get_next()
