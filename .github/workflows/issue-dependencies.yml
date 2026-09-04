@@ -7,9 +7,9 @@ name: Issue Dependency Chain
 # planner, in one pass, over the sub-issues of a single plan -- and when that
 # call failed, nothing said so. Everything downstream reads the native
 # relationship (`agent-00-dashboard.yml`'s dependency ordering,
-# `agent-02-execute.yml`'s refusal to run a blocked task,
+# `agent-02-implement.yml`'s refusal to run a blocked task,
 # `issue-linking.yml`'s open-blocker warning), so a chain that failed to get
-# created is not a cosmetic loss: it is the executor cheerfully implementing
+# created is not a cosmetic loss: it is the implementor cheerfully implementing
 # task three before task one exists.
 #
 # So the edge is written in the Issue body first, in a table any human or

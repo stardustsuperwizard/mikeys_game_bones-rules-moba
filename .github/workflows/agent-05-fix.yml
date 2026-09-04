@@ -7,7 +7,7 @@ name: Agent - PR Fix
 # locally, or commenting `@copilot` on a `review:fix` pull request.
 #
 # The gathering and prompt-building work is shared with
-# agent-02-execute.yml's pre-PR review-and-fix gate via the
+# agent-02-implement.yml's pre-PR review-and-fix gate via the
 # `build-fix-request` and `run-agent-session` composite actions. This
 # workflow's own job is everything specific to fixing an *existing* pull
 # request: checking out its branch, pushing the correction, and posting the
@@ -130,7 +130,7 @@ jobs:
       # of budget is the expensive failure here: it has already paid for
       # the review that found the problem, and it leaves a partial edit
       # for a human to finish. Kept in lockstep with the same variable in
-      # agent-02-execute.yml's pre-PR pass.
+      # agent-02-implement.yml's pre-PR pass.
       FIXER_MAX_AI_CREDITS: "150"
 
       # Context only -- the checked-out repository is the source of truth
@@ -166,7 +166,7 @@ jobs:
           # Neither is a red run. A refusal is not a malfunction, and
           # "Report Refusal" below says which one applies -- the same
           # comment-and-drop-the-label shape "Require a FIX Verdict" already
-          # uses, and that agent-02-execute.yml's "Report Guard Failure"
+          # uses, and that agent-02-implement.yml's "Report Guard Failure"
           # uses for the identical restriction on the Issue side.
 
           # A fork PR's branch cannot be pushed to with this token.
@@ -185,7 +185,7 @@ jobs:
           # Read from the pull request's *changed files*, not from the
           # originating Issue's expected files. An Issue declares intent and
           # can be wrong or absent; the diff is exactly what the push will
-          # carry, and by this point it exists. (agent-02-execute.yml asks
+          # carry, and by this point it exists. (agent-02-implement.yml asks
           # the same question of an Issue because it runs before any diff
           # does.)
           #
@@ -350,12 +350,12 @@ jobs:
       # Two inputs decide the fixer's model: how much model the planner
       # thought this task needed, and how many times fixing it has already
       # been attempted. The first is the same `model:*` label
-      # agent-02-execute.yml reads, resolved through the Issue this pull
+      # agent-02-implement.yml reads, resolved through the Issue this pull
       # request closes; the second is counted from the fixer's own
       # `<!-- agent-fix-applied -->` comments on the pull request.
       #
       # The tier only ever raises the fixer, never lowers it. A cheap
-      # executor is a cost decision made before the code existed; the fixer
+      # implementor is a cost decision made before the code existed; the fixer
       # is a correction responding to a reviewer who has read the code, and
       # spending less on it than this repository already does would be a
       # regression wearing a feature's clothes. So the base tier is a floor,
@@ -556,7 +556,7 @@ jobs:
           prompt-file: ${{ steps.build.outputs.prompt-file }}
           models: ${{ steps.tier.outputs.models }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
-          # Same tool set as the executor: this session needs to edit,
+          # Same tool set as the implementor: this session needs to edit,
           # run shell commands, and commit. Only sub-agent spawning stays
           # excluded.
           capability: write
@@ -766,7 +766,7 @@ jobs:
               summary.write("\n" + body + "\n")
 
   # The independent check on a fix commit. See the equivalent job in
-  # agent-02-execute.yml for the full reasoning; the short form is that the
+  # agent-02-implement.yml for the full reasoning; the short form is that the
   # `pull_request`-triggered gate has repeatedly failed to fire for agent
   # pushes, landing in `action_required` and never executing (Issue #167), so
   # nothing outside the fixer's own session ever measured the commit it

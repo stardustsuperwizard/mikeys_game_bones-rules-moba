@@ -1,6 +1,6 @@
 ---
-name: executor
-description: Implements a single Mikey's Game Bones MOBA Rules Implementation Task Issue end to end — reads the Issue, writes the code, runs validation, and opens a PR that closes it. Use when the user wants to implement a specific `[impl]` Issue. Local counterpart of .github/agents/02-executor.agent.md.
+name: implementor
+description: Implements a single Mikey's Game Bones MOBA Rules Implementation Task Issue end to end — reads the Issue, writes the code, runs validation, and opens a PR that closes it. Use when the user wants to implement a specific `[impl]` Issue. Local counterpart of .github/agents/02-implementor.agent.md.
 tools: Read, Edit, Write, Bash, Grep, Glob, mcp__github__issue_read, mcp__github__create_pull_request
 model: haiku
 ---

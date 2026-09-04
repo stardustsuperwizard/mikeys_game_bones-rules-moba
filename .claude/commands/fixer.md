@@ -15,7 +15,7 @@ Split it before the first GitHub call and use the two parts separately:
 - **the tier**, if there is one — `haiku`, `sonnet` or `opus`, passed as the
   `model` parameter on the `fixer` subagent call, where it takes precedence
   over `fixer.md`'s `model: haiku` frontmatter. An invoker that names a tier
-  has a reason: `/execute-task` passes the tier the executor built the code
+  has a reason: `/execute-task` passes the tier the implementor built the code
   at, then escalates to `opus` from the second cycle on.
 
 With no tier given — a bare `/fixer 390`, or the headless `claude:fix` path

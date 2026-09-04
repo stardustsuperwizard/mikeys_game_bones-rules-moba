@@ -19,22 +19,22 @@
 # WHY IT REUSES `.claude/commands/*.md`
 #
 # The prompt for each role is the same file a human invokes as `/planner`,
-# `/executor`, `/reviewer` or `/fixer` in a terminal or from the Claude mobile
+# `/implementor`, `/reviewer` or `/fixer` in a terminal or from the Claude mobile
 # app. There is one contract per role, not a workflow copy that drifts from
 # the interactive one -- the same reasoning `CLAUDE.md` gives for pointing at
 # `AGENTS.md` rather than copying it.
 #
-# `claude:execute` routes to `/executor`, NOT to `/execute-task`. Those are
-# different things: `/executor` runs the executor agent once and stops at the
+# `claude:execute` routes to `/implementor`, NOT to `/execute-task`. Those are
+# different things: `/implementor` runs the implementor agent once and stops at the
 # open PR, which is the single-role shape every other row here has, while
 # `/execute-task` is the interactive orchestrator that chains all four roles
 # and loops the fix cycle up to four times. That loop cannot fit in the
-# `--max-turns 60` budget below -- the executor step alone can consume most of
+# `--max-turns 60` budget below -- the implementor step alone can consume most of
 # it -- and a run truncated somewhere inside the third fix cycle is worse than
 # one that stopped at a place it chose. A label is a single role; the
 # orchestrator is a human sitting in a session.
 #
-# Those files are addressed by path rather than invoked as `/executor`,
+# Those files are addressed by path rather than invoked as `/implementor`,
 # because a slash command resolving inside the action is an assumption this
 # workflow does not need to make. Reading a checked-out file is not.
 #
@@ -43,7 +43,7 @@
 # Same as every other workflow here: the label is a button, not a state. The
 # run removes the label it consumed, so re-adding it is a clean retry and no
 # workflow fires on its own output. `claude:*` is a separate namespace from
-# `agent:*` on purpose -- see *Two executors* in docs/AGENT_WORKFLOW.md.
+# `agent:*` on purpose -- see *Two implementors* in docs/AGENT_WORKFLOW.md.
 #
 # SETUP -- required once, and this workflow is inert until it is done
 #
@@ -173,7 +173,7 @@ jobs:
           # docs/AGENT_WORKFLOW.md for the same reason it gives: reasoning is
           # worth paying for where decisions are made, not where they are
           # executed. Planning and review read a lot and write little; the
-          # executor's work is bounded by a contract someone else wrote.
+          # implementor's work is bounded by a contract someone else wrote.
           #
           # These are Claude Code model ids, NOT the Copilot CLI ids the other
           # workflows pass to `--model`. AGENT_WORKFLOW.md warns against
@@ -186,8 +186,8 @@ jobs:
               TARGET="issue"
               ;;
             execute)
-              PROMPT_FILE=".claude/commands/executor.md"
-              MODEL="${{ vars.CLAUDE_EXECUTOR_MODEL || 'claude-haiku-4-5-20251001' }}"
+              PROMPT_FILE=".claude/commands/implementor.md"
+              MODEL="${{ vars.CLAUDE_IMPLEMENTOR_MODEL || 'claude-haiku-4-5-20251001' }}"
               TARGET="issue"
               ;;
             review)
@@ -231,7 +231,7 @@ jobs:
 
           echo "Routing $ROLE -> $PROMPT_FILE on $MODEL, target #$NUMBER"
 
-      # The same per-task tier agent-02-execute.yml reads, mapped into Claude
+      # The same per-task tier agent-02-implement.yml reads, mapped into Claude
       # Code model ids instead of Copilot CLI ones. The Issue carries a tier
       # (`model:haiku` / `model:sonnet` / `model:opus`), never an id, exactly
       # so both pipelines can honour one decision without sharing a spelling.
@@ -254,17 +254,17 @@ jobs:
           # Lower bound on what a planner may ask for on this pipeline, so
           # the cheap tier can be taken out of circulation repository-wide
           # without editing the planner's rubric or relabelling any Issue.
-          # The Copilot counterpart is EXECUTOR_TIER_FLOOR; like it, this
+          # The Copilot counterpart is IMPLEMENTOR_TIER_FLOOR; like it, this
           # binds `execute` only -- `fix` already has a floor in the model
           # it is configured with.
-          TIER_FLOOR: ${{ vars.CLAUDE_EXECUTOR_TIER_FLOOR || 'haiku' }}
+          TIER_FLOOR: ${{ vars.CLAUDE_IMPLEMENTOR_TIER_FLOOR || 'haiku' }}
 
           # Whether an operator named the model for this role. Captured before
           # the `||` default in the route step, because once that expression
           # has collapsed to a value there is no way to tell a deliberate
-          # choice from a fallback -- the same reason agent-02-execute.yml
-          # carries EXECUTOR_MODELS_PINNED.
-          EXEC_PINNED: ${{ vars.CLAUDE_EXECUTOR_MODEL != '' }}
+          # choice from a fallback -- the same reason agent-02-implement.yml
+          # carries IMPLEMENTOR_MODELS_PINNED.
+          EXEC_PINNED: ${{ vars.CLAUDE_IMPLEMENTOR_MODEL != '' }}
           FIX_PINNED: ${{ vars.CLAUDE_FIXER_MODEL != '' }}
         run: |
           set -euo pipefail
@@ -407,14 +407,14 @@ jobs:
             FLOOR_RANK="$(rank "$TIER_FLOOR")"
 
             if [ "$FLOOR_RANK" -eq 0 ]; then
-              echo "::warning::CLAUDE_EXECUTOR_TIER_FLOOR is" \
+              echo "::warning::CLAUDE_IMPLEMENTOR_TIER_FLOOR is" \
                    "'$TIER_FLOOR', which is not a tier. Ignoring it."
               FLOOR_RANK=0
             fi
 
             # Only a tier the planner actually set is raised. An unlabelled
             # Issue took the configured default two branches up and never
-            # reaches here, which is what agent-02-execute.yml does too: the
+            # reaches here, which is what agent-02-implement.yml does too: the
             # floor bounds a recommendation, it does not invent one.
             if [ "$TIER_RANK" -lt "$FLOOR_RANK" ]; then
               echo "Raising model:$(name_for "$TIER_RANK") to the repository" \
@@ -426,7 +426,7 @@ jobs:
           else
             # The fixer never runs below where it is configured to run -- it
             # answers a reviewer who has read the code, where a cheap
-            # executor's tier is a bet placed before the code existed. So the
+            # implementor's tier is a bet placed before the code existed. So the
             # configured model is a FLOOR, not a starting point to overwrite:
             # the Issue's tier applies only when it is higher, and escalation
             # climbs from whichever of the two won.
@@ -548,7 +548,7 @@ jobs:
       # gate in this repository triggers on `pull_request`, so Godot validation
       # and gdscript-lint would never run on a `claude:execute` PR -- the exact
       # outcome an earlier version of this comment claimed to prevent.
-      # agent-02-execute.yml pushes the same way and has the same gap, so this
+      # agent-02-implement.yml pushes the same way and has the same gap, so this
       # is a repository-wide condition rather than something new here.
       #
       # Setting the optional AGENT_GITHUB_TOKEN secret closes it for this

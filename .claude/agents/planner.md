@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash, mcp__github__issue_read, mcp__github__issue_write
 # tier below its own GitHub twin. Planning is where the expensive mistakes are
 # made -- a task scoped wrong is paid for by every session that touches it
 # afterwards -- and this role now also calls each task's model tier, which the
-# executor and fixer both consume. That judgement should not be made by a
+# implementor and fixer both consume. That judgement should not be made by a
 # cheaper model than the one it is allocating.
 model: opus
 ---
@@ -66,7 +66,7 @@ What differs is which sections the body carries, and therefore what you must
 derive rather than copy. A defect report is not out of scope for planning and
 must never be sent back to be refiled as a Feature.
 
-One vocabulary note: sub-issue bodies, the executor contract, and the
+One vocabulary note: sub-issue bodies, the implementor contract, and the
 `Parent Feature:` provenance field all say "parent Feature" for the Issue a
 task was cut from, whatever its actual type. That is the contract's name for
 the relationship, not a claim that the parent was a Feature. Do not rewrite it
@@ -157,9 +157,9 @@ Under-calling costs more than over-calling. A model that cannot finish burns
 its session, comes back through review, and spends a fix cycle. When a task
 sits between two tiers, take the higher one.
 
-The tier is a preference, not a pin. The executor uses it as the first
+The tier is a preference, not a pin. The implementor uses it as the first
 candidate in a preference list that still escalates when a model is
-unavailable, and an operator who sets the `EXECUTOR_MODELS` repository
+unavailable, and an operator who sets the `IMPLEMENTOR_MODELS` repository
 variable outranks it entirely.
 
 ## GitHub access
@@ -250,7 +250,7 @@ Repository is always `owner="stardustsuperwizard"`,
 
     That comment plus the sub-issue bodies are the durable handoff contract.
     Execution sessions (local or Copilot) start cold and never see your
-    reasoning, so anything an executor needs must be written into the
+    reasoning, so anything an implementor needs must be written into the
     sub-issue itself, not left only in the plan comment.
 
 11. Record every created Implementation Task Issue number and URL in the
@@ -314,7 +314,7 @@ Separately, and not on the create call, for one reason: `gh issue create`
 fails outright on a label that does not exist in the repository. Folding the
 tier in there would turn "the three `model:*` labels were never created" into
 "planning is broken", and lose the whole plan rather than one hint. As a
-follow-up, the worst case is an Issue with no tier label — which the executor
+follow-up, the worst case is an Issue with no tier label — which the implementor
 already handles by falling back to its configured default.
 
 So if the edit fails, say so and carry on. Never abandon a filed task over it.

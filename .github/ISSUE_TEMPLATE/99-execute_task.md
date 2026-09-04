@@ -48,7 +48,7 @@ example "[<this-issue-number>] <what it does>", and include in its
 description: Closes #<this-issue-number>
 ````
 
-**Pick the model, not the agent.** The `executor` profile adds nothing a
+**Pick the model, not the agent.** The `implementor` profile adds nothing a
 cloud session can use: its `tools:` and `model:` keys are both ignored there,
 and its prose is already in `.github/copilot-instructions.md`, which every
 cloud session reads. On GitHub Mobile, selecting a custom agent costs you the
@@ -98,11 +98,11 @@ implementation pull request must be titled starting with
 <!--
 The planner's recommendation for how much model this task needs, mirrored by
 a `model:haiku` / `model:sonnet` / `model:opus` label. The label is what
-agent-02-execute.yml reads; this section is what lets a human check the call.
+agent-02-implement.yml reads; this section is what lets a human check the call.
 
-It is a preference, not a pin: the executor uses it as the first candidate in
+It is a preference, not a pin: the implementor uses it as the first candidate in
 a list that still escalates when a model is unavailable, and an explicitly set
-`EXECUTOR_MODELS` repository variable outranks it. An Issue with no tier label
+`IMPLEMENTOR_MODELS` repository variable outranks it. An Issue with no tier label
 runs on the default list, exactly as before this field existed.
 
 Disagree with it? Change the label. Nothing re-reads this prose.

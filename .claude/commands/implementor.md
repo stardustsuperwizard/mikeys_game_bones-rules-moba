@@ -6,7 +6,7 @@ argument-hint: <task-issue-number>
 Implement Implementation Task Issue #$ARGUMENTS in
 stardustsuperwizard/mikeys_game_bones-rules-moba.
 
-This command runs the `executor` subagent once and stops at the open PR. It
+This command runs the `implementor` subagent once and stops at the open PR. It
 does not wait on CI, does not review, and does not fix. `/execute-task` is
 the command that drives a task the rest of the way.
 
@@ -78,7 +78,7 @@ The Issue carries one of `model:haiku`, `model:sonnet` or `model:opus` — the
 planner's call on how much model this task needs, made by the only role that
 saw the whole feature before any of it was written. Honour it.
 
-`executor.md`'s frontmatter says `model: haiku`. That is the floor for a task
+`implementor.md`'s frontmatter says `model: haiku`. That is the floor for a task
 nobody tiered, not a pin. Pass the label's tier as the `model` parameter on
 the subagent call, which takes precedence over the frontmatter.
 
@@ -96,12 +96,12 @@ resolves the same label into the session's own `--model` before this file is
 read — see the tier step in `agent-06-claude.yml` — so there you are agreeing
 with a decision already made, not making a second one.) Say in your report which tier you used and whether
 it came from a label or from that default; the fix cycle in `/execute-task`
-reads it back, and "whatever the executor used" has to mean something
+reads it back, and "whatever the implementor used" has to mean something
 specific.
 
 ## Run it
 
-Delegate to the `executor` subagent, giving it the Issue number, the fetched
+Delegate to the `implementor` subagent, giving it the Issue number, the fetched
 body as context, and the `model` from the table above.
 
 It reports a PR URL; the PR number is that URL's last path segment. If it
@@ -125,6 +125,6 @@ CLOUD — call mcp__github__list_pull_requests with:
   head="stardustsuperwizard:<the-branch>"
 ```
 
-Report the executor's completion report, the PR URL, and the model tier you
+Report the implementor's completion report, the PR URL, and the model tier you
 ran it at. Do not add the `agent:review` label and do not review the PR
 yourself — this command's contract ends at the open PR.

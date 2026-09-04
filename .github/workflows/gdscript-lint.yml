@@ -5,7 +5,7 @@ name: GDScript Lint
 # whole-repo -- see lint-gdscript/action.yml for why.
 #
 # This is the catch-all: agent-04-review.yml folds the same check into its
-# review comment for PRs it reviews, and agent-02-execute.yml auto-fixes
+# review comment for PRs it reviews, and agent-02-implement.yml auto-fixes
 # formatting before it ever opens a pull request -- but a human-authored
 # PR, or a cloud-agent PR nobody ran `agent:review` on, would otherwise get
 # no lint signal at all. This workflow is what covers that gap.
@@ -13,7 +13,7 @@ name: GDScript Lint
 # Unlike a plain gate, this one tries to self-heal before failing:
 #
 #   1. `gdformat` is mechanical and deterministic (same tool and mode
-#      agent-02-execute.yml already runs pre-PR). If it changes anything,
+#      agent-02-implement.yml already runs pre-PR). If it changes anything,
 #      commit and push that -- no model, no judgment call, nothing to gate
 #      behind a human. This alone should resolve the large majority of
 #      findings, the same way it does pre-PR.
@@ -78,7 +78,7 @@ env:
 
   # Cheap tier by default: these are narrow, single-file, already-diagnosed
   # findings, not open-ended judgment calls -- the same "Haiku first" shape
-  # as EXECUTOR_MODELS in agent-02-execute.yml. Overridable via the
+  # as IMPLEMENTOR_MODELS in agent-02-implement.yml. Overridable via the
   # LINT_FIXER_MODELS repository variable (comma-separated).
   LINT_FIXER_MODELS: >-
     ${{ vars.LINT_FIXER_MODELS
@@ -225,7 +225,7 @@ jobs:
           cat gdscript-lint-report.md
 
       # Mechanical and deterministic -- no model call. Mirrors
-      # agent-02-execute.yml's pre-PR formatting pass: commit, validate,
+      # agent-02-implement.yml's pre-PR formatting pass: commit, validate,
       # push, or revert and continue unformatted if validation somehow
       # regressed (gdformat shouldn't change behavior, but this is a cheap
       # safety net either way).

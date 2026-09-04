@@ -81,7 +81,7 @@ rules/data/generated/
 #
 # THIS LIST IS LOAD-BEARING AND IS MATCHED BY LITERAL NAME. Renaming an
 # artifact without renaming its entry here does not fail a check -- it means
-# agent-02-execute.yml's "committing them so the work is not discarded" step
+# agent-02-implement.yml's "committing them so the work is not discarded" step
 # sweeps the runner's own scratch into somebody's pull request. Grep for the
 # name before you change it.
 
@@ -104,7 +104,7 @@ copilot-output.jsonl
 copilot-error.txt
 copilot-outcome.json
 model-help.txt
-executor-prompt.txt
+implementor-prompt.txt
 planner-prompt.txt
 reviewer-prompt.txt
 fixer-prompt.txt
@@ -124,11 +124,11 @@ closing-issues.json
 args.json
 args.jsonl
 update-pr.json
-executor-failure.json
+implementor-failure.json
 planner-failure.json
 fixer-failure.json
 review-verdict-failure.json
-execute-diff.txt
+implement-diff.txt
 fix-diff.txt
 review-diff.txt
 validate-output.txt
