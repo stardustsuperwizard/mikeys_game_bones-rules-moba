@@ -454,6 +454,71 @@ runs:
         echo "resolved_model=$resolved" >> "$GITHUB_OUTPUT"
         echo "resolved_vendor=$VENDOR" >> "$GITHUB_OUTPUT"
 
+    # What the session cost, on the run's own summary page.
+    #
+    # The outcome file already carried this and nothing rendered it, so the
+    # only way to answer "what is the reviewer costing us" was to reconstruct
+    # it from the Console afterwards. A workflow that spends money should say
+    # what it spent, next to the run that spent it.
+    #
+    # The two vendors report different things and this does not pretend
+    # otherwise: `claude -p --output-format json` returns `total_cost_usd`,
+    # an actual figure for that session, while Copilot CLI reports no spend at
+    # all -- only the credit cap it was given. Showing the cap as though it
+    # were a cost would be worse than showing nothing.
+    - name: Report Session Cost
+      if: always()
+      shell: python
+      env:
+        STEP_LABEL: ${{ inputs.step-label }}
+      run: |
+        import json
+        import os
+        import pathlib
+
+        outcome_path = pathlib.Path("agent-outcome.json")
+
+        if not outcome_path.exists():
+            raise SystemExit(0)
+
+        try:
+            outcome = json.loads(outcome_path.read_text())
+        except json.JSONDecodeError:
+            raise SystemExit(0)
+
+        if not isinstance(outcome, dict):
+            raise SystemExit(0)
+
+        vendor = outcome.get("vendor") or "unknown"
+        model = outcome.get("model") or "unknown"
+        reason = outcome.get("reason") or "unknown"
+        chars = outcome.get("assistant_text_chars")
+        label = os.environ.get("STEP_LABEL") or "Session"
+
+        cost = outcome.get("total_cost_usd")
+
+        if isinstance(cost, (int, float)):
+            spend = f"${cost:.4f}"
+        elif vendor == "copilot":
+            cap = outcome.get("credit_limit")
+            # A cap, not a spend. Said so explicitly rather than printed bare.
+            spend = f"no spend reported (cap {cap})" if cap else "no spend reported"
+        else:
+            spend = "no spend reported"
+
+        line = (
+            f"- **{label}** · `{vendor}` · `{model}` · {reason} · {spend}"
+            + (f" · {chars} chars" if isinstance(chars, int) else "")
+        )
+
+        print(line)
+
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+
+        if summary:
+            with open(summary, "a") as handle:
+                handle.write(line + "\n")
+
     # Runs even when the step above failed, so a truncated or budget-capped
     # session's partial text is still available to whatever the caller's
     # own failure-reporting does with it.
