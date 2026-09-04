@@ -330,11 +330,31 @@ jobs:
             ISSUE="$NUMBER"
             PRIOR=0
           else
+            # The structured field first; the body is the fallback. A
+            # closing reference that has not registered -- the body edited
+            # after opening, or GitHub simply not having caught up -- leaves
+            # `closingIssuesReferences` empty on a pull request that plainly
+            # says which Issue it closes. agent-05-fix.yml reads both for
+            # that reason, and reading only one here meant the same pull
+            # request resolved a tier on the Copilot side and not this one.
+            gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --json body,closingIssuesReferences \
+              > claude-pr-meta.json
+
             ISSUE="$(
-              gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
-                --json closingIssuesReferences \
-                --jq '.closingIssuesReferences[0].number // empty'
+              jq -r '.closingIssuesReferences[0].number // empty' \
+                claude-pr-meta.json
             )"
+
+            if [ -z "$ISSUE" ]; then
+              ISSUE="$(
+                jq -r '.body // ""' claude-pr-meta.json \
+                  | grep -oiE 'closes[[:space:]]+#[0-9]+' \
+                  | head -1 \
+                  | grep -oE '[0-9]+' \
+                || true
+              )"
+            fi
 
             # Completed fix rounds, from the marker agent-05-fix.yml posts
             # when a fix was actually pushed. Same signal, same meaning, so a
