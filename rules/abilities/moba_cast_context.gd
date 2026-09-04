@@ -7,6 +7,9 @@
 ## - ground_point: world position for ground-placed abilities (unused for self/targeted)
 ## - requester_id: the peer id of the requesting client (0 for local/server, used for rewind)
 ## - client_send_ticks_ms: the client's Time.get_ticks_msec() at send time (used for rewind)
+## - locked_target: the caster's current lock-on target, consumed by hard_lock aim assist
+##   when set and valid. Nothing in this file populates it -- lock-on acquisition is #39;
+##   it exists only so hard_lock (see #272) has something to consume.
 class_name MobaCastContext
 extends RefCounted
 
@@ -16,6 +19,7 @@ var aim_direction: Vector3 = Vector3.ZERO
 var ground_point: Vector3 = Vector3.ZERO
 var requester_id: int = 0
 var client_send_ticks_ms: int = 0
+var locked_target: Node = null
 
 
 func _init(

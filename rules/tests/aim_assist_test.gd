@@ -5,6 +5,13 @@
 ## and the pure locked-target function.
 class_name AimAssistTest
 
+const MobaAbility = preload("res://rules/abilities/moba_ability.gd")
+
+## Directory scanned by _test_shipped_magnetism_never_exceeds_one_with_any_device().
+## Every real, shipped ability -- not test fixtures -- so this is a check on the
+## actual data #272 ships, per its Scope.
+const _ABILITIES_DIR := "res://rules/data/abilities/"
+
 
 ## Helper to compare floats with tolerance.
 static func _approx_equal(a: float, b: float, tolerance: float = 0.0001) -> bool:
@@ -69,6 +76,10 @@ static func run() -> bool:
 
 	# Test 11: Locked-target resolution function
 	all_violations.append_array(_test_locked_target_resolution())
+
+	# Test 12: Every shipped ability's authored magnetism combined with every
+	# device multiplier in aim_assist.json never exceeds 1.0
+	all_violations.append_array(_test_shipped_magnetism_never_exceeds_one_with_any_device())
 
 	if all_violations.is_empty():
 		return true
@@ -353,5 +364,49 @@ static func _test_locked_target_resolution() -> Array[String]:
 		violations.append(
 			"Locked target: given null, expected raw aim %v, got %v" % [raw_aim, result2]
 		)
+
+	return violations
+
+
+## Test 12: Scan every real, shipped rules/data/abilities/*.tres file and assert
+## that its authored magnetism, combined with every device multiplier in
+## aim_assist.json, never exceeds 1.0 once effective_magnetism()'s clamp is
+## applied -- i.e. the clamp never actually has to fire on real shipped data.
+## This should hold structurally once #271's multipliers are all <= 1.0 (Test 10
+## above already checks that in isolation), but the Scope requires it asserted
+## against the real data this task ships.
+static func _test_shipped_magnetism_never_exceeds_one_with_any_device() -> Array[String]:
+	var violations: Array[String] = []
+
+	MobaAimAssist.reset_for_testing()
+	var devices := ["mouse", "gamepad", "touch"]
+
+	var dir := DirAccess.open(_ABILITIES_DIR)
+	if dir == null:
+		violations.append("Shipped magnetism: could not open %s" % _ABILITIES_DIR)
+		return violations
+
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "":
+		if not file_name.begins_with(".") and file_name.ends_with(".tres"):
+			var full_path := _ABILITIES_DIR.path_join(file_name)
+			var ability := ResourceLoader.load(full_path) as MobaAbility
+			if ability != null:
+				for device in devices:
+					# The unclamped product, not effective_magnetism()'s clamped result --
+					# that always returns <= 1.0 by construction, which would make this
+					# assertion vacuous. The real question is whether real shipped data
+					# ever needs the clamp to fire at all.
+					var multiplier := MobaAimAssist.get_device_multiplier(device)
+					var raw_product: float = ability.magnetism * multiplier
+					if raw_product > 1.0:
+						violations.append(
+							(
+								"Shipped magnetism: %s magnetism %.3f x %s multiplier %.3f exceeds 1.0"
+								% [file_name, ability.magnetism, device, multiplier]
+							)
+						)
+		file_name = dir.get_next()
 
 	return violations

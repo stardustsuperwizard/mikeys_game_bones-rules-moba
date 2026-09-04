@@ -4,23 +4,23 @@
 
 [resource]
 script = ExtResource("1")
-id = "aimed_shot"
-name = "Aimed Shot"
+id = "deadeye"
+name = "Deadeye"
 discipline = 3
 targeting_type = 2
 aim_assist = 1
 aim_cone_degrees = 8.0
 magnetism = 0.75
-acquisition_range = 12.0
+acquisition_range = 18.0
 damage_type = 0
-base_damage = 100.0
+base_damage = 180.0
 scaling = {}
-resource_cost = 30.0
-cooldown = 6.0
+resource_cost = 70.0
+cooldown = 18.0
 cast_time = 0.0
 channel_duration = 0.0
 channel_tick_interval = 0.0
-range = 12.0
+range = 18.0
 projectile_speed = 20.0
 area_radius = 0.0
 duration = 3.0
