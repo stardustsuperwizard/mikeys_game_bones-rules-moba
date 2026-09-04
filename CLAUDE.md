@@ -27,11 +27,32 @@ does not, so check manually before editing:
 | `rules/**` | `.github/instructions/rules.instructions.md` |
 | `sim/**` | `.github/instructions/sim.instructions.md` |
 
+## Declaring that one Issue blocks another
+
+Write the edge in the Issue's `## Dependencies` table and add the `blocker`
+label to the Issue doing the blocking. That label is what
+`.github/workflows/issue-dependencies.yml` fires on to create GitHub's native
+dependency relationship — the table is the declaration, the relationship is
+derived from it, and nothing else in this repository creates it.
+
+The contract is *Declaring Issue dependencies* in
+`.github/copilot-instructions.md`; the grammar is
+`.github/scripts/issue_dependencies.py`. Do not use `gh issue edit
+--add-blocked-by`: it needs a `gh` newer than the runner may have, and
+failing silently there is the bug this replaced.
+
 ## Before declaring anything complete
 
 Run `.github/scripts/validate-godot.sh`. It's the same validation the
 Copilot pipeline runs — the single source of truth for pass/fail, not a
 duplicate check.
+
+It covers the Godot project, and nothing else. If you touched the dependency
+tooling — `issue_dependencies.py`, `sync-issue-dependencies.py`,
+`issue-dependencies.yml`, or the `## Dependencies` block in a template — also
+run `.github/scripts/test-issue-dependencies.sh`. It needs no Godot, no
+credentials and no network, and it pins the one contract that fails silently:
+a parser that stops recognizing the table produces a clean, green, empty sync.
 
 ## Working an Implementation Task Issue
 

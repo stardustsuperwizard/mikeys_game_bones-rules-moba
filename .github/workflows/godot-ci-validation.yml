@@ -47,8 +47,14 @@ on:
       - '.github/workflows/agent-*.yml'
       - '.github/workflows/gdscript-lint.yml'
       - '.github/workflows/issue-linking.yml'
+      - '.github/workflows/issue-dependencies.yml'
       - '.github/scripts/render-dashboard.py'
       - '.github/scripts/classify-copilot-outcome.py'
+      # Issue bookkeeping. These read Issue bodies and call `gh`; they have
+      # their own check in `test-issue-dependencies.sh`, which needs no Godot.
+      - '.github/scripts/issue_dependencies.py'
+      - '.github/scripts/sync-issue-dependencies.py'
+      - '.github/scripts/test-issue-dependencies.sh'
       # The agent workflows' own composite actions -- prompt-building and
       # Copilot CLI plumbing, none of it touches the Godot project.
       # `setup-godot/` is deliberately NOT here: it controls how the engine

@@ -5,9 +5,14 @@ name: Agent - Control Plane
 # Most repository state is now read through GitHub issue *views* -- saved
 # label queries, evaluated when you look at them, nothing to run and nothing
 # to keep fresh. See docs/AGENT_WORKFLOW.md. What a view cannot express is
-# the **dependency graph**: there is no label for "blocked by #12", so
-# "ready to dispatch, in dependency order" has to be computed. That is the
-# one job left here, and it is why this workflow still exists.
+# the **dependency graph**: `blocker` says an Issue blocks something but not
+# what, so "ready to dispatch, in dependency order" still has to be computed.
+# That is the one job left here, and it is why this workflow still exists.
+#
+# It reads the graph, it does not build it. `issue-dependencies.yml` creates
+# the blocked-by relationships from each Issue's `## Dependencies` table; a
+# task missing from the blocked list here means that table is wrong or was
+# never wired, not that this renderer lost it.
 #
 # Every state it shows is computed fresh from issues, GitHub issue
 # dependencies, sub-issue links, open pull requests and the reviewer's

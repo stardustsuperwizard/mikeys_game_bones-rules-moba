@@ -268,8 +268,10 @@ For every promoted Implementation Task:
    - out-of-scope work;
    - dependency information.
 
-6. Express sibling ordering using GitHub Issue dependency relationships,
-   not merely text in the Issue body.
+6. Express sibling ordering in the `## Dependencies` table in each Issue's
+   body, and label every Issue that has a `Blocks` row `blocker`. The table
+   is what creates GitHub's native dependency relationship; do not create
+   that relationship by hand and leave the table saying something else.
 
 7. Assign Copilot only after the Issue is complete enough to stand alone.
 
@@ -301,18 +303,51 @@ human-readable form: GitHub's Issues list does not surface sub-issue
 relationships, so the tag is what lets a person scanning that list see which
 Feature a task belongs to at a glance.
 
-When the task depends on another Issue, include the appropriate GitHub Issue
-dependency relationship, for example:
+### Dependencies between tasks
 
-```bash
-gh issue create \
-  ... \
-  --parent <parent-feature-number> \
-  --blocked-by <dependency-issue-number>
+Write the edge into the Issue body's `## Dependencies` table, then let the
+tooling create the GitHub relationship from it:
+
+```markdown
+## Dependencies
+
+| Relationship | Issue | Why |
+| --- | --- | --- |
+| Blocked by | #101 | Adds the effect container API this consumes |
+| Blocks | #103 | #103 renders what this resolves |
 ```
 
-Do not depend solely on textual `Depends On` fields when GitHub supports a
-native relationship.
+Two relationship words, `Blocked by` and `Blocks`, and you write whichever end
+you know about. Prefer writing both ends when you know both, as a planner
+decomposing a chain usually does: the table is then readable from either
+Issue, and each blocking Issue earns its `blocker` label.
+
+Then add the `blocker` label to every Issue with a `Blocks` row:
+
+```bash
+gh issue edit <blocking-issue-number> \
+  --repo stardustsuperwizard/mikeys_game_bones-rules-moba \
+  --add-label blocker
+```
+
+`.github/workflows/issue-dependencies.yml` fires on that label, reads the
+table, and creates GitHub's native blocked-by relationship. Nothing else in
+this repository creates that relationship, and everything downstream reads it
+— the control plane's dispatch ordering, `agent:execute`'s refusal to run a
+blocked task, and `issue-linking.yml`'s open-blocker warning.
+
+**Do not reach for `gh issue create --blocked-by` or `gh issue edit
+--add-blocked-by`.** Those flags need GitHub CLI 2.94.0 and fail as unknown
+flags on anything older. More to the point, a chain wired that way exists only
+if the call succeeded, and nothing records the intent if it did not — which is
+the state this repository was in. The table records the intent, and
+`.github/scripts/sync-issue-dependencies.py` realizes it against the REST
+endpoint, which has no version floor.
+
+If you cannot apply the label, still write the table and say so in your
+output. The chain can be rebuilt from the tables at any time — a maintainer
+dispatches `issue-dependencies.yml` with **sweep** ticked — but only if the
+tables exist.
 
 Before creating an Issue:
 
@@ -325,9 +360,11 @@ After creating an Issue:
 
 1. Read it back.
 2. Verify the parent relationship.
-3. Verify labels.
+3. Verify labels, including `blocker` on every Issue with a `Blocks` row.
 4. Verify milestone when applicable.
-5. Verify dependency relationships.
+5. Verify that the `## Dependencies` table names real Issue numbers, not
+   planner task IDs. A task ID means nothing to a reader and nothing to the
+   parser, so the edge it describes will never be created.
 6. Record its Issue number and URL in the plan comment.
 
 If GitHub write access is unavailable, DO NOT pretend an Issue was created.

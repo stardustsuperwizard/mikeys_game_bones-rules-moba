@@ -43,6 +43,62 @@ Roles, model routing, and the session flow are defined in
 is the only context carried across the handoff. If a constraint is not
 written in the Issue, it does not exist.
 
+## Declaring Issue dependencies
+
+One Issue waiting on another is written in exactly one place: the
+`## Dependencies` table that every Issue template carries.
+
+```markdown
+## Dependencies
+
+| Relationship | Issue | Why |
+| --- | --- | --- |
+| Blocked by | #12 | Needs the effect container API |
+| Blocks | #34 | #34 consumes the resolver this adds |
+```
+
+Two relationship words and only two. `Blocked by` means this Issue cannot
+start until that one closes; `Blocks` is the same edge written from the other
+end. Write whichever end you know about — both, when you know both. When
+there are no dependencies, leave the template's row alone:
+
+```markdown
+| None | — | — |
+```
+
+**Add the `blocker` label to any Issue with a `Blocks` row.** That label is
+the trigger: `.github/workflows/issue-dependencies.yml` fires on it, reads the
+table, and creates GitHub's native blocked-by relationship. The label also
+makes the set queryable — `is:issue is:open label:blocker` is every Issue
+something is waiting on.
+
+The table is the declaration; the GitHub relationship is derived from it.
+That direction matters, because everything downstream reads the relationship
+and none of it reads the table: the control plane orders dispatch by it,
+`agent:execute` refuses a task whose blockers are open, and `issue-linking.yml`
+warns when work starts on a blocked task anyway. An edge that exists only in
+someone's head is an executor implementing step three before step one exists.
+
+Three rules follow from that:
+
+- **Do not create the relationship by hand and leave the table saying
+  something else.** The table wins, and a sweep will report the difference.
+- **Do not use `gh issue create --blocked-by` or `gh issue edit
+  --add-blocked-by`.** Those need GitHub CLI 2.94.0 and fail as unknown flags
+  on anything older. More to the point, a chain wired that way exists only if
+  the call succeeded, and nothing records the intent if it did not — which is
+  the state this repository was in. Write the row and add the label instead.
+- **Never delete a dependency to unblock yourself.** If the edge is wrong,
+  correct the table and say so.
+
+The chain can always be rebuilt from the tables: dispatch
+`issue-dependencies.yml` with **sweep** ticked. It is add-only — an edge in
+GitHub that no table declares is reported, never removed.
+
+The grammar lives in `.github/scripts/issue_dependencies.py`, which also
+accepts the older `- Blocked by: #12` bullet form so Issues filed before this
+standard still sync.
+
 ## Executing an Implementation Task
 
 This section applies whenever you are working an Issue titled `[impl]`, or

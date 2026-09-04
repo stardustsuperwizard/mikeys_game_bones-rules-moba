@@ -197,6 +197,21 @@ exactly and write nothing before or after:
 - [ ] <or "None">
 ```
 
+If what stops you is *another Issue* — this task genuinely cannot be finished
+until some other work lands — say which one, and record the edge in the task
+Issue's `## Dependencies` table:
+
+```markdown
+| Blocked by | #101 | Needs the effect container API |
+```
+
+Then add the `blocker` label to that other Issue, which is what creates the
+GitHub dependency relationship. This is the one Issue edit an execution
+session should make: it files no new work and widens no scope, it records an
+ordering fact that already existed, and without it the next dispatch of this
+task walks into the same wall. See *Declaring Issue dependencies* in
+`.github/copilot-instructions.md`.
+
 If you stop on an unresolved requirement or ambiguity instead of completing
 the task (and therefore made no commit — see above), replace the above with
 a plain explanation of what is blocking completion. The workflow treats "no

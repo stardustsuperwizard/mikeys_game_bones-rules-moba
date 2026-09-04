@@ -90,6 +90,18 @@ Planning, implementation, and review run as separate sessions on different
 models. See `docs/AGENT_WORKFLOW.md` for role definitions, model routing,
 and the handoff contract.
 
+## Issue Dependencies
+
+One Issue waiting on another is written in that Issue's `## Dependencies`
+table — `Blocked by` or `Blocks`, one row per edge — and the Issue doing the
+blocking gets the `blocker` label. The label is what turns the table into
+GitHub's native dependency relationship, which is what the control plane
+orders by and what `agent:execute` refuses to run past.
+
+Write the row and add the label. Do not create the relationship by hand, and
+do not reach for `gh issue edit --add-blocked-by`. The full contract is
+*Declaring Issue dependencies* in `.github/copilot-instructions.md`.
+
 ## Testing
 
 - Existing tests represent established behavior.
