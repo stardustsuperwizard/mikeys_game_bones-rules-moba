@@ -252,10 +252,19 @@ static func _resolve_soft_lock_direction(
 ## 1.0, no blend) when it is set and valid; MobaAimAssist.resolve_direction()
 ## already falls back to the raw direction on a null/freed target, which is
 ## exactly the fallback hard_lock needs.
+##
+## The locked_target must be resolved through _get_spatial_anchor() (MobaTargeting's
+## resolution for candidates) so MobaAimAssist can read its position. Production
+## scenes have Actor(Node) -> Body(Node3D), so the anchor is the Body.
 static func _resolve_hard_lock_direction(context: MobaCastContext, caster: Node) -> Vector3:
 	var caster_pos := _get_position(caster)
+	var resolved_target: Node = null
+	if context.locked_target != null and is_instance_valid(context.locked_target):
+		var anchor := MobaTargeting._get_spatial_anchor(context.locked_target)
+		if anchor != null:
+			resolved_target = anchor
 	return MobaAimAssist.resolve_direction(
-		context.aim_direction, context.locked_target, caster_pos, 1.0
+		context.aim_direction, resolved_target, caster_pos, 1.0
 	)
 
 

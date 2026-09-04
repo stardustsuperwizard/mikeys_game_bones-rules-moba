@@ -132,7 +132,7 @@ static func _test_scheme_change_updates_multiplier_live(tree: SceneTree) -> Arra
 	MobaAbilityLibrary._reset()
 	MobaAbilityLibrary._ensure_loaded("res://rules/data/abilities/")
 
-	var origin := Vector3(_CLUSTER_SPACING * 0.0, 0.0, 0.0)
+	var origin := Vector3(_CLUSTER_SPACING * 0.5, 0.0, 0.0)
 	var caster := _make_physics_actor(tree, true, origin)
 	# Off-axis from raw_direction (1, 0, 0) by ~16.7 degrees -- inside the 45
 	# degree cone below, but far enough off-axis that soft-lock bending by
@@ -190,15 +190,30 @@ static func _test_scheme_change_updates_multiplier_live(tree: SceneTree) -> Arra
 		)
 	var gamepad_angle := raw_direction.angle_to(context_gamepad.aim_direction)
 
-	# GAMEPAD's multiplier (0.67) is well above MOUSE's (0.23), so the second
-	# activation -- on the very next activation, no restart -- should bend
-	# further toward the candidate than the first.
-	if gamepad_angle <= mouse_angle + _EPSILON:
+	# Calculate the expected angles based on the actual candidate position and magnetism.
+	# The candidate is at origin + (1.0, 0.3, 0.0), and the raw direction is (1, 0, 0).
+	# The angle from raw to candidate is arccos((1, 0, 0) . (1, 0.3, 0).normalized()).
+	# With magnetism values of 0.23 (mouse) and 0.67 (gamepad) applied via slerp,
+	# the resulting angles should be approximately the candidate angle * magnetism.
+	var to_candidate := (candidate.global_position - caster.global_position).normalized()
+	var candidate_angle := raw_direction.angle_to(to_candidate)
+	var expected_mouse_angle := candidate_angle * 0.23  # magnetism 1.0 * mouse multiplier 0.23
+	var expected_gamepad_angle := candidate_angle * 0.67  # magnetism 1.0 * gamepad multiplier 0.67
+
+	# Assert that both angles match their expected values within tolerance, pinning that
+	# the multiplier was read live at activation time (not cached).
+	if absf(mouse_angle - expected_mouse_angle) > _EPSILON:
 		violations.append(
 			(
-				"scheme_change: gamepad activation should bend further than mouse"
-				+ " (mouse_angle=%f, gamepad_angle=%f)"
-				% [mouse_angle, gamepad_angle]
+				"scheme_change: mouse angle should be ~%.4f (0.23 * %.4f), got %.4f"
+				% [expected_mouse_angle, candidate_angle, mouse_angle]
+			)
+		)
+	if absf(gamepad_angle - expected_gamepad_angle) > _EPSILON:
+		violations.append(
+			(
+				"scheme_change: gamepad angle should be ~%.4f (0.67 * %.4f), got %.4f"
+				% [expected_gamepad_angle, candidate_angle, gamepad_angle]
 			)
 		)
 
