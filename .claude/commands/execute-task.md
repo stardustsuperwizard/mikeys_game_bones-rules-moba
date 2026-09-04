@@ -164,8 +164,8 @@ checks" and leaving the reader to guess:
   than trusting this summary — it is a summary, and the list is the
   authority.
 - **The PR's author cannot start workflows.** GitHub does not start
-  `pull_request` runs for a PR opened by `GITHUB_TOKEN`, which is what a
-  an Actions run opens PRs as unless `AGENT_GITHUB_TOKEN` is set —
+  `pull_request` runs for a PR opened by `GITHUB_TOKEN`, which is what an
+  Actions run opens PRs as unless `AGENT_GITHUB_TOKEN` is set —
   see the identity comment in `agent-02-implement.yml`. This is *not* green:
   the gates did not pass, they never ran, and nothing can start them after
   the fact. Say so explicitly, on the PR, and carry it into step 4 as "CI
