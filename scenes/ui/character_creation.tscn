@@ -189,6 +189,57 @@ layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(60, 60)
 
+[node name="AppearanceSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="AppearanceLabel" type="Label" parent="MarginContainer/VBoxContainer/AppearanceSection"]
+layout_mode = 2
+text = "Appearance"
+theme_override_font_sizes/font_size = 18
+
+[node name="HelmContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/AppearanceSection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HelmLabel" type="Label" parent="MarginContainer/VBoxContainer/AppearanceSection/HelmContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Helm:"
+
+[node name="HelmOption" type="OptionButton" parent="MarginContainer/VBoxContainer/AppearanceSection/HelmContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="ChestContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/AppearanceSection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ChestLabel" type="Label" parent="MarginContainer/VBoxContainer/AppearanceSection/ChestContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Chest:"
+
+[node name="ChestOption" type="OptionButton" parent="MarginContainer/VBoxContainer/AppearanceSection/ChestContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
+[node name="ColorSchemeContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/AppearanceSection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ColorSchemeLabel" type="Label" parent="MarginContainer/VBoxContainer/AppearanceSection/ColorSchemeContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Color Scheme:"
+
+[node name="ColorSchemeOption" type="OptionButton" parent="MarginContainer/VBoxContainer/AppearanceSection/ColorSchemeContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(60, 60)
+
 [node name="CharacterNameLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "Character Name"

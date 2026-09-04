@@ -54,6 +54,9 @@ var _refreshing_stats: bool = false
 var _weapon_option: OptionButton
 var _action_ability_options: Array[OptionButton]  # action_slot_options[0..3]
 var _passive_ability_option: OptionButton
+var _helm_option: OptionButton
+var _chest_option: OptionButton
+var _color_scheme_option: OptionButton
 var _character_name_input: LineEdit
 var _save_button: Button
 var _cancel_button: Button
@@ -78,6 +81,11 @@ var _abilities_by_discipline: Dictionary = {}
 ## silent drift if the validator's constants ever change.
 func _get_failure_messages() -> Dictionary:
 	return {
+		MobaBuildValidator.FAILURE_NAME_EMPTY: "Character name is required.",
+		MobaBuildValidator.FAILURE_NAME_TOO_LONG:
+		"Character name is too long (maximum %d characters)." % MobaBuildValidator.MAX_NAME_LENGTH,
+		MobaBuildValidator.FAILURE_NAME_INVALID_CHARACTERS:
+		"Character name contains invalid characters. Use only letters, numbers, spaces, and underscores.",
 		MobaBuildValidator.FAILURE_DISCIPLINES_NOT_DISTINCT:
 		"Primary and secondary Disciplines must be different.",
 		MobaBuildValidator.FAILURE_LOADOUT_INVALID: "Loadout configuration is invalid.",
@@ -90,6 +98,12 @@ func _get_failure_messages() -> Dictionary:
 		MobaBuildValidator.FAILURE_STAT_ALLOCATION_EXCEEDS_PER_STAT_MAX:
 		"One or more stats exceeds the per-stat maximum.",
 		MobaBuildValidator.FAILURE_STAT_POOL_OVERSPENT: "Total stat points exceed the pool.",
+		MobaAppearanceValidator.FAILURE_UNKNOWN_HELM:
+		"The selected helm does not exist in the catalog.",
+		MobaAppearanceValidator.FAILURE_UNKNOWN_CHEST:
+		"The selected chest piece does not exist in the catalog.",
+		MobaAppearanceValidator.FAILURE_UNKNOWN_COLOR_SCHEME:
+		"The selected color scheme does not exist in the catalog.",
 	}
 
 
@@ -113,8 +127,13 @@ func _ready() -> void:
 	if _action_ability_options.any(func(opt): return opt == null):
 		push_error("Failed to resolve one or more action ability option buttons")
 		return
-	if _passive_ability_option == null:
-		push_error("Failed to resolve passive ability option button")
+	if (
+		_passive_ability_option == null
+		or _helm_option == null
+		or _chest_option == null
+		or _color_scheme_option == null
+	):
+		push_error("Failed to resolve passive ability or appearance option buttons")
 		return
 	if _character_name_input == null or _save_button == null or _cancel_button == null:
 		push_error("Failed to resolve name input or save/cancel buttons")
@@ -128,6 +147,7 @@ func _ready() -> void:
 	_build_stat_rows()
 	_populate_discipline_options()
 	_populate_weapon_options()
+	_populate_appearance_options()
 	_populate_template_options()
 	_populate_template_option_button()
 	_populate_saved_characters_option()
@@ -199,6 +219,19 @@ func _resolve_controls() -> void:
 	]
 	_passive_ability_option = (
 		main_container.get_node_or_null(^"LoadoutSection/PassiveContainer/PassiveAbilityOption")
+		as OptionButton
+	)
+
+	_helm_option = (
+		main_container.get_node_or_null(^"AppearanceSection/HelmContainer/HelmOption")
+		as OptionButton
+	)
+	_chest_option = (
+		main_container.get_node_or_null(^"AppearanceSection/ChestContainer/ChestOption")
+		as OptionButton
+	)
+	_color_scheme_option = (
+		main_container.get_node_or_null(^"AppearanceSection/ColorSchemeContainer/ColorSchemeOption")
 		as OptionButton
 	)
 
@@ -367,6 +400,58 @@ func _populate_weapon_options() -> void:
 	_apply_selected_weapon()
 
 
+## Populate the appearance option buttons (helm, chest, color scheme)
+## from MobaAppearanceCatalog, adding a "(None)" option for each.
+func _populate_appearance_options() -> void:
+	if _helm_option == null or _chest_option == null or _color_scheme_option == null:
+		return
+
+	# Populate helm option
+	_helm_option.clear()
+	_helm_option.add_item("(None)")
+	_helm_option.set_item_metadata(0, "")
+
+	var helm_ids = MobaAppearanceCatalog.get_helm_ids()
+	for i in range(helm_ids.size()):
+		var helm_id = helm_ids[i]
+		_helm_option.add_item(str(helm_id))
+		_helm_option.set_item_metadata(i + 1, helm_id)
+
+	_helm_option.select(0)
+	_helm_option.custom_minimum_size = TOUCH_TARGET_SIZE
+	_helm_option.focus_mode = Control.FOCUS_ALL
+
+	# Populate chest option
+	_chest_option.clear()
+	_chest_option.add_item("(None)")
+	_chest_option.set_item_metadata(0, "")
+
+	var chest_ids = MobaAppearanceCatalog.get_chest_ids()
+	for i in range(chest_ids.size()):
+		var chest_id = chest_ids[i]
+		_chest_option.add_item(str(chest_id))
+		_chest_option.set_item_metadata(i + 1, chest_id)
+
+	_chest_option.select(0)
+	_chest_option.custom_minimum_size = TOUCH_TARGET_SIZE
+	_chest_option.focus_mode = Control.FOCUS_ALL
+
+	# Populate color scheme option
+	_color_scheme_option.clear()
+	_color_scheme_option.add_item("(None)")
+	_color_scheme_option.set_item_metadata(0, "")
+
+	var color_scheme_ids = MobaAppearanceCatalog.get_color_scheme_ids()
+	for i in range(color_scheme_ids.size()):
+		var scheme_id = color_scheme_ids[i]
+		_color_scheme_option.add_item(str(scheme_id))
+		_color_scheme_option.set_item_metadata(i + 1, scheme_id)
+
+	_color_scheme_option.select(0)
+	_color_scheme_option.custom_minimum_size = TOUCH_TARGET_SIZE
+	_color_scheme_option.focus_mode = Control.FOCUS_ALL
+
+
 ## Populate template load button's options (not a full menu, just a button
 ## that triggers a template picker). Called to cache templates for later.
 func _populate_template_options() -> void:
@@ -526,6 +611,14 @@ func _connect_signals() -> void:
 	# Weapon selection
 	if _weapon_option != null:
 		_weapon_option.item_selected.connect(_on_weapon_changed)
+
+	# Appearance selection
+	if _helm_option != null:
+		_helm_option.item_selected.connect(_on_helm_changed)
+	if _chest_option != null:
+		_chest_option.item_selected.connect(_on_chest_changed)
+	if _color_scheme_option != null:
+		_color_scheme_option.item_selected.connect(_on_color_scheme_changed)
 
 	# Save and load buttons
 	if _save_button != null:
@@ -778,6 +871,77 @@ func _apply_selected_weapon() -> void:
 		_current_build.loadout.weapon = weapon
 
 
+## Signal handler: Helm appearance option changed.
+func _on_helm_changed(_index: int) -> void:
+	_apply_appearance_selection()
+	_clear_message()
+
+
+## Signal handler: Chest appearance option changed.
+func _on_chest_changed(_index: int) -> void:
+	_apply_appearance_selection()
+	_clear_message()
+
+
+## Signal handler: Color scheme appearance option changed.
+func _on_color_scheme_changed(_index: int) -> void:
+	_apply_appearance_selection()
+	_clear_message()
+
+
+## Apply the currently selected appearance ids to the build.
+## Creates a MobaAppearance sub-resource if none exists yet.
+func _apply_appearance_selection() -> void:
+	if _helm_option == null or _chest_option == null or _color_scheme_option == null:
+		return
+
+	var helm_id = _helm_option.get_selected_metadata() as String
+	var chest_id = _chest_option.get_selected_metadata() as String
+	var color_scheme_id = _color_scheme_option.get_selected_metadata() as String
+
+	# Create appearance if needed
+	if _current_build.appearance == null:
+		_current_build.appearance = MobaAppearance.new()
+
+	_current_build.appearance.helm_id = StringName(helm_id)
+	_current_build.appearance.chest_id = StringName(chest_id)
+	_current_build.appearance.color_scheme_id = StringName(color_scheme_id)
+
+
+## Restore the appearance pickers to match the current build's appearance.
+## Follows the same "select by data, fall back to (None)" pattern as abilities.
+func _restore_appearance_selection() -> void:
+	if _helm_option == null or _chest_option == null or _color_scheme_option == null:
+		return
+
+	var appearance = _current_build.appearance
+
+	# Restore helm selection. If the stored id is no longer found in the
+	# picker (e.g. a hand-edited .tres carrying an id the catalog dropped),
+	# clear the build's field to match what the picker now shows -- the same
+	# "select by data, fall back to (None) and clear the field if not found"
+	# pattern _update_ability_options() follows for abilities.
+	if appearance != null and appearance.helm_id != "":
+		if not _select_option_by_data(_helm_option, str(appearance.helm_id)):
+			appearance.helm_id = &""
+	else:
+		_helm_option.select(0)
+
+	# Restore chest selection
+	if appearance != null and appearance.chest_id != "":
+		if not _select_option_by_data(_chest_option, str(appearance.chest_id)):
+			appearance.chest_id = &""
+	else:
+		_chest_option.select(0)
+
+	# Restore color scheme selection
+	if appearance != null and appearance.color_scheme_id != "":
+		if not _select_option_by_data(_color_scheme_option, str(appearance.color_scheme_id)):
+			appearance.color_scheme_id = &""
+	else:
+		_color_scheme_option.select(0)
+
+
 ## Signal handler: Load template button pressed.
 ## Loads the selected template from the OptionButton into the form.
 func _on_load_template() -> void:
@@ -843,6 +1007,9 @@ func _load_template(template: MobaCharacterBuild) -> void:
 	_current_build.loadout = (
 		template.loadout.duplicate() if template.loadout != null else MobaLoadout.new()
 	)
+	_current_build.appearance = (
+		template.appearance.duplicate() if template.appearance != null else null
+	)
 
 	# Update all UI elements to reflect the template
 	_character_name_input.text = _current_build.character_name
@@ -894,6 +1061,9 @@ func _load_template(template: MobaCharacterBuild) -> void:
 	# Update abilities
 	_update_ability_options()
 
+	# Update appearance pickers
+	_restore_appearance_selection()
+
 	if weapon_warning == "":
 		_clear_message()
 	else:
@@ -906,10 +1076,6 @@ func _load_template(template: MobaCharacterBuild) -> void:
 func _on_save() -> void:
 	# Read character name from input
 	_current_build.character_name = _character_name_input.text.strip_edges()
-
-	if _current_build.character_name.is_empty():
-		_show_error("Character name is required.")
-		return
 
 	# Validate the build using the authoritative validator
 	var failure_reason := MobaBuildValidator.validate(_current_build, _allocation_policy)
