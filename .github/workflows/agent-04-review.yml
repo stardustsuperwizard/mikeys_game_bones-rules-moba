@@ -146,7 +146,7 @@ jobs:
           max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
           # Same capability-removal posture as the planner: the reviewer
           # can read the checkout but holds no tool that can change it.
-          excluded-tools: "bash,powershell,apply_patch,create,edit,task,write_agent"
+          capability: read-only
           step-label: "Reviewing"
 
       - name: Extract Verdict

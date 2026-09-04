@@ -57,25 +57,29 @@ inputs:
     required: false
     default: "60"
 
-  excluded-tools:
+  capability:
     description: >-
-      Copilot only. Comma-separated tools to remove from the session.
-      Copilot's posture is subtractive -- it starts able and the caller takes
-      capability away.
-    required: false
-    default: "task,write_agent"
+      What this session is allowed to do: `read-only` or `write`.
 
-  allowed-tools:
-    description: >-
-      Claude only. Comma-separated tools to permit, in permission-rule
-      syntax. Claude's posture is additive -- it starts unable under
-      `--permission-mode dontAsk` and the caller grants capability.
+      This is deliberately ONE semantic knob rather than a pass-through of
+      each CLI's tool flags, because the two vendors' postures are opposites
+      and a pass-through fails silently. Copilot is subtractive -- it starts
+      able and `--excluded-tools` takes capability away. Claude is additive --
+      under `--permission-mode dontAsk` it starts unable and `--allowedTools`
+      grants capability. A caller that said "remove nothing but task" meant
+      "you may edit"; the same words handed to the additive vendor mean "you
+      may do nothing at all". A role would then run, write no code, and be
+      indistinguishable from a model that underperformed.
 
-      The default is read-only on purpose. A role that must edit or push says
-      so explicitly at its call site, the same way the reviewer says
-      explicitly that it cannot.
+      So the caller states the intent and this action encodes it per vendor.
+      Adding a third posture means editing the two case statements below, in
+      one file, where they can be read side by side.
+
+      `read-only` is the default because it is the fail-safe one: a caller
+      that forgets gets a session that cannot change the checkout, rather
+      than one that can.
     required: false
-    default: "Read,Grep,Glob"
+    default: "read-only"
 
   step-label:
     description: >-
@@ -201,8 +205,7 @@ runs:
         MODELS: ${{ inputs.models }}
         MAX_AI_CREDITS: ${{ inputs.max-ai-credits }}
         MAX_TURNS: ${{ inputs.max-turns }}
-        EXCLUDED_TOOLS: ${{ inputs.excluded-tools }}
-        ALLOWED_TOOLS: ${{ inputs.allowed-tools }}
+        CAPABILITY: ${{ inputs.capability }}
         STEP_LABEL: ${{ inputs.step-label }}
       run: |
         set -euo pipefail
@@ -211,6 +214,35 @@ runs:
           echo "::error::Prompt file $PROMPT_FILE does not exist."
           exit 1
         fi
+
+        # The one place the two postures are reconciled. Read the two cases
+        # together: they must grant the same real capability, or a role
+        # changes behaviour when its label's vendor segment changes, which is
+        # the single thing this whole standardisation exists to prevent.
+        case "$CAPABILITY" in
+          read-only)
+            # Copilot: strip everything that can touch the checkout or spawn
+            # further agents. Claude: grant only the readers.
+            EXCLUDED_TOOLS="bash,powershell,apply_patch,create,edit,task,write_agent"
+            ALLOWED_TOOLS="Read,Grep,Glob"
+            ;;
+          write)
+            # Copilot: keep edit and shell, still no sub-agents. Claude:
+            # grant the writers and Bash, which the implementing roles need
+            # for validate-godot.sh and for `git commit`. Neither vendor gets
+            # a push here -- the workflow pushes, deliberately, so the commit
+            # a session made is inspected before it leaves the runner.
+            EXCLUDED_TOOLS="task,write_agent"
+            ALLOWED_TOOLS="Read,Grep,Glob,Edit,Write,Bash"
+            ;;
+          *)
+            echo "::error::Unknown capability '$CAPABILITY'. Expected 'read-only' or 'write'."
+            exit 1
+            ;;
+        esac
+
+        echo "capability=$CAPABILITY -> copilot excludes [$EXCLUDED_TOOLS]," \
+             "claude allows [$ALLOWED_TOOLS]"
 
         # One invocation function per vendor, one shared loop. The loop is
         # the load-bearing part -- "advance only on model_unavailable" is the

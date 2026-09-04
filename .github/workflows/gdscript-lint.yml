@@ -405,6 +405,9 @@ jobs:
           # no `agent:{role}:{vendor}` label to take a vendor from. It is
           # pinned to copilot deliberately rather than left to a default.
           vendor: copilot
+          # Was relying on the old action's "task,write_agent" default. That
+          # default is gone: capability is stated, not inherited.
+          capability: write
           prompt-file: lint-fix-prompt.txt
           models: ${{ env.LINT_FIXER_MODELS }}
           max-ai-credits: ${{ env.LINT_FIXER_MAX_AI_CREDITS }}

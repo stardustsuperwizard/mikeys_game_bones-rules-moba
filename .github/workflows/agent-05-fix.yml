@@ -559,7 +559,7 @@ jobs:
           # Same tool set as the executor: this session needs to edit,
           # run shell commands, and commit. Only sub-agent spawning stays
           # excluded.
-          excluded-tools: "task,write_agent"
+          capability: write
           step-label: "Fixing"
 
       # The prompt tells the model to commit but never push. This is the

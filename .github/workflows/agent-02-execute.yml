@@ -675,7 +675,7 @@ jobs:
           max-ai-credits: ${{ env.EXECUTOR_MAX_AI_CREDITS }}
           # Needs to edit, run shell commands, and commit -- same tool set
           # as the fixer. Only sub-agent spawning stays excluded.
-          excluded-tools: "task,write_agent"
+          capability: write
           step-label: "Executing"
 
       # Safety net for a session that made real changes but stopped short
@@ -1100,7 +1100,7 @@ jobs:
           prompt-file: ${{ steps.review-build.outputs.prompt-file }}
           models: ${{ env.REVIEWER_MODELS }}
           max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
-          excluded-tools: "bash,powershell,apply_patch,create,edit,task,write_agent"
+          capability: read-only
           step-label: "Reviewing (pre-PR)"
 
       - name: Extract Pre-PR Review Verdict
@@ -1168,7 +1168,7 @@ jobs:
           prompt-file: ${{ steps.fix-build.outputs.prompt-file }}
           models: ${{ env.FIXER_MODELS }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
-          excluded-tools: "task,write_agent"
+          capability: write
           step-label: "Fixing (pre-PR)"
 
       # A single bounded pass, exactly like agent-05-fix.yml: this either
