@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="AppearanceCatalog" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/appearance_catalog.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/appearance/pieces/basic_helm.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/appearance/pieces/iron_helm.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/appearance/pieces/basic_chest.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/appearance/pieces/leather_chest.tscn" id="5"]
+
+[resource]
+script = ExtResource("1")
+helm_scenes = {
+"basic_helm": ExtResource("2"),
+"iron_helm": ExtResource("3")
+}
+chest_scenes = {
+"basic_chest": ExtResource("4"),
+"leather_chest": ExtResource("5")
+}
+color_schemes = {
+"azure": Color(0.13, 0.4, 0.85, 1),
+"crimson": Color(0.72, 0.11, 0.15, 1),
+"emerald": Color(0.11, 0.58, 0.32, 1)
+}

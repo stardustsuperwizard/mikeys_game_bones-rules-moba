@@ -3,6 +3,12 @@ extends CharacterBody3D
 
 const SPEED = 5.0
 
+# The placeholder appearance renderer this body owns (#377). Created in _ready()
+# rather than authored into every actor scene so one component covers player,
+# enemy and lobby avatar, and so a body that never wears anything still has the
+# same structure as one that does.
+var appearance_renderer: ActorAppearance3D
+
 @onready var actor: Actor = get_parent() as Actor
 @onready var mesh: MeshInstance3D = get_node_or_null("MeshInstance3D")
 
@@ -12,6 +18,15 @@ func _ready() -> void:
 		var material := StandardMaterial3D.new()
 		material.albedo_color = actor.color
 		mesh.material_override = material
+
+	# Dress the body from the appearance its spawn data carried. Spawn assigns
+	# Actor.appearance before the actor enters the tree, so it is already set by
+	# the time this runs. An actor with no appearance is left untouched -- see
+	# ActorAppearance3D.apply().
+	appearance_renderer = ActorAppearance3D.new()
+	appearance_renderer.name = ActorAppearance3D.NODE_NAME
+	add_child(appearance_renderer)
+	appearance_renderer.apply(actor)
 
 
 # Placeholder actors (bare primitive meshes, no material of their own) rely
