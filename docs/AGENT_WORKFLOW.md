@@ -69,6 +69,68 @@ contract-driven work doesn't need the top model the way blind planning or
 review does. See `agent-02-execute.yml` and `agent-05-fix.yml` for their
 exact lists.
 
+### Claude Code gets one fallback chain, not four lists
+
+The `.claude` roles cannot express the table above. A Claude Code subagent's
+`model:` frontmatter is a single scalar — an alias (`sonnet`, `opus`,
+`haiku`, `fable`), a full model ID, or `inherit` — with no array form and no
+comma-separated preference list. The `model` parameter on a subagent call is
+a single value too. There is nowhere to write `PLANNER_MODELS` locally.
+
+What exists instead is `fallbackModel`, and it is **one chain for the whole
+session**, applied to every subagent in it:
+
+```jsonc
+// .claude/settings.json
+{ "fallbackModel": ["claude-opus-5", "claude-opus-4-8"] }
+```
+
+**The chain only ever escalates, and that is the whole design.** A chain is
+session-wide, so the same list that catches an unavailable Haiku executor also
+catches an unavailable Opus reviewer. A natural-looking
+`["claude-sonnet-5", "claude-haiku-4-5"]` would quietly hand a Haiku model the
+review of a pull request the planner deliberately tiered to Opus — the exact
+outcome `EXECUTOR_MODELS` refuses when its `haiku` tier falls *up* through
+`claude-sonnet-5` to `claude-opus-5` rather than down. Escalate-only is the
+one shape a single shared chain can take without contradicting the tiering
+everything else in this document is built on. It costs more only when a model
+is genuinely unavailable, which is rare; a review done cheaply because Opus
+was busy costs a fix cycle, and that is not cheaper.
+
+Three things about it are easy to get wrong.
+
+- **The file has to be `.claude/settings.json`, committed.** A cloud session —
+  Claude Code on the web, and therefore the Claude mobile app — runs on a
+  fresh clone and reads shared project settings out of it. It does **not**
+  read `~/.claude/settings.json` or `.claude/settings.local.json`; both stay
+  on the machine. Anything that must apply from a phone has to be in the
+  clone. `.gitignore` ignores `.claude/*` wholesale, so this file needs its
+  own `!.claude/settings.json` negation next to the ones for `agents/` and
+  `commands/` — without it the setting works on the desktop and is invisible
+  everywhere it was written for. `settings.local.json` stays ignored on
+  purpose: it is the personal override, and a personal override that reached
+  cloud sessions would not be one.
+- **These are Claude Code model IDs, and they use dashes.** `claude-opus-4-8`,
+  not the `claude-opus-4.8` that appears in `EXECUTOR_MODELS` above — that is
+  the Copilot CLI spelling. This is the same two-namespace hazard
+  *`model:` in an agent file takes a display name* describes for agent files
+  and `--model`, and the failure is quiet: an unreachable entry is skipped and
+  the chain moves on, so a mistyped ID looks exactly like a chain that was
+  never needed.
+- **Subagent coverage needs Claude Code v2.1.247 or later.** Before it, a
+  failure the chain covers ended the subagent instead of failing it over. On
+  an older build the file is harmless but does nothing for the four roles,
+  which is the only place it matters here.
+
+The trigger conditions match `run-copilot-session`'s rule closely enough to
+be worth stating: Claude Code switches when the primary is overloaded,
+unavailable, or returns another non-retryable server error, and never on
+authentication, billing, rate-limit, request-size, transport, or policy
+errors. Both systems fall back on *unavailability alone* — never after a real
+failure, because a cheap retry after a genuine failure defeats whichever tier
+the caller chose. Claude Code caps the chain at three after removing
+duplicates, and a switch lasts one turn.
+
 ### The executor's tier is chosen per task
 
 Every other role in the table gets one list for the whole repository. The
@@ -1543,7 +1605,11 @@ Six things about that loop are decisions rather than obvious consequences:
   label gets `sonnet`, not `haiku` — the planner's own rule is that `sonnet`
   is the answer when the tier is unclear, and an absent label is the most
   unclear a tier gets. Without this the planner's tiering, which is the one
-  judgement made with the whole feature in view, was being discarded locally.
+  judgement made with the whole feature in view, was being discarded locally. When a model turns out to be unavailable rather than merely
+  cheap, `.claude/settings.json`'s `fallbackModel` chain catches it — see
+  *Claude Code gets one fallback chain, not four lists* above for why that
+  chain only ever escalates, and why it has to be the committed project file
+  rather than either of the other two settings scopes.
 - **CI failures do not get their own repair path.** A red check is carried
   into the review as context, not fixed on the spot. The `fixer` finds its
   work by reading an `<!-- agent-review-verdict -->` comment, so a check
