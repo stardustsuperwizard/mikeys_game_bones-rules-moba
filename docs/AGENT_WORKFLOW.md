@@ -1487,12 +1487,73 @@ semantics and is flagged where it is used: setting labels through
 `issue_write` replaces the whole set, where `gh pr edit --add-label` adds to
 it, so the reviewer reads the current labels first.
 
+The asymmetry runs the other way too. Subscribing to a pull request's
+activity — the `<wake reason="external-event">` envelopes that carry comments,
+CI failures and check-suite rollups back into a live session — is a cloud-side
+facility with no `gh` equivalent, so `/execute-task` subscribes on the cloud
+surface and polls `gh pr checks --watch` on the desktop one. Same step, two
+mechanisms, both written out, and neither pretending to be the other.
+
+### `/execute-task` drives one task to a verdict
+
+The four roles are four contracts, but they are not four things a human wants
+to sit and trigger in sequence. `/execute-task` therefore does not stop when
+the executor opens a PR. It subscribes to that PR, waits for CI on the pushed
+commit, hands the CI outcome to the `reviewer` subagent along with the diff,
+and routes on the verdict: `FIX` goes to the `fixer`, whose push re-runs CI
+and sends the loop round again; `DESIGN AMBIGUITY` and `PLANNING FAILURE`
+stop and go to the human, because neither is a bounded correction. Two fix
+cycles, then it hands over — a third round on the same finding means the
+review and the fix disagree about what the finding is, which is not something
+a fourth round settles.
+
+Three things about that loop are worth stating, because each is a decision
+rather than an obvious consequence:
+
+- **CI failures do not get their own repair path.** A red check is carried
+  into the review as context, not fixed on the spot. The `fixer` finds its
+  work by reading an `<!-- agent-review-verdict -->` comment, so a check
+  repaired before any verdict exists is a repair nothing recorded — and a
+  reviewer not told CI is red will hand back a `PASS` on a PR that cannot
+  merge. One repair path, driven by verdicts.
+- **It does not add `agent:review`.** That label is the entry to
+  `agent-04-review.yml`, and a session that has already run the `reviewer`
+  subagent would be commissioning a second full review of the same PR — two
+  verdict comments, two `review:*` writes, and no way to know which one the
+  fixer will read. `CLAUDE.md` tells a Claude Code session to add the label by
+  hand; that instruction is for a session that stops before the review step,
+  which this one does not.
+- **An empty check list ends the wait, and is not automatically green.** CI
+  here is path-filtered — `godot-ci-validation.yml` by `paths-ignore`,
+  `gdscript-lint.yml` by `paths` — so a docs-only PR legitimately runs
+  nothing, and that *is* green. A PR that changes `**.gd` and still has no
+  checks is the other case, below, and is not. Either way the wait stops:
+  waiting for a check that will never be created is the one way that step
+  hangs forever.
+
+The loop ends at a `PASS` on green CI. It does not merge and does not approve;
+that is still the human's, as it is on every other path in this document.
+
+One caveat is written into the file because the file has two readers.
+`agent-06-claude.yml` hands this same prompt to a headless session for the
+`claude:execute` label, and that session is bounded by `--max-turns 60` — the
+executor step alone can consume most of it, and a truncated run stops
+mid-loop rather than anywhere it chose. So an unattended session runs steps
+one through four and stops at the verdict, saying on the PR that the fix
+cycle was not run and that `agent:fix` or `/fix-review` starts it. It also
+bounds the CI wait, for the reason the identity comment in that workflow
+already gives: without `AGENT_GITHUB_TOKEN`, the pull requests it opens are
+authored by `GITHUB_TOKEN` and GitHub starts no `pull_request` runs for them.
+That is the second reading of an empty check list, and the one where empty is
+not green — the gates did not pass, they never ran, and the file says to
+report it that way.
+
 ### `/feature-status` — where does this feature stand?
 
-The four roles above are four separate invocations, and between them someone
-has to work out what is already done: which tasks exist, which have pull
-requests, which came back `FIX`, which are blocked on a task that has not
-merged. `/feature-status <intake-issue>` answers that in one table, with the
+`/execute-task` drives one task to a verdict, but a feature is many tasks, and
+between them someone has to work out what is already done: which tasks exist,
+which have pull requests, which came back `FIX`, which are blocked on a task
+that has not merged. `/feature-status <intake-issue>` answers that in one table, with the
 literal next command in the right-hand column.
 
 ```
