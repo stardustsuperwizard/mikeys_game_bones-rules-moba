@@ -97,6 +97,29 @@ jobs:
         ${{ vars.FIXER_MODELS
         || 'claude-sonnet-5,claude-sonnet-4.5,claude-opus-5' }}
 
+      # An operator who sets FIXER_MODELS has named the list they want; the
+      # escalation below does not overrule it. Captured before the `||`
+      # because the expression above cannot tell a set variable from its
+      # own default once it has collapsed to a value.
+      FIXER_MODELS_PINNED: ${{ vars.FIXER_MODELS != '' }}
+
+      # "Resolve Fixer Model Tier" below buys a stronger model when a pull
+      # request keeps coming back. A task the planner called cheap and the
+      # reviewer keeps rejecting was mis-called, and repeating the same
+      # session at the same tier is how a cheap task becomes an expensive
+      # one -- four sessions instead of one.
+      #
+      # Counted in *completed* fix rounds, so the default of 1 means: the
+      # first fix runs at the base tier, and every round after that climbs
+      # one tier, to a ceiling of opus. Set to 0 to escalate immediately,
+      # or to a large number to switch escalation off.
+      FIXER_ESCALATE_AFTER: ${{ vars.FIXER_ESCALATE_AFTER || '1' }}
+
+      # Where the climb starts. Kept as a tier name rather than read out of
+      # FIXER_MODELS, because inferring a tier from the first id in a list
+      # would silently change meaning the next time that list is retuned.
+      FIXER_BASE_TIER: ${{ vars.FIXER_BASE_TIER || 'sonnet' }}
+
       # Soft cap for this fix session. Higher than the reviewer's, because
       # this session also edits files and re-runs validation, not just
       # reads. The Copilot CLI rejects any value below 30 before it starts
@@ -324,6 +347,172 @@ jobs:
 
           cat skip-comment.md >> "$GITHUB_STEP_SUMMARY"
 
+      # Two inputs decide the fixer's model: how much model the planner
+      # thought this task needed, and how many times fixing it has already
+      # been attempted. The first is the same `model:*` label
+      # agent-02-execute.yml reads, resolved through the Issue this pull
+      # request closes; the second is counted from the fixer's own
+      # `<!-- agent-fix-applied -->` comments on the pull request.
+      #
+      # The tier only ever raises the fixer, never lowers it. A cheap
+      # executor is a cost decision made before the code existed; the fixer
+      # is a correction responding to a reviewer who has read the code, and
+      # spending less on it than this repository already does would be a
+      # regression wearing a feature's clothes. So the base tier is a floor,
+      # the Issue's tier applies only when it is higher, and escalation
+      # climbs from whichever of the two won.
+      - name: Resolve Fixer Model Tier
+        id: tier
+        if: steps.build.outputs.verdict == 'FIX'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rank() {
+            case "$1" in
+              haiku) echo 1 ;;
+              sonnet) echo 2 ;;
+              opus) echo 3 ;;
+              *) echo 0 ;;
+            esac
+          }
+
+          name_for() {
+            case "$1" in
+              1) echo haiku ;;
+              2) echo sonnet ;;
+              3) echo opus ;;
+            esac
+          }
+
+          if [ "$FIXER_MODELS_PINNED" = "true" ]; then
+            echo "models=$FIXER_MODELS" >> "$GITHUB_OUTPUT"
+            echo "FIXER_MODELS is set for this repository; using it as-is." \
+                 "Per-task tier and escalation are both skipped."
+            echo "Fixer model preference list: $FIXER_MODELS"
+            exit 0
+          fi
+
+          # Completed fix rounds already spent on this pull request. The
+          # marker is the one "Publish Fix" posts, so a round that failed
+          # before pushing anything does not count against the budget --
+          # escalating on a crashed session would spend more model on a
+          # problem that was never diagnosed.
+          PRIOR="$(
+            gh pr view "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json comments \
+              --jq '[.comments[]
+                     | select(.body | contains("<!-- agent-fix-applied -->"))]
+                    | length'
+          )"
+
+          # The Issue this pull request closes, for its tier label. The
+          # structured field first; the body is the fallback, and this
+          # repository requires `Closes #<n>` in every pull request body.
+          gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body,closingIssuesReferences \
+            > fixer-pr-meta.json
+
+          ISSUE="$(
+            jq -r '.closingIssuesReferences[0].number // empty' \
+              fixer-pr-meta.json
+          )"
+
+          if [ -z "$ISSUE" ]; then
+            ISSUE="$(
+              jq -r '.body // ""' fixer-pr-meta.json \
+                | grep -oiE 'closes[[:space:]]+#[0-9]+' \
+                | head -1 \
+                | grep -oE '[0-9]+' \
+              || true
+            )"
+          fi
+
+          ISSUE_RANK=0
+
+          if [ -n "$ISSUE" ]; then
+            while read -r label; do
+              case "$label" in
+                model:*) CANDIDATE_RANK="$(rank "${label#model:}")" ;;
+                *) continue ;;
+              esac
+
+              if [ "$CANDIDATE_RANK" -gt "$ISSUE_RANK" ]; then
+                ISSUE_RANK="$CANDIDATE_RANK"
+              fi
+            done < <(
+              gh issue view "$ISSUE" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json labels \
+                --jq '.labels[].name' 2>/dev/null || true
+            )
+          fi
+
+          BASE_RANK="$(rank "$FIXER_BASE_TIER")"
+
+          if [ "$BASE_RANK" -eq 0 ]; then
+            echo "::warning::FIXER_BASE_TIER is '$FIXER_BASE_TIER', which" \
+                 "is not a tier. Falling back to sonnet."
+            BASE_RANK=2
+          fi
+
+          START_RANK="$BASE_RANK"
+
+          if [ "$ISSUE_RANK" -gt "$START_RANK" ]; then
+            START_RANK="$ISSUE_RANK"
+          fi
+
+          STEPS_UP=$(( PRIOR - FIXER_ESCALATE_AFTER + 1 ))
+
+          if [ "$STEPS_UP" -lt 0 ]; then
+            STEPS_UP=0
+          fi
+
+          EFFECTIVE=$(( START_RANK + STEPS_UP ))
+
+          if [ "$EFFECTIVE" -gt 3 ]; then
+            EFFECTIVE=3
+          fi
+
+          TIER="$(name_for "$EFFECTIVE")"
+
+          # Nothing raised the fixer above where it already runs, so use the
+          # configured list untouched -- it carries intermediate ids (such as
+          # claude-sonnet-4.5) that a tier list does not, and dropping them
+          # here would narrow the fallback walk for no reason.
+          if [ "$EFFECTIVE" -le "$BASE_RANK" ]; then
+            MODELS="$FIXER_MODELS"
+          else
+            case "$TIER" in
+              haiku) MODELS="claude-haiku-4.5,claude-sonnet-5,claude-opus-5" ;;
+              sonnet) MODELS="claude-sonnet-5,claude-opus-5" ;;
+              opus)
+                MODELS="claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5"
+                ;;
+            esac
+          fi
+
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          echo "tier=$TIER" >> "$GITHUB_OUTPUT"
+
+          echo "Fix round $(( PRIOR + 1 )) on this pull request" \
+               "($PRIOR completed already)."
+          echo "Base tier $FIXER_BASE_TIER; Issue tier rank $ISSUE_RANK" \
+               "(from ${ISSUE:-no closing Issue found});" \
+               "escalating after $FIXER_ESCALATE_AFTER round(s)."
+
+          if [ "$STEPS_UP" -gt 0 ] && [ "$EFFECTIVE" -eq 3 ] \
+             && [ "$(( START_RANK + STEPS_UP ))" -gt 3 ]; then
+            echo "Already at the top tier; further rounds cannot escalate." \
+                 "If this pull request keeps coming back, the finding is" \
+                 "probably not a model problem."
+          fi
+
+          echo "Resolved tier: $TIER"
+          echo "Fixer model preference list: $MODELS"
+
       - name: Configure Git Identity
         if: steps.build.outputs.verdict == 'FIX'
         shell: bash
@@ -350,7 +539,7 @@ jobs:
         uses: ./.github/actions/run-copilot-session
         with:
           prompt-file: ${{ steps.build.outputs.prompt-file }}
-          models: ${{ env.FIXER_MODELS }}
+          models: ${{ steps.tier.outputs.models }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
           # Same tool set as the executor: this session needs to edit,
           # run shell commands, and commit. Only sub-agent spawning stays

@@ -34,7 +34,7 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 | Executor — native cloud agent | Claude Haiku 4.5 | The picker, when **you** dispatch — see *Four entry points* below. |
 | Executor — scripted (`agent:execute`) | Per task, from the Issue's `model:*` label; Claude Opus 5, then Sonnet 5, then Haiku 4.5 when unlabelled | `model:*` label → `agent-02-execute.yml`'s *Resolve Executor Model Tier*; default and override in `EXECUTOR_MODELS` env / `vars.EXECUTOR_MODELS`. See *The executor's tier is chosen per task* below |
 | Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-04-review.yml` (also used by `agent-02-execute.yml`'s pre-PR self-review) |
-| Fixer | Claude Sonnet 5, then fallbacks | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-execute.yml`'s pre-PR self-fix) |
+| Fixer | Claude Sonnet 5, then fallbacks — climbing a tier per repeat round | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-execute.yml`'s pre-PR self-fix); escalation in its *Resolve Fixer Model Tier* step |
 | Lint fixer | Claude Haiku 4.5, then Sonnet 5 | `LINT_FIXER_MODELS` env / `vars.LINT_FIXER_MODELS` in `gdscript-lint.yml` |
 
 Planner, the scripted executor, reviewer, and fixer are all Copilot CLI
@@ -128,10 +128,51 @@ work, and the planner logs each label it could not apply.
 reviewer follows it — the reasoning this document already gives for the
 executor's tier being cheaper than the planner's. This change leans harder on
 that, so the reviewer staying on the strong tier stops being a preference and
-becomes the thing holding the arrangement up. Nothing here escalates a task
-that keeps failing; a task that burns several fix cycles on `model:haiku` is a
-signal to relabel it by hand, and automatic escalation is the obvious next
-step if that turns out to happen often.
+becomes the thing holding the arrangement up.
+
+### A pull request that keeps coming back buys a better model
+
+The planner calls the tier before the code exists, so it will sometimes call
+it wrong, and the failure is asymmetric. Over-calling costs money once.
+Under-calling costs a session that cannot finish, a review that rejects it, and
+a fix cycle — repeated at the same tier for as long as nobody notices, which
+is how a task scoped as cheap becomes the most expensive one in the milestone.
+
+So `agent-05-fix.yml` climbs. Its *Resolve Fixer Model Tier* step counts the
+fix rounds already completed on the pull request and raises the tier one step
+for each round past `FIXER_ESCALATE_AFTER` (default `1`), to a ceiling of
+`opus`. With the default, the first fix runs where the fixer runs today and the
+second buys Opus. Set it to `0` to escalate immediately, or to something large
+to switch escalation off.
+
+Three properties are worth stating, because each one is a decision:
+
+- **It only ever raises.** The base is `FIXER_BASE_TIER` (default `sonnet`),
+  and the Issue's `model:*` tier applies only when it is *higher* than that. A
+  cheap executor is a cost decision made before the code existed; the fixer is
+  a correction responding to a reviewer who has read the code, and spending
+  less on it than this repository already does would be a regression wearing a
+  feature's clothes. So `model:haiku` never produces a cheaper fixer — but
+  `model:opus` does produce a stronger one, from the first round.
+- **Rounds are counted from `<!-- agent-fix-applied -->`,** the marker
+  *Publish Fix* posts when a fix was actually pushed. A session that crashed
+  before diagnosing anything does not count against the budget: escalating on
+  a crash spends more model on a problem nobody has understood yet.
+- **Nothing changes until something is raised.** When the effective tier is
+  no higher than the base, the configured `FIXER_MODELS` list is used
+  untouched — it carries intermediate ids like `claude-sonnet-4.5` that a tier
+  list does not, and narrowing the fallback walk for no reason would trade
+  availability for tidiness.
+
+`FIXER_BASE_TIER` is a tier name rather than something inferred from the first
+id in `FIXER_MODELS`, so that retuning that list later does not silently move
+where the climb starts.
+
+An explicitly set `vars.FIXER_MODELS` skips all of it, the same way it does on
+the executor side: if you name the list, you own it, including on the fourth
+round. And the ceiling is real — once a pull request is at `opus`, further
+rounds cannot buy anything, and the run log says so. A fix that keeps failing
+at the top tier is telling you the finding is not a model problem.
 
 Copilot CLI resolves model availability against the **identity making the
 request**, and in Actions that identity is the workflow's `GITHUB_TOKEN`, not
