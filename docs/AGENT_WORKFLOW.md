@@ -175,17 +175,26 @@ decision, made once by the planner, read by whichever implementor the label
 summons. The planner and reviewer keep their configured per-vendor lists:
 planning and review are repository-wide judgements, not per-task ones.
 
-The escalation runs per vendor on the same signal: a fix cycle counts the
-same `<!-- agent-fix-applied -->` comments `agent-05-fix.yml` counts, and
-climbs a tier per round past `CLAUDE_FIXER_ESCALATE_AFTER` (default `1`). A
-pull request fixed once by one pipeline therefore escalates on the other,
-which is the point of sharing a marker rather than each keeping its own tally.
+The escalation is vendor-blind: a fix cycle counts the
+`<!-- agent-fix-applied -->` comments on the pull request and climbs a tier
+per round past `FIXER_ESCALATE_AFTER` (default `1`), whichever vendor applied
+the earlier ones. A pull request fixed once by Copilot therefore escalates on
+a Claude retry, which is the point of counting a shared marker rather than
+each vendor keeping its own tally.
 
-The two bounds that hold on the Copilot side hold here as well, and for the
-same reasons. Setting `vars.CLAUDE_IMPLEMENTOR_MODEL` or `vars.CLAUDE_FIXER_MODEL`
-skips tier resolution entirely for that role: an operator naming a model has
-made a decision about this repository, and neither a planner's guess about one
-task nor an escalation counter overrules it. And the fix cycle treats its
+The two bounds hold for both vendors, and for the same reasons. Setting the
+answering vendor's list — `vars.COPILOT_IMPLEMENTOR_MODELS` or
+`vars.CLAUDE_IMPLEMENTOR_MODELS`, and the same pair for the fixer — skips tier
+resolution entirely for that role: an operator naming a list has made a
+decision about this repository, and neither a planner's guess about one task
+nor an escalation counter overrules it. The workflows capture whether the
+variable was *set* (a `*_PINNED` flag) separately from its value, because the
+`||` default collapses "unset" and "set to the default" into the same string.
+Pinning is per vendor: an operator who pinned the Copilot list has said
+nothing about what Claude should run. The pre-vendor names — `PLANNER_MODELS`,
+`REVIEWER_MODELS`, `FIXER_MODELS` and the singular `*_MODEL` forms — are still
+read as a Copilot fallback, so an existing override is not silently lost.
+And the fix cycle treats its
 configured model as a **floor** rather than a starting point to overwrite —
 the Issue's tier applies only when it is higher, and when nothing has raised
 the fixer above where it is configured to run, the configured id is handed
@@ -1798,6 +1807,20 @@ sentence, rather than walking every candidate and blaming availability.
 **The legacy `agent:plan`, `agent:execute`, `agent:review` and `agent:fix`
 labels still work** and mean Copilot, which is what they have always meant.
 They are retired separately rather than broken mid-migration.
+
+**The eight labels already exist on the repository** — `agent:{planner,
+implementor, reviewer, fixer}:{copilot, claude}` — created by hand rather than
+by a workflow. Nothing in the pipeline creates them, so a fork or a fresh
+clone needs them added before any of these gates can fire. `gh label list`
+shows what is there; the gates match on exact names, so a typo in a label is a
+run that never starts rather than one that fails.
+
+**The legacy repository variables are still read** as a Copilot fallback:
+`PLANNER_MODELS`, `REVIEWER_MODELS`, `FIXER_MODELS` and the singular `*_MODEL`
+forms feed the matching `COPILOT_*_MODELS` when the new name is unset. Legacy
+labels were kept working through the migration; dropping the variables while
+keeping the labels would have reverted an operator's pinned list to the
+default with no warning, which is a worse surprise than a stale name.
 
 
 ## Running in VS Code

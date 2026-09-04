@@ -101,8 +101,12 @@ jobs:
       # are NOT interchangeable -- Copilot spells Opus 4.8 `claude-opus-4.8`,
       # Claude Code spells it `claude-opus-4-8` -- so copying one list into
       # the other variable walks every candidate and then blames availability.
+      # `REVIEWER_MODELS` / `REVIEWER_MODEL` are the pre-vendor names, read
+      # as a copilot fallback for the reason given in agent-01-planner.yml.
       COPILOT_REVIEWER_MODELS: >-
         ${{ vars.COPILOT_REVIEWER_MODELS
+        || vars.REVIEWER_MODELS
+        || vars.REVIEWER_MODEL
         || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
 
       CLAUDE_REVIEWER_MODELS: >-
@@ -201,8 +205,6 @@ jobs:
         id: session
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
           vendor: ${{ steps.route.outputs.vendor }}
           prompt-file: ${{ steps.build.outputs.prompt-file }}
           models: ${{ steps.route.outputs.models }}
@@ -366,7 +368,8 @@ jobs:
                   "No candidate model was available to the Actions"
                   " `GITHUB_TOKEN` identity. Check"
                   " https://github.com/settings/copilot/features, then set"
-                  " the `REVIEWER_MODELS` repository variable."
+                  " the `COPILOT_REVIEWER_MODELS` or `CLAUDE_REVIEWER_MODELS`"
+                  " repository variable, whichever vendor this run used."
               ),
               "harness_error": (
                   "This is a workflow fault, not a model or budget fault."

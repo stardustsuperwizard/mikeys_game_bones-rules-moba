@@ -114,8 +114,11 @@ jobs:
       # `claude-sonnet-4.5` -- the intermediate id the comment on the tier
       # step says is deliberately kept, because a tier list does not contain
       # it and dropping it would narrow the fallback walk for no reason.
+      # `FIXER_MODELS` is the pre-vendor name, read as a copilot fallback for
+      # the reason given in agent-01-planner.yml.
       COPILOT_FIXER_MODELS: >-
         ${{ vars.COPILOT_FIXER_MODELS
+        || vars.FIXER_MODELS
         || 'claude-sonnet-5,claude-sonnet-4.5,claude-opus-5' }}
 
       CLAUDE_FIXER_MODELS: >-
@@ -133,10 +136,6 @@ jobs:
 
       FIXER_MAX_TURNS: "60"
 
-      # An operator who sets FIXER_MODELS has named the list they want; the
-      # escalation below does not overrule it. Captured before the `||`
-      # because the expression above cannot tell a set variable from its
-      # own default once it has collapsed to a value.
 
       # "Resolve Fixer Model Tier" below buys a stronger model when a pull
       # request keeps coming back. A task the planner called cheap and the
@@ -640,8 +639,6 @@ jobs:
         id: session
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
           vendor: ${{ steps.route.outputs.vendor }}
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           max-turns: ${{ env.FIXER_MAX_TURNS }}

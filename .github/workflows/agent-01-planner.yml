@@ -86,8 +86,14 @@ jobs:
       # Claude Code spells the same model `claude-opus-4-8`. Copying one list
       # into the other variable produces a model-unavailable walk through
       # every candidate and then a failure that blames availability.
+      # `PLANNER_MODELS` / `PLANNER_MODEL` are the pre-vendor names. Read
+      # as a copilot fallback rather than dropped: legacy labels were kept
+      # working through the migration, and an operator's pinned list going
+      # silently back to the default is a worse surprise than a stale name.
       COPILOT_PLANNER_MODELS: >-
         ${{ vars.COPILOT_PLANNER_MODELS
+        || vars.PLANNER_MODELS
+        || vars.PLANNER_MODEL
         || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
 
       CLAUDE_PLANNER_MODELS: >-
@@ -2087,7 +2093,8 @@ jobs:
                   "No candidate model was available to the Actions"
                   " `GITHUB_TOKEN` identity. Check"
                   " https://github.com/settings/copilot/features, then set"
-                  " the `PLANNER_MODELS` repository variable."
+                  " the `COPILOT_PLANNER_MODELS` or `CLAUDE_PLANNER_MODELS`"
+                  " repository variable, whichever vendor this run used."
               ),
               "harness_error": (
                   "This is a workflow fault, not a model or budget fault."

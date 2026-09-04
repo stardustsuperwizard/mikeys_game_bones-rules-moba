@@ -193,16 +193,32 @@ jobs:
 
       # Same variables and defaults as agent-04-review.yml / agent-05-fix.yml
       # -- deliberately, so tuning one repository variable affects the
-      # standalone workflow and this pre-PR pass identically.
-      REVIEWER_MODELS: >-
-        ${{ vars.REVIEWER_MODELS
+      # standalone workflow and this pre-PR pass identically. That property
+      # only holds while the names match, so these moved to the per-vendor
+      # form when those two did.
+      #
+      # The pre-PR review and fix run at the vendor the *implementor* label
+      # named. They are steps of implementing the task, not separately
+      # labelled roles, so there is one vendor for the whole run.
+      COPILOT_REVIEWER_MODELS: >-
+        ${{ vars.COPILOT_REVIEWER_MODELS
+        || vars.REVIEWER_MODELS
         || vars.REVIEWER_MODEL
         || 'claude-opus-5,claude-opus-4.8,claude-opus-4.7,claude-sonnet-5' }}
+      CLAUDE_REVIEWER_MODELS: >-
+        ${{ vars.CLAUDE_REVIEWER_MODELS
+        || 'claude-opus-5,claude-opus-4-8,claude-sonnet-5' }}
       REVIEWER_MAX_AI_CREDITS: "75"
+      REVIEWER_MAX_TURNS: "40"
 
-      FIXER_MODELS: >-
-        ${{ vars.FIXER_MODELS
+      COPILOT_FIXER_MODELS: >-
+        ${{ vars.COPILOT_FIXER_MODELS
+        || vars.FIXER_MODELS
         || 'claude-sonnet-5,claude-sonnet-4.5,claude-opus-5' }}
+      CLAUDE_FIXER_MODELS: >-
+        ${{ vars.CLAUDE_FIXER_MODELS
+        || 'claude-sonnet-5,claude-opus-5,claude-opus-4-8' }}
+      FIXER_MAX_TURNS: "60"
       # 150, not the reviewer's 75: this session edits files and re-runs
       # validation rather than only reading, and 100 was not enough --
       # the pre-PR fix pass on #165 stopped mid-task with
@@ -235,7 +251,23 @@ jobs:
             *)                  VENDOR="${DISPATCH_VENDOR:-copilot}" ;;
           esac
 
+          # The pre-PR review and fix sessions need the vendor's spellings
+          # too. Resolved here so both call sites read one output instead of
+          # an env var that is only correct for copilot.
+          case "$VENDOR" in
+            copilot)
+              REVIEWER_MODELS="$COPILOT_REVIEWER_MODELS"
+              FIXER_MODELS="$COPILOT_FIXER_MODELS"
+              ;;
+            claude)
+              REVIEWER_MODELS="$CLAUDE_REVIEWER_MODELS"
+              FIXER_MODELS="$CLAUDE_FIXER_MODELS"
+              ;;
+          esac
+
           echo "vendor=$VENDOR" >> "$GITHUB_OUTPUT"
+          echo "reviewer_models=$REVIEWER_MODELS" >> "$GITHUB_OUTPUT"
+          echo "fixer_models=$FIXER_MODELS" >> "$GITHUB_OUTPUT"
           echo "Running as $VENDOR"
 
       - name: Checkout Repository
@@ -742,8 +774,6 @@ jobs:
         id: exec-session
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
           vendor: ${{ steps.route.outputs.vendor }}
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: implementor-prompt.txt
@@ -1170,12 +1200,11 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
           vendor: ${{ steps.route.outputs.vendor }}
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: ${{ steps.review-build.outputs.prompt-file }}
-          models: ${{ env.REVIEWER_MODELS }}
+          models: ${{ steps.route.outputs.reviewer_models }}
+          max-turns: ${{ env.REVIEWER_MAX_TURNS }}
           max-ai-credits: ${{ env.REVIEWER_MAX_AI_CREDITS }}
           capability: read-only
           step-label: "Reviewing (pre-PR)"
@@ -1239,12 +1268,11 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/run-agent-session
         with:
-          # Explicit for now. Stage 3 replaces this literal with the vendor
-          # segment of the `agent:{role}:{vendor}` label that triggered the run.
           vendor: ${{ steps.route.outputs.vendor }}
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt-file: ${{ steps.fix-build.outputs.prompt-file }}
-          models: ${{ env.FIXER_MODELS }}
+          models: ${{ steps.route.outputs.fixer_models }}
+          max-turns: ${{ env.FIXER_MAX_TURNS }}
           max-ai-credits: ${{ env.FIXER_MAX_AI_CREDITS }}
           capability: write
           step-label: "Fixing (pre-PR)"
