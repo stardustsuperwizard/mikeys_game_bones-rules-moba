@@ -91,10 +91,14 @@ on:
       # `.github/scripts` entries above.
       - '.github/scripts/task_scope.py'
 
-      # The Python balance harness's own workflows. `sim/**` is already
-      # ignored for the reason given there -- the harness reads exported JSON
-      # and never feeds back into the Godot project -- so the jobs that run
-      # it are ignored on the same grounds.
+      # The Python balance harness's own workflows. Note these DO install
+      # Godot (`setup-godot`), so the `sim/**` reasoning above is not why
+      # they are here -- they are here because this gate cannot say anything
+      # useful about them. It imports the Godot project; running it against
+      # an edited workflow proves the project still boots, which was never in
+      # question. `balance-fast.yml` meanwhile triggers on
+      # `.github/workflows/balance-*.yml`, so editing either file already
+      # runs the harness that actually exercises them.
       - '.github/workflows/balance-*.yml'
 
       # Dependency preparation for Copilot agent sessions. It provisions an
