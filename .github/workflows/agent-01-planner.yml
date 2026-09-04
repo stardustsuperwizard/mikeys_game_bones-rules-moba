@@ -1370,6 +1370,17 @@ jobs:
             "D4C5F9" \
             "Touches paths GITHUB_TOKEN cannot push; needs a human-credentialed session"
 
+          # Applied by `sync-issue-dependencies.py` to whichever end of an
+          # edge does the blocking, and the trigger `issue-dependencies.yml`
+          # listens for. Bootstrapped here as well as there because a label
+          # that does not exist cannot be added, and this workflow is the one
+          # that runs first on a fresh repository -- the sync would otherwise
+          # spend its first run creating the label instead of using it.
+          ensure_label \
+            "blocker" \
+            "B23F00" \
+            "Blocks at least one other Issue; wires the dependency chain"
+
           # `plan` is applied by the Issue templates, but a template silently
           # drops a label the repository does not define — so an intake Issue
           # would arrive unlabelled and never appear in the awaiting-planning
@@ -1424,6 +1435,13 @@ jobs:
           )
 
           import task_scope
+
+          # The dependency-table grammar, shared with
+          # `sync-issue-dependencies.py` and `issue-dependencies.yml`. Imported
+          # for `render_table` specifically: the planner writing the table by
+          # hand is how the writer and the reader drift apart, and the reader
+          # failing silently is the whole failure mode being fixed here.
+          import issue_dependencies
 
           repo = os.environ["GITHUB_REPOSITORY"]
           parent = os.environ["ISSUE_NUMBER"]
@@ -1566,11 +1584,13 @@ jobs:
           ## Out of Scope
 
           {bullets(task["out_of_scope"])}
-
-          ## Dependencies
-
-          {bullets(task["depends_on"])}
           """
+              # No `## Dependencies` section yet, deliberately. It has to name
+              # Issue *numbers*, and none of the siblings exist until this
+              # loop finishes -- `depends_on` at this point holds planner task
+              # IDs, which mean nothing to anyone reading the Issue and
+              # nothing to `issue_dependencies.py`. The third pass appends the
+              # real table once every number is known.
 
               # Evaluated against the rendered body rather than against
               # `task["expected_files"]` directly, because the body is what
@@ -1690,51 +1710,77 @@ jobs:
                   f"#{number}: {task['title']}"
               )
 
-          # Second pass: add native GitHub blocked-by relationships.
+          # Second pass: work out each task's dependency table.
+          #
+          # This used to be where `gh issue edit --add-blocked-by` ran, and it
+          # is where the dependency chain was being lost. That flag needs
+          # GitHub CLI 2.94.0 and is an unknown-flag error on an older runner
+          # image -- but the deeper problem is structural, and would bite
+          # whatever the immediate cause: this step has *already created the
+          # Issues* by the time it gets here, so a failure leaves a plan that
+          # exists and a chain that does not, and the only retry available is
+          # one that duplicates every Issue. Nothing recorded the intent, so
+          # there was nothing cheaper to replay from.
+          #
+          # So the intent is written into the Issue body instead, in the
+          # standard table every template carries, and
+          # `.github/scripts/sync-issue-dependencies.py` realizes it in a
+          # later step. That script goes straight to the REST endpoint, which
+          # has no version floor, and it is re-runnable: if it fails, the
+          # tables are still on the Issues and the `blocker` label or a manual
+          # sweep rebuilds the chain from them.
+          blocks = {task["id"]: [] for task in plan["tasks"]}
+
           for task in plan["tasks"]:
-              if not task["depends_on"]:
-                  continue
+              for dependency in task["depends_on"]:
+                  blocks[dependency].append(task["id"])
 
-              child_number = created[
-                  task["id"]
-              ]["number"]
 
-              dependency_numbers = [
-                  str(
-                      created[dependency]["number"]
-                  )
-                  for dependency
-                  in task["depends_on"]
+          def dependency_section(task_id):
+              """The task's `## Dependencies` table, in Issue numbers.
+
+              Both directions are written, from the one `depends_on` graph the
+              planner produced. A task that only listed what it waits on still
+              gets `Blocks` rows on the other end of each edge, which is what
+              earns those Issues the `blocker` label and makes the chain
+              readable from either Issue rather than only the downstream one.
+
+              The `Why` column takes the other task's title. The planner emits
+              no per-edge rationale, and a title is a truthful answer to "why
+              does this edge exist" -- considerably more use than an em dash.
+              """
+              blocked_by = [
+                  created[dependency]["number"]
+                  for dependency in plan_by_id[task_id]["depends_on"]
+              ]
+              blocking = [
+                  created[dependent]["number"]
+                  for dependent in blocks[task_id]
               ]
 
-              subprocess.run(
-                  [
-                      "gh",
-                      "issue",
-                      "edit",
-                      str(child_number),
-                      "--repo",
-                      repo,
-                      "--add-blocked-by",
-                      ",".join(
-                          dependency_numbers
-                      ),
-                  ],
-                  check=True,
-              )
+              reasons = {
+                  entry["number"]: entry["title"]
+                  for entry in created.values()
+              }
 
-              print(
-                  f"Set dependencies for "
-                  f"#{child_number}: "
-                  + ", ".join(
-                      f"#{number}"
-                      for number
-                      in dependency_numbers
+              return (
+                  "## Dependencies\n\n"
+                  + issue_dependencies.render_table(
+                      blocked_by=blocked_by,
+                      blocks=blocking,
+                      reasons=reasons,
                   )
+                  + "\n"
               )
 
 
-          # Third pass: prepend the task description and the contract.
+          plan_by_id = {
+              task["id"]: task
+              for task in plan["tasks"]
+          }
+
+          # Third pass: prepend the task description and the contract, and
+          # append the dependency table.
           #
           # A pasted task description is the one channel that survives every
           # picker GitHub takes away. The desktop agents panel offers a model
@@ -1866,7 +1912,12 @@ jobs:
                   suffix=".md",
                   delete=False,
               ) as patched:
-                  patched.write(run_block + bodies[task_id])
+                  patched.write(
+                      run_block
+                      + bodies[task_id]
+                      + "\n"
+                      + dependency_section(task_id)
+                  )
                   patched_path = patched.name
 
               subprocess.run(
@@ -1893,6 +1944,40 @@ jobs:
                   indent=2
               ) + "\n"
           )
+
+      # Realize the tables the step above wrote. Separate from issue creation
+      # on purpose: creation is the expensive, unrepeatable half -- an Issue
+      # created twice is a duplicate somebody has to close by hand -- while
+      # this half reads bodies and POSTs relationships, and is safe to run
+      # again as many times as it takes. Splitting them means a dependency
+      # failure never puts the created Issues at risk, and the retry is
+      # re-running one cheap step rather than re-planning.
+      #
+      # `--issue` per created task rather than `--sweep`: these are the Issues
+      # whose tables just changed, and the whole repository does not need
+      # re-reading to wire one plan.
+      - name: Wire the Dependency Chain
+        if: steps.duplicate_check.outputs.already_planned != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ARGS=()
+
+          while read -r NUMBER; do
+            [ -n "$NUMBER" ] || continue
+            ARGS+=(--issue "$NUMBER")
+          done < <(jq -r '.[].number' created-issues.json)
+
+          if [ ${#ARGS[@]} -eq 0 ]; then
+            echo "No Issues were created; nothing to wire."
+            exit 0
+          fi
+
+          .github/scripts/sync-issue-dependencies.py \
+            --repo "$GITHUB_REPOSITORY" \
+            "${ARGS[@]}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish Plan to Parent Issue
         if: steps.duplicate_check.outputs.already_planned != 'true'

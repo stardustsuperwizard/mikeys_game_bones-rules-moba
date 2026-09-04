@@ -44,6 +44,12 @@ PLANNING FAILURE
 The implementation reveals a flaw in the technical plan or requires
 architectural changes. Return the work to the planning agent.
 
+An undeclared dependency is one of these. If the diff only works because
+another Issue's work is assumed present, or the task was implemented ahead
+of something it needs, say which Issue and which direction — the plan's
+`## Dependencies` tables were wrong, and the ordering that let this happen
+will let it happen again.
+
 DESIGN AMBIGUITY
 The requested behavior is unclear or conflicts with project design.
 Escalate rather than inventing requirements.

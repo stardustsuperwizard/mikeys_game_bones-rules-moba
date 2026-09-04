@@ -198,7 +198,7 @@ jobs:
 
           gh issue view "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --json number,title,body,url,state,labels,blockedBy \
+            --json number,title,body,url,state,labels \
             > issue.json
 
           echo "issue_url=$(jq -r '.url' issue.json)" >> "$GITHUB_OUTPUT"
@@ -226,11 +226,45 @@ jobs:
             exit 0
           fi
 
+          # Blockers come from the REST dependencies endpoint, not from
+          # `gh issue view --json blockedBy`, and this guard fails closed.
+          #
+          # What it used to read was:
+          #
+          #   [.blockedBy.nodes[]? | select(.state == "OPEN") | ...]
+          #
+          # and the `?` is the problem. It suppresses the iterate-over-null
+          # error, so a `blockedBy` that arrives null -- a renamed field, a
+          # dependencies API hiccup, a `gh` that reports the field without
+          # populating it -- yields an empty list, which is byte-identical to
+          # "this task is unblocked". The workflow then spends a full executor
+          # session implementing a task whose dependency has not landed, which
+          # is the exact outcome the guard exists to prevent. "Cannot tell"
+          # must never resolve to "go ahead".
+          #
+          # The endpoint has a known shape (a JSON array of issue objects) and
+          # no `gh` version floor -- `--json blockedBy` needs GitHub CLI
+          # 2.94.0, this needs only `gh api`. Note REST spells the state
+          # lowercase where the GraphQL-backed `--json` output spells it
+          # upper, hence the `ascii_downcase`.
+          if ! gh api \
+               "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/dependencies/blocked_by?per_page=100" \
+               > blockers.json; then
+            echo "::error::Could not read #$ISSUE_NUMBER's blockers." \
+                 "Refusing to dispatch a session that may be blocked." \
+                 "Re-add \`agent:execute\` once the API is reachable."
+            exit 1
+          fi
+
           BLOCKERS=$(
             jq -r '
-              [.blockedBy.nodes[]? | select(.state == "OPEN") | "#\(.number)"]
+              [
+                .[]
+                | select((.state | ascii_downcase) == "open")
+                | "#\(.number)"
+              ]
               | join(", ")
-            ' issue.json
+            ' blockers.json
           )
 
           if [ -n "$BLOCKERS" ]; then

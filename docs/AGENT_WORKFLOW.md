@@ -442,6 +442,12 @@ one. `agent-00-dashboard.yml` no
 longer runs on every event — it renders on demand now. See *Issue views* and
 *The control plane* below.
 
+Two more workflows sit outside the `agent-*` numbering and cost nothing:
+`issue-linking.yml` around dispatch bookkeeping, and `issue-dependencies.yml`
+around the dependency chain. Neither appears in the diagram because neither is
+a stage — they are triggered by the `blocker` label and by pull request and
+assignment events, not by a stage completing.
+
 ```
 Intake Issue        [plan] in title, `plan` + type label
         │
@@ -549,8 +555,19 @@ points, two different products* above.
 | `agent:fix` label | You | `agent-05-fix.yml` | Apply the bounded correction the last `FIX` verdict asked for |
 | `planned` label | Planner | — | Intake Issue has been decomposed |
 | `review:*` label | Reviewer | — | Last verdict on a PR |
+| `blocker` label | Planner, any agent, you | `issue-dependencies.yml` | This Issue blocks at least one other; wire its `## Dependencies` table into GitHub dependencies |
 | `dashboard:update` label | You | `agent-00-dashboard.yml` | Re-render the control plane |
 | `dashboard` label | `agent-00` | `agent-00-dashboard.yml` | This Issue is the generated control plane |
+
+`blocker` is the one row that is both. It is a state marker — an Issue carries
+it for as long as something is waiting on it, and it is never consumed, so
+`is:issue is:open label:blocker` is an exact list of what the rest of the work
+is queued behind. Adding it is also what fires `issue-dependencies.yml`. That
+combination costs the usual retry story: re-adding a label already present is
+not an event, so a failed wiring run is retried by dispatching the workflow
+(with **sweep** ticked to rebuild everything) rather than by re-labelling. The
+trade is worth it — a trigger label that gets consumed would take the queryable
+state with it, and the state is the more useful half.
 
 `plan` is the one row that is not a trigger — nothing fires on it. It is a
 state marker: every intake template applies it, and the planner consumes it
@@ -582,6 +599,7 @@ depends on the color. Checked live against the repository on 2026-08-22:
 | `implementation` | `#1D76DB` | `agent-01-planner.yml` |
 | `machine` | `#70A8BD` | `agent-01-planner.yml` |
 | `human-credentials` | `#D4C5F9` | `agent-01-planner.yml` |
+| `blocker` | `#B23F00` | `agent-01-planner.yml` and `sync-issue-dependencies.py` (duplicated, not shared) |
 | `review:pass` | `#0E8A16` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
 | `review:fix` | `#D93F0B` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
 | `review:planning-failure` | `#B60205` | `agent-04-review.yml` and `agent-02-execute.yml` (duplicated, not shared) |
@@ -1067,9 +1085,15 @@ The Feature Issue is the parent and remains the source of truth for intended
 behavior. Every promoted Implementation Task is a direct GitHub sub-issue of
 that Feature. Writing the parent number in an Issue body is not sufficient;
 the GitHub sub-issue relationship must exist — `agent-01-planner.yml` creates
-it with `gh issue create --parent`, and sibling ordering with
-`gh issue edit --add-blocked-by`. Both need a recent `gh`; the runner image
-ships one, but pin it if a run ever fails on an unknown flag.
+it with `gh issue create --parent`, which needs a recent `gh`; the runner
+image ships one, but pin it if a run ever fails on an unknown flag.
+
+Sibling *ordering* is not created that way, and used to be. See *The
+dependency chain* below: the planner writes each task's `## Dependencies`
+table and `.github/scripts/sync-issue-dependencies.py` realizes it, because
+`gh issue edit --add-blocked-by` needs `gh` 2.94.0 and failed as an unknown
+flag on older images — after the Issues had already been created, with
+nothing recording the intent to retry from.
 
 Each implementation sub-issue:
 
@@ -1080,7 +1104,8 @@ Each implementation sub-issue:
   *Paths the agent workflows cannot push*), and nothing else — the planner
   applies no `agent:*` label, because those are dispatch triggers a human
   adds and a pre-applied trigger is a spent one;
-- records sibling ordering with GitHub issue dependencies;
+- records sibling ordering in its `## Dependencies` table, which becomes a
+  GitHub issue dependency;
 - is the only Issue assigned to the executor; and
 - is closed by its own implementation PR.
 
@@ -1107,6 +1132,7 @@ The views worth having, and the queries behind them:
 | Planning in flight | `is:issue is:open label:"agent:plan"` |
 | Planned Features | `is:issue is:open label:planned` |
 | Open tasks | `is:issue is:open label:implementation` |
+| Blocking something | `is:issue is:open label:blocker` |
 | Awaiting review | `is:pr is:open draft:false -label:"review:pass","review:fix","review:planning-failure","review:design-ambiguity"` |
 | Needs your attention | `is:pr is:open label:"review:fix","review:planning-failure","review:design-ambiguity","validation:failed"` |
 | Ready to merge | `is:pr is:open label:"review:pass"` |
@@ -1131,11 +1157,108 @@ The `-label:"agent:plan"` exclusion is what separates "queued" from
 "running": `agent:plan` is consumed by the planner on success and given back
 on failure, so a Feature is in exactly one of the two views at any moment.
 
-What a view cannot express is the **dependency graph** — there is no label
-for "blocked by #12", and no query that orders tasks by it. That is the one
-question views leave unanswered, and it happens to be the question you
-actually ask: *what can I dispatch right now?* It is why the control plane
-below still exists.
+What a view cannot express is the **dependency graph** — `blocker` tells you
+an Issue blocks *something*, but not what, and no query orders tasks by it.
+That is the one question views leave unanswered, and it happens to be the
+question you actually ask: *what can I dispatch right now?* It is why the
+control plane below still exists.
+
+### The dependency chain
+
+An Issue waiting on another is written in the `## Dependencies` table that
+every Issue template carries, and nowhere else:
+
+```markdown
+| Relationship | Issue | Why |
+| --- | --- | --- |
+| Blocked by | #12 | Needs the effect container API |
+| Blocks | #34 | #34 consumes the resolver this adds |
+```
+
+The Issue doing the blocking gets the `blocker` label.
+`issue-dependencies.yml` fires on that label, reads the table, and creates
+GitHub's native blocked-by relationship — which is what the control plane
+orders by, what `agent:execute` refuses to run past, and what
+`issue-linking.yml` warns about when a task is dispatched anyway.
+
+**Why the table exists at all**, when GitHub has a native relationship: the
+native one is invisible in a body, in a plan comment, and in every export —
+and it was the piece that kept failing to get created. `gh issue create
+--blocked-by` and `gh issue edit --add-blocked-by` need GitHub CLI 2.94.0
+(2026-06-10) and are unknown-flag errors on anything older, which is one way
+that call fails; a permissions or API change is another. The version is not
+really the point. The point is that the call ran in the same step that had
+already created the plan's Issues, so *any* failure of it left a plan that
+existed and a chain that did not — retriable only by re-creating every Issue —
+and nothing anywhere recorded what the chain was supposed to be.
+
+So the body is the declaration and the relationship is derived state. Three
+consequences, and they are the whole design:
+
+- **It survives a failed write.** The table is on the Issue whether the POST
+  worked or not, so the chain can be rebuilt at any time — dispatch
+  `issue-dependencies.yml` with **sweep** ticked.
+- **It has no `gh` version floor.** `sync-issue-dependencies.py` goes to the
+  REST endpoint (`POST /repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`,
+  taking the blocking Issue's *database id*, not its number) rather than a CLI
+  flag. Only drift reporting wants the newer `gh`, and it degrades to a note
+  rather than a failure.
+- **It is add-only.** A dependency GitHub has that no table declares is
+  reported, never deleted. Wiring one by hand in the UI is a legitimate thing
+  to do; a sweep that silently unwired it would be data loss nobody noticed
+  until work started in the wrong order.
+
+Two writers, one implementation. `agent-01-planner.yml` calls the sync script
+directly at the end of a plan — it cannot rely on its own `blocker` labels
+firing the workflow, because a label applied with `GITHUB_TOKEN` does not
+start a run. Everyone else adds the label and lets the workflow do it. Both
+paths go through `.github/scripts/issue_dependencies.py`, so a hand-written
+table and a generated one are read by exactly the same grammar. That grammar
+also accepts the older `- Blocked by: #12` bullet form, so a sweep repairs the
+backlog filed before this existed.
+
+#### Reading the chain fails closed
+
+Creating the chain is half of it. Three places *read* it to decide whether
+work may start — `agent-02-execute.yml`'s refusal, `issue-linking.yml`'s
+warning, and the control plane's *Ready to dispatch* bucket — and all three
+inferred "unblocked" from an empty result without checking the result meant
+anything. The pattern was:
+
+```
+[.blockedBy.nodes[]? | select(.state == "OPEN") | "#\(.number)"]
+```
+
+The `?` suppresses jq's iterate-over-null error, so a `blockedBy` arriving
+null — a renamed field, a dependencies API hiccup, a `gh` reporting the field
+without populating it — yields an empty list byte-identical to "this task has
+no blockers". A paid executor session then runs against a task whose
+dependency has not landed, which is the outcome the guard exists to prevent.
+
+Note this is *not* the `gh` version floor: an unknown `--json` field makes
+`gh` exit non-zero, and under `set -euo pipefail` that fails the step loudly.
+The fail-open is narrower and worse — the field is accepted, and its emptiness
+is believed.
+
+The two enforcement points now read
+`/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by` instead: a known
+shape (a JSON array of issue objects), no version floor, and a failed read is
+fatal rather than empty. **Cannot tell must never resolve to go ahead.** Note
+REST spells the state lowercase where the GraphQL-backed `--json` output
+spells it upper, so both comparisons downcase first.
+
+The control plane reads 500 issues in one call and cannot afford a request
+each, so it reports the uncertainty rather than resolving it: an issue whose
+`blockedBy` is not a `nodes` list of `{number, state}` is filed under *Needs
+your attention* with `DEPENDENCIES UNREADABLE`, never under *Ready to
+dispatch*.
+
+`.github/scripts/test-issue-dependencies.sh` pins all of it — the parser, the
+`gh` calls against a stub CLI, and the read side, including a grep that fails
+if either enforcement point drifts back to `.blockedBy.nodes[]?`. It needs no
+Godot, credentials or network, and it is the check to run when touching any of
+this, because the failure mode throughout is a green run that wired or saw
+nothing.
 
 ### The control plane
 
@@ -1563,6 +1686,7 @@ are custom agents and MCP servers.
 | `.github/workflows/agent-03-rollup.yml` | Comments on the parent Feature when its last sub-issue closes |
 | `.github/workflows/agent-04-review.yml` | Reviews a PR against its task contract, emits a verdict |
 | `.github/workflows/agent-05-fix.yml` | Applies a bounded correction against the latest `FIX` verdict, on `agent:fix`; refuses fork PRs and diffs it cannot push before spending a session; ends with an independent validation job on the pushed SHA |
+| `.github/workflows/issue-dependencies.yml` | Turns an Issue's `## Dependencies` table into GitHub dependencies, on the `blocker` label or a dispatch; `sweep` rebuilds the whole chain |
 | `.github/workflows/godot-validation.yml` | The one reusable validation job (`workflow_call`); called by `godot-ci-validation.yml`, `agent-02-execute.yml`, and `agent-05-fix.yml` |
 | `.github/workflows/godot-ci-validation.yml` | Human-authored `pull_request` validation gate (`paths-ignore` deny-list) plus a manual dispatch; calls `godot-validation.yml` |
 | `.github/actions/build-review-request` | Shared by `agent-04-review.yml` and `agent-02-execute.yml`'s pre-PR pass: builds the reviewer prompt |
@@ -1571,6 +1695,9 @@ are custom agents and MCP servers.
 | `.github/actions/extract-review-verdict` | Turns a review session's text into a machine-readable `VERDICT` |
 | `.github/actions/lint-gdscript` | Diff-scoped `gdformat` check/fix, used by `agent-02-execute.yml` and `gdscript-lint.yml` |
 | `.github/scripts/render-dashboard.py` | Derives every task and Feature state from the repository graph |
+| `.github/scripts/issue_dependencies.py` | The dependency-table grammar, shared by the planner, the sync script and the tests — the one definition of what `Blocked by` and `Blocks` mean |
+| `.github/scripts/sync-issue-dependencies.py` | The only writer of GitHub issue dependencies: reads tables, POSTs the relationships, applies `blocker`, reports drift |
+| `.github/scripts/test-issue-dependencies.sh` | Pins the parser and the sync's `gh` calls against a stub CLI; no Godot, credentials or network |
 | `.github/scripts/task_scope.py` | The one path rule the pushing workflows share: the ⚠️ delicate-paths flag, executor eligibility from an Issue's expected files (`agent-01-planner.yml`, `agent-02-execute.yml`, the control plane), and pushability from a pull request's changed files (`agent-05-fix.yml`) |
 | `.github/agents/01-planner.agent.md` | Planner role, Issue promotion criteria |
 | `.github/agents/02-executor.agent.md` | Executor role, scope boundaries |
@@ -1606,4 +1733,8 @@ Re-check these with the commands rather than trusting this table.
 | Copilot is assignable here | `gh api graphql -f query='{repository(owner:"stardustsuperwizard",name:"mikeys_game_bones-rules-moba"){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login}}}}'` |
 | `gh agent-task create` has no `--model` | `gh agent-task create --help` |
 | The `plan` queue is not stale | `gh issue list --label plan --json number,title,labels` — nothing here should also carry `planned` |
+| This `gh` can read dependencies in bulk | `gh issue list --json number,blockedBy --limit 1` — an "unknown JSON field" error means `gh` is older than 2.94.0, which only costs drift reporting and the control plane's blocked bucket; neither enforcement point depends on it |
+| The shape of `blockedBy` | `gh issue list --json number,blockedBy --limit 5 --jq '.[].blockedBy'` — the control plane expects `{"nodes": [{"number", "state"}]}` and flags anything else rather than reading it as unblocked |
+| The dependency endpoint answers | `gh api repos/stardustsuperwizard/mikeys_game_bones-rules-moba/issues/1/dependencies/blocked_by` |
+| The chain matches the tables | `.github/scripts/sync-issue-dependencies.py --sweep --dry-run` |
 | Derived state matches reality | `.github/scripts/render-dashboard.py --json` |

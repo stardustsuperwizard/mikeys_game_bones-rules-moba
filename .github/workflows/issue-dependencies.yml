@@ -1,0 +1,215 @@
+name: Issue Dependency Chain
+
+# Turns the `## Dependencies` table in an Issue body into GitHub's native
+# blocked-by relationship.
+#
+# The problem this solves: the relationship could only be created by the
+# planner, in one pass, over the sub-issues of a single plan -- and when that
+# call failed, nothing said so. Everything downstream reads the native
+# relationship (`agent-00-dashboard.yml`'s dependency ordering,
+# `agent-02-execute.yml`'s refusal to run a blocked task,
+# `issue-linking.yml`'s open-blocker warning), so a chain that failed to get
+# created is not a cosmetic loss: it is the executor cheerfully implementing
+# task three before task one exists.
+#
+# So the edge is written in the Issue body first, in a table any human or
+# agent can fill in, and realized from there. The body is the declaration; the
+# GitHub relationship is derived state that can be rebuilt at any time from
+# the tables. See "Declaring Issue dependencies" in
+# `.github/copilot-instructions.md` for the contract, and
+# `.github/scripts/issue_dependencies.py` for the grammar.
+#
+# Spends no AI credits and needs no secrets beyond GITHUB_TOKEN.
+
+on:
+  # The `blocker` label is the signal, because it is the one an agent can
+  # apply and a human can add from a phone. An Issue earns it by blocking at
+  # least one other Issue.
+  #
+  # `edited` as well as `labeled`: the table is the source of truth, so
+  # changing it on an Issue that already carries the label has to re-sync.
+  # This subscribes to every Issue edit in the repository, but the job below
+  # runs only when the Issue actually carries `blocker` -- every other edit
+  # terminates in the skipped-job check, costing nothing.
+  issues:
+    types:
+      - labeled
+      - edited
+
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue whose Dependencies table should be realized"
+        required: false
+        type: number
+      sweep:
+        description: >-
+          Read every open Issue instead of one. The repair mode: rebuilds the
+          whole chain from the tables and reports dependencies GitHub has that
+          no table declares.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # Per Issue, and never cancelled. Two edits in quick succession must both be
+  # read: the second one's table is the current one, but the first run may
+  # already be mid-POST, and cancelling it would leave the chain half-built
+  # with nothing recording that it happened.
+  group: issue-dependencies-${{ github.event.issue.number || 'dispatch' }}
+  cancel-in-progress: false
+
+jobs:
+  wire:
+    name: Issue Dependency Chain
+    runs-on: ubuntu-latest
+
+    # `issues.labeled` fires for every label on every Issue, and `edited` for
+    # every body change; only Issues that are, or have just become, blockers
+    # are interesting.
+    #
+    # This also breaks the only loop available to it. The sync applies
+    # `blocker` to the Issues it finds on the blocking end of an edge, which
+    # is a `labeled` event matching the first clause -- but a label applied
+    # with GITHUB_TOKEN does not start a workflow run, by GitHub's design.
+    # That is load-bearing here rather than incidental, and it is also why
+    # `agent-01-planner.yml` calls the sync script directly instead of
+    # labelling and expecting this workflow to notice.
+    if: >-
+      github.event_name != 'issues' ||
+      github.event.label.name == 'blocker' ||
+      contains(github.event.issue.labels.*.name, 'blocker')
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BLOCKER_LABEL: blocker
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Realize the Declared Dependencies
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ARGS=()
+
+          if [ "${{ inputs.sweep }}" = "true" ]; then
+            ARGS+=(--sweep)
+          fi
+
+          # A dispatch may name an Issue, a sweep, or both -- naming one
+          # alongside a sweep is how a *closed* Issue gets re-wired, since the
+          # sweep only reads open ones.
+          ISSUE="${{ github.event.issue.number || inputs.issue_number }}"
+
+          if [ -n "$ISSUE" ]; then
+            ARGS+=(--issue "$ISSUE")
+          fi
+
+          if [ ${#ARGS[@]} -eq 0 ]; then
+            echo "::error::Dispatch with an issue number, or tick sweep."
+            exit 1
+          fi
+
+          # Never `set -e`-fatal on its own: the script exits non-zero when a
+          # declared edge could not be created, and that outcome has to reach
+          # the comment step before the job goes red.
+          set +e
+          .github/scripts/sync-issue-dependencies.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --json \
+            "${ARGS[@]}" \
+            > report.json
+          STATUS=$?
+          set -e
+
+          if [ ! -s report.json ]; then
+            echo "::error::The sync produced no report."
+            exit 1
+          fi
+
+          jq -r '.markdown' report.json >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.markdown' report.json
+
+          {
+            echo "status=$STATUS"
+            echo "needs_attention=$(jq -r '.needs_attention' report.json)"
+            echo "created=$(jq -r '.created | length' report.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      # Only when a person has to do something about it. A clean sync is
+      # silent -- it happens on every edit to every blocker Issue, and a
+      # comment each time would make the Issue unreadable within a week.
+      #
+      # One comment, updated in place rather than appended to, for the same
+      # reason: the current state of the chain is the useful thing, and a
+      # thread of eleven stale sync reports is not.
+      - name: Report What Needs a Human
+        if: >-
+          always() &&
+          github.event.issue.number &&
+          steps.sync.outputs.needs_attention == 'true'
+        shell: bash
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          MARKER="<!-- issue-dependency-sync -->"
+
+          {
+            echo "$MARKER"
+            echo
+            echo "## Dependency chain needs a look"
+            echo
+            echo "The \`## Dependencies\` table on this Issue was read and"
+            echo "acted on. Some rows could not be turned into a GitHub"
+            echo "dependency:"
+            echo
+            jq -r '.markdown' report.json
+            echo
+            echo "Fix the table and this comment updates itself on the next"
+            echo "edit. The rest of the chain was wired regardless."
+          } > sync-comment.md
+
+          EXISTING=$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments?per_page=100" \
+              --jq "[.[] | select(.body | startswith(\"$MARKER\")) | .id] | first // empty"
+          )
+
+          if [ -n "$EXISTING" ]; then
+            # `jq -Rs` wraps the whole file as one JSON string, which is the
+            # only escaping-proof way to send a markdown body containing
+            # backticks, quotes and newlines through `gh api`.
+            jq -Rs '{body: .}' sync-comment.md \
+              | gh api \
+                  --method PATCH \
+                  "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING" \
+                  --input -
+            echo "Updated the existing sync comment on #$ISSUE_NUMBER."
+          else
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body-file sync-comment.md
+            echo "Commented on #$ISSUE_NUMBER."
+          fi
+
+      # The step above swallowed the script's exit status so the comment could
+      # be posted first. Give it back here, so a chain that failed to build
+      # shows as a failed run rather than a green one with a comment nobody
+      # opens.
+      - name: Fail if a Declared Dependency Was Refused
+        if: steps.sync.outputs.status != '0'
+        shell: bash
+        run: |
+          echo "::error::At least one declared dependency could not be" \
+               "created. See the job summary."
+          exit 1

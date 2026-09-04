@@ -76,3 +76,27 @@ How do we know integration succeeded?
 - Forking dependency
 - Modifying vendor code
 - ...
+
+## Dependencies
+
+<!--
+Other *Issues*, not the third-party dependency this ticket is about — that one
+goes under `## Dependency` above. This section is the one place an Issue-to-
+Issue edge is declared in this repository. Two relationship words and only two -- `Blocked by` and `Blocks` -- and you write whichever end
+you happen to know about:
+
+| Blocked by | #12 | Needs the effect container API |
+| Blocks | #34 | #34 consumes the resolver this adds |
+
+Add the `blocker` label to any Issue with a `Blocks` row.
+`.github/workflows/issue-dependencies.yml` reads this table and creates
+GitHub's native blocked-by relationship from it, which is what the control
+plane orders by and what `agent:execute` refuses to run past. Write the row;
+do not wire the relationship by hand.
+
+Leave the `None` row exactly as it is when there are no dependencies.
+-->
+
+| Relationship | Issue | Why |
+| --- | --- | --- |
+| None | — | — |

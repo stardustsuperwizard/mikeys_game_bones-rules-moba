@@ -519,13 +519,14 @@ jobs:
 
           MARKER="<!-- agent-execute-blocked -->"
           ANY_BLOCKED=0
+          UNREADABLE=""
 
           while read -r TASK; do
             [ -n "$TASK" ] || continue
 
             gh issue view "$TASK" \
               --repo "$GITHUB_REPOSITORY" \
-              --json number,title,url,state,blockedBy \
+              --json number,title,url,state \
               > task.json
 
             if [ "$(jq -r '.state' task.json)" != "OPEN" ]; then
@@ -533,15 +534,35 @@ jobs:
               continue
             fi
 
+            # Read from the REST dependencies endpoint rather than
+            # `gh issue view --json blockedBy`, and treat a failed read as a
+            # problem rather than as an absence of blockers. The old
+            # `.blockedBy.nodes[]?` swallowed a null field into an empty list,
+            # which is indistinguishable from "unblocked" -- so the one thing
+            # this step exists to say would go unsaid precisely when the
+            # dependency graph was unreadable. The endpoint also drops the
+            # GitHub CLI 2.94.0 floor that `--json blockedBy` carries.
+            #
+            # Collected rather than fatal, so a run covering several tasks
+            # reports every one it could not read instead of stopping at the
+            # first; the step fails after the loop.
+            if ! gh api \
+                 "repos/$GITHUB_REPOSITORY/issues/$TASK/dependencies/blocked_by?per_page=100" \
+                 > task-blockers.json; then
+              echo "::error::Could not read #$TASK's blockers."
+              UNREADABLE="$UNREADABLE #$TASK"
+              continue
+            fi
+
             BLOCKERS=$(
               jq -r '
                 [
-                  .blockedBy.nodes[]?
-                  | select(.state == "OPEN")
+                  .[]
+                  | select((.state | ascii_downcase) == "open")
                   | "#\(.number)"
                 ]
                 | join(", ")
-              ' task.json
+              ' task-blockers.json
             )
 
             if [ -z "$BLOCKERS" ]; then
@@ -588,6 +609,15 @@ jobs:
           done < tasks.txt
 
           echo "any_blocked=$ANY_BLOCKED" >> "$GITHUB_ENV"
+
+          # After the loop, so every unreadable task is named at once. A red
+          # step here means "nobody checked whether this work is blocked",
+          # which is worth a failed run even though the Copilot session it
+          # would have warned about has already started.
+          if [ -n "$UNREADABLE" ]; then
+            echo "::error::Blockers could not be read for:$UNREADABLE"
+            exit 1
+          fi
 
       # ----------------------------------------------------------------------
       # Human-readable Actions summary.

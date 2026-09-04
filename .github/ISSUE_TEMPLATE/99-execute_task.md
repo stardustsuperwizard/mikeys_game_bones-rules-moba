@@ -173,8 +173,26 @@ than implementing it.
 ## Dependencies
 
 <!--
-Use GitHub's native blocked-by relationship for dependencies.
-This section exists so the Issue remains understandable when read alone.
+The one place a dependency is declared in this repository, and the section
+`.github/workflows/issue-dependencies.yml` reads. Two relationship words and
+only two -- `Blocked by` and `Blocks` -- and you write whichever end you
+happen to know about. The planner usually knows both, because it decomposed
+the chain:
+
+| Blocked by | #12 | Needs the effect container API |
+| Blocks | #34 | #34 consumes the resolver this adds |
+
+Add the `blocker` label to any Issue with a `Blocks` row.
+
+This is a declaration, not a description of one: the table is what *creates*
+GitHub's native blocked-by relationship, which is what the control plane
+orders by and what `agent:execute` refuses to run past. Do not wire the
+relationship by hand and leave the table saying something else -- the table
+wins, and a sweep will report the difference.
+
+Leave the `None` row exactly as it is when there are no dependencies.
 -->
 
-- Blocked by: <issue number or "none">
+| Relationship | Issue | Why |
+| --- | --- | --- |
+| None | — | — |

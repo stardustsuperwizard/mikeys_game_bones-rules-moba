@@ -129,6 +129,38 @@ def pr_index(prs: list[dict]) -> dict[int, dict]:
     return index
 
 
+def open_blockers(issue: dict):
+    """Open blockers of `issue`, and whether the answer is trustworthy.
+
+    Returns `(blockers, readable)`. `readable` is False when `blockedBy` did
+    not arrive in the shape this expects — the field null, absent, or carrying
+    something other than a `nodes` list of `{number, state}`.
+
+    That distinction is the point. Reading the field leniently and defaulting
+    to `[]` makes "no blockers" and "could not tell" identical, and the board
+    then files a blocked task under *Ready to dispatch* — which is the one
+    answer it exists to give and the one that costs a wasted session. The two
+    enforcement points (`agent-02-execute.yml`, `issue-linking.yml`) read the
+    REST dependencies endpoint instead and fail closed; this board reads 500
+    issues in one call and cannot afford a request each, so it reports the
+    uncertainty rather than resolving it.
+    """
+    field = issue.get("blockedBy")
+
+    if not isinstance(field, dict) or not isinstance(field.get("nodes"), list):
+        return [], False
+
+    nodes = field["nodes"]
+
+    if not all(
+        isinstance(node, dict) and "number" in node and "state" in node
+        for node in nodes
+    ):
+        return [], False
+
+    return [node for node in nodes if node["state"] == "OPEN"], True
+
+
 def classify_task(issue: dict, prs: dict[int, dict]) -> tuple[str, dict]:
     """Derive one implementation task's state. Order of tests is the design."""
     detail: dict = {}
@@ -136,8 +168,14 @@ def classify_task(issue: dict, prs: dict[int, dict]) -> tuple[str, dict]:
     if issue["state"] == "CLOSED":
         return DONE, detail
 
-    blockers = [node for node in (issue.get("blockedBy") or {}).get("nodes", [])
-                if node["state"] == "OPEN"]
+    blockers, readable = open_blockers(issue)
+
+    if not readable:
+        # Not READY: an unknown dependency state is exactly the case where
+        # "go ahead" is the expensive guess.
+        detail["verdict"] = "DEPENDENCIES UNREADABLE"
+        return NEEDS_ATTENTION, detail
+
     if blockers:
         detail["blockers"] = [node["number"] for node in blockers]
         return BLOCKED_DEPS, detail
@@ -314,10 +352,15 @@ def render(model: dict, repo: str | None) -> str:
     attention = by_state.get(NEEDS_ATTENTION, [])
     out += [f"## {NEEDS_ATTENTION} ({len(attention)})", ""]
     if attention:
+        # `r.get("pr")`, not `r["pr"]`: every other route into this bucket is
+        # a verdict on a pull request and carries one, but an unreadable
+        # dependency state lands here before a PR has even been looked for.
         out += task_table(
             attention, ["Task", "PR", "Verdict", "Title"],
             lambda r: [
-                link(r["issue"]), f"#{r['pr']}", f"`{r.get('verdict', '?')}`",
+                link(r["issue"]),
+                f"#{r['pr']}" if r.get("pr") else "—",
+                f"`{r.get('verdict', '?')}`",
                 r["issue"]["title"].removeprefix("[impl] "),
             ],
         )
