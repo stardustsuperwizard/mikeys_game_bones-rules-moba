@@ -60,6 +60,7 @@ runs:
             "## Architecture Constraints",
             "## Scope Adherence",
             "## Findings",
+            "## Deferred Findings",
             "## Required Before Merge",
         ]
 

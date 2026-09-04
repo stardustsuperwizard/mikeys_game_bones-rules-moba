@@ -1,0 +1,611 @@
+name: Agent - AW06 Triage Out-of-Scope Findings
+
+# Nothing today reads the two places this repository's pipeline records work
+# it deliberately did not do: an implementor's "Discovered Out-of-Scope Work"
+# section in a merged pull request's own body, and a reviewer's "Deferred
+# Findings" in its `<!-- agent-review-verdict -->` comment (see
+# build-review-request/action.yml). Both exist because
+# .github/copilot-instructions.md forbids an implementor from filing its own
+# discoveries -- "let the planner decide" -- but nothing ever asked the
+# planner. They sit in a closed pull request until a human happens to
+# reread it.
+#
+# This workflow is that ask, run once per merge. It does not decide whether
+# a finding matters -- that decision was already made, by whoever wrote the
+# bullet, when they judged it out of scope for the pull request in front of
+# them. Turning an already-made judgment into a tracked Issue is
+# transcription, not planning, so this does not need the human-decision gate
+# `agent-05-fix.yml` describes for spending a session on code -- see the
+# identical reasoning `gdscript-lint.yml` gives for its own narrow exception.
+# What it must NOT do is decide priority or merge findings together across
+# unrelated pull requests -- that stays the planner's job, later, when
+# someone actually looks at the backlog.
+#
+# No AWNN number in the human-facing sense of Plan -> Execute -> Rollup: this
+# does not sit in that walk. It keeps one anyway, unlike Review and Fix,
+# because it is triggered by the same event that ends that walk (a merge)
+# rather than by a label a human presses, and "06" reads naturally as "what
+# happens after 03's rollup, once the branch is gone".
+#
+# Shape, deliberately: no repository files are ever touched here. The model
+# session below runs read-only and returns text, nothing else -- it drafts
+# an Issue title and body per finding; this workflow's own `gh`/`jq`/python
+# does every GitHub write (labels, Issues, the completion comment). That is
+# the same "the workflow pulls the information, the agent just answers"
+# split agent-04-review.yml uses, pushed one step further: here the agent
+# does not even see the checkout, because nothing it needs to answer lives
+# in it.
+
+on:
+  pull_request:
+    types:
+      - closed
+
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull Request number to triage"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  copilot-requests: write
+
+concurrency:
+  group: agent-triage-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    name: Agent - AW06 Triage Out-of-Scope Findings
+    runs-on: ubuntu-latest
+
+    # A manual dispatch always runs, even against a pull request that is not
+    # (yet) merged -- the same "a human already decided" reasoning every
+    # other workflow_dispatch escape hatch in this pipeline uses. The
+    # automatic trigger only ever fires on an actual merge; a closed-without-
+    # merge pull request has nothing that will ever reach main and is
+    # skipped.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
+
+      # Not one of the four labelled roles -- there is no
+      # `agent:{role}:{vendor}` label on a merge event -- so the vendor is a
+      # repository variable instead, the same shape gdscript-lint.yml uses
+      # for the same reason. NOTE the ids differ per vendor and are NOT
+      # interchangeable: Copilot CLI spells Haiku 4.5 `claude-haiku-4.5`;
+      # Claude Code spells the same model `claude-haiku-4-5`.
+      TRIAGE_VENDOR: ${{ vars.TRIAGE_VENDOR || 'copilot' }}
+
+      TRIAGE_MODELS: >-
+        ${{ vars.TRIAGE_MODELS
+        || (vars.TRIAGE_VENDOR == 'claude'
+            && 'claude-haiku-4-5,claude-sonnet-5'
+            || 'claude-haiku-4.5,claude-sonnet-5') }}
+
+      # Drafting a short title and paragraph per already-written bullet is a
+      # small, bounded task -- narrower than the lint fixer's, which also has
+      # to read and edit a file. The Copilot CLI rejects anything below 30.
+      TRIAGE_MAX_AI_CREDITS: "30"
+      TRIAGE_MAX_TURNS: "20"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Pull Request
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json number,title,url,body,comments \
+            > pr.json
+
+          echo "url=$(jq -r '.url' pr.json)" >> "$GITHUB_OUTPUT"
+          echo "title=$(jq -r '.title' pr.json)" >> "$GITHUB_OUTPUT"
+
+      # Cheap and exact: a marker comment this same workflow posted earlier,
+      # searched by literal string. Guards a re-run of the automatic trigger
+      # (a merge event delivered twice) and a repeat `workflow_dispatch`
+      # against filing the same findings a second time.
+      - name: Check Already Triaged
+        id: already
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if jq -e '
+            [.comments[] | select(.body | contains("<!-- agent-triage-complete -->"))]
+            | length > 0
+          ' pr.json > /dev/null; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "PR #$PR_NUMBER already carries an" \
+                 "<!-- agent-triage-complete --> comment. Skipping."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # No model call -- pure text extraction from two places already
+      # written in plain Markdown by an earlier session: the pull request's
+      # own "Discovered Out-of-Scope Work" section (required by
+      # .github/pull_request_template.md) and the latest reviewer verdict
+      # comment's "Deferred Findings" section (required by
+      # build-review-request/action.yml's prompt). Finding the candidates is
+      # mechanical; only phrasing them as Issues below needs a model.
+      - name: Gather Findings
+        id: gather
+        if: steps.already.outputs.already != 'true'
+        shell: python
+        run: |
+          import json
+          import os
+          import pathlib
+          import re
+
+          pr = json.loads(pathlib.Path("pr.json").read_text())
+
+          def section(text, heading):
+              """Return the body of one '## heading' section, or ''."""
+
+              if not text:
+                  return ""
+
+              pattern = re.compile(
+                  r"^##\s+" + re.escape(heading) + r"\s*$"
+                  r"(.*?)(?=^##\s+|\Z)",
+                  re.MULTILINE | re.DOTALL,
+              )
+
+              match = pattern.search(text)
+              return match.group(1) if match else ""
+
+          def bullets(text):
+              """Top-level '- ' / '* ' bullets, skipping 'None' and anything
+              that already names an Issue -- both mean there is nothing left
+              for this workflow to file."""
+
+              found = []
+
+              for line in text.splitlines():
+                  match = re.match(r"^\s*[-*]\s+(.*\S)\s*$", line)
+
+                  if not match:
+                      continue
+
+                  item = match.group(1).strip()
+
+                  if not item or re.fullmatch(r"(?i)none\.?", item):
+                      continue
+
+                  if re.search(r"#\d+", item):
+                      continue
+
+                  found.append(item)
+
+              return found
+
+          comments = pr.get("comments") or []
+          review_comments = [
+              c["body"] for c in comments
+              if "<!-- agent-review-verdict -->" in (c.get("body") or "")
+          ]
+          latest_review = review_comments[-1] if review_comments else ""
+
+          items = []
+
+          for bullet in bullets(section(pr.get("body") or "", "Discovered Out-of-Scope Work")):
+              items.append({"source": "pr-body", "text": bullet})
+
+          for bullet in bullets(section(latest_review, "Deferred Findings")):
+              items.append({"source": "review", "text": bullet})
+
+          pathlib.Path("triage-items.json").write_text(json.dumps(items, indent=2))
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"has-items={'true' if items else 'false'}\n")
+              handle.write(f"item-count={len(items)}\n")
+
+          summary_lines = [f"### Out-of-scope findings gathered: {len(items)}", ""]
+
+          if items:
+              summary_lines += [f"- ({item['source']}) {item['text']}" for item in items]
+          else:
+              summary_lines.append("Nothing to triage on this pull request.")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write("\n".join(summary_lines) + "\n")
+
+          print("\n".join(summary_lines))
+
+      # One title + one paragraph per bullet, in the same order, nothing
+      # else. Asked for pure JSON and nothing surrounding it so parsing below
+      # needs no code-fence guessing beyond the one form the prompt allows --
+      # the same "make the contract narrow enough to check mechanically"
+      # choice extract-review-verdict.py makes for VERDICT lines.
+      - name: Build Triage Prompt
+        id: build
+        if: >-
+          steps.already.outputs.already != 'true' &&
+          steps.gather.outputs.has-items == 'true'
+        shell: python
+        run: |
+          import json
+          import os
+          import pathlib
+
+          items = json.loads(pathlib.Path("triage-items.json").read_text())
+          pr_url = os.environ["PR_URL"]
+
+          numbered = "\n".join(
+              f"{i + 1}. ({item['source']}) {item['text']}"
+              for i, item in enumerate(items)
+          )
+
+          prompt = f"""
+          You are drafting GitHub Issues from findings that were already
+          judged out of scope by an implementor or reviewer session on pull
+          request {pr_url}. You are NOT deciding whether these matter --
+          that decision is already made. Your only job is to phrase each one
+          as a standalone Issue a planner can read later with no other
+          context.
+
+          HARD RULES:
+
+          - Produce exactly {len(items)} draft(s), one per finding below, in
+            the same order. Do not merge findings together, even if two look
+            related. Do not add findings that are not listed.
+          - Do not invent detail the finding does not contain. If a finding
+            is vague, keep the draft vague rather than guessing specifics.
+          - Do not judge priority, severity, or whether the finding is worth
+            acting on -- that already happened.
+          - Do not use any tool. Respond with ONLY a JSON array, nothing
+            before or after it, not even a code fence.
+
+          Each array element must be an object with exactly two string
+          fields:
+
+          - "title": a short (under 80 characters) Issue title.
+          - "body": one paragraph explaining what was found, restating the
+            finding's own words where they are already specific.
+
+          Findings ({len(items)}):
+
+          {numbered}
+          """
+
+          pathlib.Path("triage-prompt.txt").write_text(prompt)
+          print(f"Prompt built: {len(prompt)} chars, {len(items)} finding(s)")
+        env:
+          PR_URL: ${{ steps.pr.outputs.url }}
+
+      - name: Run Triage Session
+        id: session
+        if: >-
+          steps.already.outputs.already != 'true' &&
+          steps.gather.outputs.has-items == 'true'
+        uses: ./.github/actions/run-agent-session
+        with:
+          vendor: ${{ env.TRIAGE_VENDOR }}
+          prompt-file: triage-prompt.txt
+          models: ${{ env.TRIAGE_MODELS }}
+          max-ai-credits: ${{ env.TRIAGE_MAX_AI_CREDITS }}
+          max-turns: ${{ env.TRIAGE_MAX_TURNS }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # This session never needs to touch the checkout -- everything it
+          # answers from is already in the prompt. read-only is the
+          # fail-safe default anyway, but it is also the honest description
+          # of what this role is allowed to do: draft text, nothing else.
+          capability: read-only
+          step-label: "Drafting deferred-finding issues"
+
+      # Deliberately as strict as extract-review-verdict.py: a session that
+      # ran out of budget mid-JSON must not have its partial output treated
+      # as a smaller-than-expected but valid list.
+      - name: Parse Triage Drafts
+        id: parse
+        if: >-
+          steps.already.outputs.already != 'true' &&
+          steps.gather.outputs.has-items == 'true'
+        shell: python
+        run: |
+          import json
+          import os
+          import pathlib
+          import sys
+
+          items = json.loads(pathlib.Path("triage-items.json").read_text())
+
+          outcome_path = pathlib.Path("agent-outcome.json")
+          outcome = json.loads(outcome_path.read_text()) if outcome_path.exists() else {}
+
+          text = pathlib.Path("agent-final-text.txt").read_text(errors="replace").strip()
+
+          def fail(headline, guidance):
+              pathlib.Path("triage-failure.json").write_text(
+                  json.dumps({"headline": headline, "guidance": guidance, "evidence": text[:1500]}, indent=2)
+              )
+              print(f"::error::{headline}")
+              print(guidance)
+              sys.exit(1)
+
+          if outcome.get("unfinished_turn") or outcome.get("reason") == "budget_exhausted":
+              fail(
+                  "The triage session was cut off before finishing its draft list",
+                  "Raise TRIAGE_MAX_AI_CREDITS / TRIAGE_MAX_TURNS, or re-run"
+                  " manually via workflow_dispatch. Do not trust a partial"
+                  " JSON array as a smaller-than-expected but valid one.",
+              )
+
+          if text.startswith("```"):
+              lines = text.splitlines()
+              lines = lines[1:]
+              if lines and lines[-1].strip() == "```":
+                  lines = lines[:-1]
+              text = "\n".join(lines).strip()
+
+          try:
+              drafts = json.loads(text)
+          except json.JSONDecodeError as exc:
+              fail(
+                  "The triage session did not return parseable JSON",
+                  f"json.loads failed: {exc}. This is a prompt-following"
+                  " failure, not a budget one -- see the evidence below"
+                  " before retrying with a bigger budget.",
+              )
+
+          if not isinstance(drafts, list) or len(drafts) != len(items):
+              fail(
+                  f"Expected {len(items)} draft(s), got"
+                  f" {len(drafts) if isinstance(drafts, list) else type(drafts).__name__}",
+                  "The session did not honour the one-draft-per-finding"
+                  " contract. Retrying with the same prompt is reasonable"
+                  " once; a repeat failure means the prompt needs"
+                  " tightening.",
+              )
+
+          for draft in drafts:
+              if not isinstance(draft, dict) or not isinstance(draft.get("title"), str) \
+                 or not isinstance(draft.get("body"), str) or not draft["title"].strip() \
+                 or not draft["body"].strip():
+                  fail(
+                      "A draft is missing a non-empty title or body",
+                      f"Malformed element: {draft!r}",
+                  )
+
+          pathlib.Path("triage-drafts.json").write_text(json.dumps(drafts, indent=2))
+          print(f"Parsed {len(drafts)} draft(s).")
+
+      # Everything from here on is plain gh/jq/python again -- the model's
+      # job ended at the previous step. Filing is all-or-nothing: a session
+      # that drafted five Issues and failed on the third leaves two
+      # untracked, so a partial run is reported as a failure (no completion
+      # marker posted) rather than silently accepted, and a retry is a clean
+      # `workflow_dispatch` away. The known cost of that choice is a retry
+      # after a partial success re-filing the Issues that already went
+      # through -- accepted here the same way this pipeline accepts a wasted
+      # session elsewhere in exchange for never silently dropping a finding.
+      - name: File Issues
+        id: file
+        if: >-
+          steps.already.outputs.already != 'true' &&
+          steps.gather.outputs.has-items == 'true'
+        shell: python
+        env:
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import sys
+
+          items = json.loads(pathlib.Path("triage-items.json").read_text())
+          drafts = json.loads(pathlib.Path("triage-drafts.json").read_text())
+          pr_url = os.environ["PR_URL"]
+          pr_number = os.environ["PR_NUMBER"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          existing = subprocess.run(
+              ["gh", "label", "list", "--repo", repo, "--limit", "200",
+               "--json", "name", "--jq", ".[].name"],
+              capture_output=True, text=True, check=True,
+          ).stdout.splitlines()
+
+          if "deferred-finding" not in existing:
+              subprocess.run(
+                  ["gh", "label", "create", "deferred-finding",
+                   "--repo", repo, "--color", "C5DEF5",
+                   "--description",
+                   "Filed by agent-06-triage.yml from a merged pull"
+                   " request's Discovered Out-of-Scope Work or Deferred"
+                   " Findings section"],
+                  check=True,
+              )
+
+          filed = []
+
+          for item, draft in zip(items, drafts):
+              body = (
+                  f"{draft['body']}\n\n"
+                  "---\n\n"
+                  f"Discovered in #{pr_number} ({pr_url}), from its"
+                  f" **{'Discovered Out-of-Scope Work' if item['source'] == 'pr-body' else 'Deferred Findings'}**"
+                  " section, and filed automatically by `agent-06-triage.yml`."
+                  " Not yet triaged for priority.\n\n"
+                  f"> {item['text']}"
+              )
+
+              pathlib.Path("issue-body.md").write_text(body)
+
+              result = subprocess.run(
+                  ["gh", "issue", "create", "--repo", repo,
+                   "--title", draft["title"],
+                   "--body-file", "issue-body.md",
+                   "--label", "deferred-finding"],
+                  capture_output=True, text=True,
+              )
+
+              if result.returncode != 0:
+                  pathlib.Path("triage-failure.json").write_text(json.dumps({
+                      "headline": f"Failed to file an Issue for: {draft['title']}",
+                      "guidance": result.stderr.strip(),
+                      "filed_before_failure": filed,
+                  }, indent=2))
+                  print(f"::error::gh issue create failed: {result.stderr.strip()}")
+                  sys.exit(1)
+
+              url = result.stdout.strip()
+              filed.append({"title": draft["title"], "url": url})
+              print(f"Filed: {url}  ({draft['title']})")
+
+          pathlib.Path("filed-issues.json").write_text(json.dumps(filed, indent=2))
+
+      # Runs whenever nothing above failed -- including when there was
+      # nothing to triage at all, so the marker still lands and a re-run
+      # (the merge event redelivered, or a stray workflow_dispatch) is a
+      # cheap no-op via "Check Already Triaged" instead of a repeat pass
+      # over the same pull request.
+      - name: Comment On Pull Request
+        # No cancelled()/failure() check needed: a plain `if:` is already
+        # implicitly ANDed with success(), so this is skipped the same way
+        # any later step would be if "File Issues" (or an earlier step)
+        # failed. It still runs when there was nothing to triage -- those
+        # steps were skipped, not failed.
+        if: steps.already.outputs.already != 'true'
+        shell: python
+        run: |
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          pr_number = os.environ["PR_NUMBER"]
+
+          filed_path = pathlib.Path("filed-issues.json")
+          filed = json.loads(filed_path.read_text()) if filed_path.exists() else []
+
+          lines = [
+              "<!-- agent-triage-complete -->",
+              "",
+              "## Out-of-scope findings triaged",
+              "",
+          ]
+
+          if filed:
+              lines.append(
+                  "Filed from this pull request's Discovered Out-of-Scope"
+                  " Work / Deferred Findings sections:"
+              )
+              lines.append("")
+              lines += [f"- [{entry['title']}]({entry['url']})" for entry in filed]
+          else:
+              lines.append(
+                  "No un-filed out-of-scope findings were found on this pull"
+                  " request."
+              )
+
+          lines += [
+              "",
+              "Filed as plain `deferred-finding` Issues, untriaged for"
+              " priority -- a human decides if and when these become planned"
+              " work. Filed by `agent-06-triage.yml`.",
+          ]
+
+          body = "\n".join(lines)
+
+          subprocess.run(
+              ["gh", "pr", "comment", pr_number, "--repo", repo, "--body", body],
+              check=True,
+          )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write("\n" + body + "\n")
+
+      - name: Report Triage Failure
+        if: failure()
+        shell: python
+        env:
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository
+            }}/actions/runs/${{ github.run_id }}
+        run: |
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          pr_number = os.environ["PR_NUMBER"]
+          run_url = os.environ["RUN_URL"]
+
+          failure = {}
+
+          for candidate in ("triage-failure.json", "agent-session-failure.json"):
+              path = pathlib.Path(candidate)
+
+              if path.exists():
+                  try:
+                      failure = json.loads(path.read_text())
+                  except json.JSONDecodeError:
+                      failure = {}
+                  break
+
+          lines = [
+              "<!-- agent-triage-failed -->",
+              "",
+              "## Out-of-scope triage did not complete",
+              "",
+              "**No `<!-- agent-triage-complete -->` marker was posted.**"
+              " Re-running `agent-06-triage.yml` via `workflow_dispatch` on"
+              " this pull request's number is a clean retry.",
+              "",
+          ]
+
+          if failure:
+              lines += [
+                  f"**{failure.get('headline', 'The triage run failed')}**",
+                  "",
+              ]
+
+              guidance = failure.get("guidance")
+
+              if guidance:
+                  lines += [guidance, ""]
+
+              filed_before = failure.get("filed_before_failure")
+
+              if filed_before:
+                  lines += [
+                      "Already filed before the failure (retrying will file"
+                      " the remaining findings again, not these):",
+                      "",
+                  ]
+                  lines += [
+                      f"- [{entry['title']}]({entry['url']})"
+                      for entry in filed_before
+                  ]
+                  lines.append("")
+
+          lines.append(f"Full run log: {run_url}")
+
+          body = "\n".join(lines)
+
+          subprocess.run(
+              ["gh", "pr", "comment", pr_number, "--repo", repo, "--body", body],
+              check=True,
+          )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write("\n" + body + "\n")

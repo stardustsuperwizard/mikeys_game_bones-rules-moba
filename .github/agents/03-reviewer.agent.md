@@ -19,6 +19,11 @@ sections as the authoritative work contract.
 Do not inspect the parent Feature for additional work unless the task
 explicitly requires context from it.
 
+If you notice something outside the task's contract, note it under Deferred
+Findings without evaluating it -- do not implement it and do not file an
+Issue for it yourself. An automated post-merge step reads that list and
+files it; this session should not.
+
 Review the completed implementation against:
 
 1. The Implementation Task Issue and its acceptance criteria.

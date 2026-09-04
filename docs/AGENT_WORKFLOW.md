@@ -36,6 +36,7 @@ JetBrains, Eclipse, or Xcode, and are inert everywhere else.
 | Reviewer | Claude Opus 5, then fallbacks | `REVIEWER_MODELS` env / `vars.REVIEWER_MODELS` in `agent-04-review.yml` (also used by `agent-02-implement.yml`'s pre-PR self-review) |
 | Fixer | Claude Sonnet 5, then fallbacks — climbing a tier per repeat round | `FIXER_MODELS` env / `vars.FIXER_MODELS` in `agent-05-fix.yml` (also used by `agent-02-implement.yml`'s pre-PR self-fix); escalation in its *Resolve Fixer Model Tier* step |
 | Lint fixer | Claude Haiku 4.5, then Sonnet 5 | `LINT_FIXER_MODELS` env / `vars.LINT_FIXER_MODELS` in `gdscript-lint.yml` |
+| Triage | Claude Haiku 4.5, then Sonnet 5 | `TRIAGE_MODELS` env / `vars.TRIAGE_MODELS` in `agent-06-triage.yml` |
 
 Planner, the scripted implementor, reviewer, and fixer are all Copilot CLI
 sessions, so each one's model is a string in version control rather than a
@@ -53,6 +54,18 @@ at all — go to a capped Copilot CLI session scoped to just those findings and
 the files they're in. See the comment at the top of `gdscript-lint.yml` for
 why that's a deliberate, narrow exception to spending a Copilot session
 without a human decision first.
+
+Triage is the same shape, run once per merge instead of per status check:
+`agent-06-triage.yml` reads a merged pull request's own "Discovered
+Out-of-Scope Work" section and the reviewer's "Deferred Findings" section
+(see `build-review-request/action.yml`) — both already-written judgments
+that nothing previously acted on — and files each one as a plain
+`deferred-finding` Issue for a human to triage later. Its session is
+narrower still than the lint fixer's: it never touches the checkout, it only
+drafts a title and paragraph per finding as text, and this workflow's own
+`gh`/`jq`/python does every actual GitHub write. See the comment at the top
+of `agent-06-triage.yml` for why turning an already-made judgment into an
+Issue doesn't need the human-decision gate either.
 
 ### All four are lists, because CLI availability is per-identity
 

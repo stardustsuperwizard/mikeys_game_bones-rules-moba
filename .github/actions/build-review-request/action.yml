@@ -309,6 +309,20 @@ runs:
         Numbered, most serious first. Each finding gives the file, what is
         wrong, and why it matters. Write "None" if there are none.
 
+        ## Deferred Findings
+
+        Bullet list of things you noticed that are explicitly out of scope
+        for this task and were NOT evaluated for correctness -- write "None"
+        if there are none. Do not put something here that you evaluated and
+        are asking the implementor to fix; that belongs in Findings above.
+
+        `agent-06-triage.yml` reads this section after the pull request
+        merges and files each bullet as its own tracked Issue, unread by any
+        human first. So write each one as a standalone note a planner could
+        act on without re-reading this pull request: what you saw, where
+        (file/method), and why it might matter later -- not "see above" or a
+        fragment that only makes sense next to the diff.
+
         ## Required Before Merge
 
         Bullet list of what must change for this to become PASS.
