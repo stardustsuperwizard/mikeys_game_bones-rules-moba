@@ -1052,11 +1052,17 @@ jobs:
               check=True,
           )
 
-          subprocess.run(
-              ["gh", "issue", "edit", issue_number, "--repo", repo,
-               "--remove-label", os.environ.get("TRIGGER_LABEL") or ""],
-              check=False,
-          )
+          # The eighth and last release site. Guarded like the others:
+          # `--remove-label ""` is a call with an empty argument, not a
+          # no-op, and workflow_dispatch pressed no button.
+          trigger_label = os.environ.get("TRIGGER_LABEL") or ""
+
+          if trigger_label:
+              subprocess.run(
+                  ["gh", "issue", "edit", issue_number, "--repo", repo,
+                   "--remove-label", trigger_label],
+                  check=False,
+              )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write(f"### Execute Task\n\nOpened {pr_url}.\n")
