@@ -108,8 +108,20 @@ jobs:
       TRIAGE_MAX_TURNS: "25"
 
     steps:
+      # Pinned, unlike every other workflow here, because this is the only
+      # one that fires on `pull_request: closed`. The default ref for a
+      # pull_request event is the ephemeral `refs/pull/:num/merge` test-merge
+      # commit, which has no reason to still resolve once the pull request is
+      # closed and the branch is gone. Nothing in this job reads pull request
+      # content anyway -- the only thing the checkout is for is making the
+      # local `uses: ./.github/actions/...` path below resolvable, and that
+      # action lives on the base branch. So take the base branch by name, and
+      # whatever ref a manual dispatch was aimed at, so dispatching from a
+      # branch still tests that branch's copy.
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
 
       - name: Resolve Pull Request
         id: pr
@@ -162,102 +174,97 @@ jobs:
           import os
           import pathlib
           import re
+          import sys
+
+          # Both modules live in the checkout and both document themselves as
+          # importable from a workflow step, with no network, no `gh` and no
+          # third-party dependencies. Imported rather than re-typed here: a
+          # hand-copied `strip_comments` or empty-value set is one that stops
+          # matching the original the first time either is fixed, and nothing
+          # would fail loudly when it does. agent-01-planner.yml imports the
+          # same way, from the same place.
+          sys.path.insert(
+              0,
+              os.path.join(
+                  os.environ.get("GITHUB_WORKSPACE", "."), ".github", "scripts"
+              ),
+          )
+
+          import issue_dependencies
+          import model_response
 
           pr = json.loads(pathlib.Path("pr.json").read_text())
 
-          # Same set .github/scripts/issue_dependencies.py uses for the
-          # identical "is this cell actually empty" question, kept in step
-          # with it rather than re-deriving a narrower one here.
-          EMPTY_VALUES = {"", "none", "n/a", "na", "-", "--", "—", "–", "…", "..."}
-
-          # A bullet naming an Issue it was already filed under (e.g. "Filed
-          # as #123", "see #123", "duplicate of #123") is done, not a new
-          # finding. Deliberately narrower than a bare `#\d+` search: that
-          # also matched a hex color (#004488) or a plain number a finding's
-          # own text happened to mention ("#100 base HP"), silently dropping
-          # a real finding with no warning. Requiring one of these keywords
-          # near the `#` is a real trade -- a bullet that references another
-          # Issue without any of these words slips through -- but silently
-          # over-filtering is the worse failure mode for a workflow whose
-          # whole point is not losing findings.
+          # A bullet naming the Issue it was already filed under is done, not
+          # a new finding. The keyword has to sit immediately before the
+          # reference -- "filed as #123", "see #123", "duplicate of #9" --
+          # rather than merely somewhere near it: a finding's own prose can
+          # say "already" or "see" within a few words of an unrelated `#404`
+          # ("...ignores status codes like #404, already documented"), and
+          # silently dropping a real finding is the worse failure for a
+          # workflow whose whole point is not losing them. A bare `#\d+`
+          # search was worse still -- it also caught a hex colour (#004488)
+          # and a plain number ("#100 base HP").
           FILED_REFERENCE = re.compile(
-              r"(?i)\b(?:filed|tracked|duplicate\s+of|see|already)\b[^#\n]{0,30}#\d+\b"
+              r"(?i)\b(?:filed|tracked|duplicate\s+of|see)\b"
+              r"(?:\s+(?:as|in|at|by|under|via))?\s*#\d+\b"
           )
 
-          def strip_comments(text):
-              """Drop HTML comments before scanning for content.
-
-              Same helper as issue_dependencies.py's strip_comments, kept
-              local rather than imported (that module answers an unrelated
-              question about Issues, not pull requests -- see its own note
-              on why the two stay separate). Without this, an instructional
-              HTML comment inside a section -- the PR template's own
-              guidance prose lives in one -- would be scanned for bullets
-              exactly like real content the moment either ever contains an
-              example line starting with '-'.
-              """
-
-              return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
-
-          def section(text, heading):
-              """Return the body of one '## heading' section, or ''."""
-
-              if not text:
-                  return ""
-
-              pattern = re.compile(
-                  r"^##\s+" + re.escape(heading) + r"\s*$"
-                  r"(.*?)(?=^##\s+|\Z)",
-                  re.MULTILINE | re.DOTALL,
-              )
-
-              match = pattern.search(text)
-              return match.group(1) if match else ""
+          # `- item`, `* item`, `1. item`, `2) item`. Numbered lists are read
+          # because a reviewer asked for "a bullet list" sometimes answers
+          # with a numbered one, and recognising only dashes turned that into
+          # zero findings plus a cheerful "nothing to triage" -- a silent
+          # total loss rather than a degraded parse.
+          BULLET = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*\S)\s*$")
 
           def is_empty(item):
-              normalized = item.strip().strip("`*_").strip().casefold()
-
-              if normalized in EMPTY_VALUES:
-                  return True
-
-              # An unedited template placeholder, e.g. `<or "None">` from
-              # pull_request_template.md / 02-implementor.agent.md -- not
-              # itself a finding, whatever it says inside the brackets.
-              return bool(re.fullmatch(r"<.*>", item.strip()))
+              # issue_dependencies' own answer to "is this cell actually
+              # empty", plus the one case only a template produces: an
+              # unedited `<or "None">` placeholder, which is not a finding
+              # whatever it says between the brackets.
+              return issue_dependencies.is_empty(item) or bool(
+                  re.fullmatch(r"<.*>", item.strip())
+              )
 
           def bullets(text):
-              """Merge each top-level '- ' / '* ' bullet with the plain
-              continuation lines and indented sub-bullets under it, then
-              skip anything empty or already filed.
+              """Merge each top-level bullet with everything written under
+              it, then skip anything empty or already filed.
 
-              A finding written as a wrapped sentence or with sub-bullets
-              elaborating it is one finding, not several -- splitting it
-              would file indented detail as its own context-free Issue and
-              truncate the parent to its first line. Only a line with
-              little or no indentation starts a *new* finding; anything
-              indented under it (bulleted or not) is folded into the
-              finding above, joined as a continuation of its text.
+              A finding written as a wrapped sentence, as a bullet with
+              sub-bullets, or as a bullet followed by a blank line and an
+              indented second paragraph (a "loose" Markdown list, which is
+              what a model asked for file/what/why tends to produce) is one
+              finding, not several and not just its first line. So only a
+              line with little or no indentation starts a *new* finding;
+              anything indented under it is folded in, across blank lines.
+
+              Unindented prose after a blank line is the other case, and it
+              ends the list rather than joining it -- that is a section's
+              own closing paragraph, not part of the finding above it.
               """
 
               raw = []
               current = None
+              after_blank = False
 
               for line in text.splitlines():
                   if not line.strip():
-                      current = None
+                      after_blank = True
                       continue
 
                   indent = len(line) - len(line.lstrip())
                   stripped = line.strip()
-                  match = re.match(r"^[-*]\s+(.*\S)\s*$", stripped)
+                  match = BULLET.match(stripped)
 
                   if match and indent < 2:
                       current = [match.group(1).strip()]
                       raw.append(current)
-                  elif current is not None:
+                  elif current is not None and (indent >= 2 or not after_blank):
                       current.append(match.group(1).strip() if match else stripped)
-                  # A line before any top-level bullet has started belongs to
-                  # the section's own lead-in prose, not to a finding.
+                  else:
+                      current = None
+
+                  after_blank = False
 
               found = []
 
@@ -271,6 +278,20 @@ jobs:
 
               return found
 
+          def findings(text, heading):
+              """Every un-filed finding under one heading of `text`."""
+
+              # HTML comments first (the pull request template's guidance
+              # prose lives in one), then fenced blocks -- a pasted example
+              # of this very template, or of a past verdict comment, would
+              # otherwise contribute headings and bullets of its own and be
+              # read as real. Only then look for the heading.
+              cleaned = model_response.strip_fenced_blocks(
+                  issue_dependencies.strip_comments(text or "")
+              )
+
+              return bullets(issue_dependencies.section(cleaned, heading) or "")
+
           comments = pr.get("comments") or []
           review_comments = [
               c["body"] for c in comments
@@ -278,16 +299,13 @@ jobs:
           ]
           latest_review = review_comments[-1] if review_comments else ""
 
-          items = []
-
-          pr_body = strip_comments(pr.get("body") or "")
-          latest_review = strip_comments(latest_review)
-
-          for bullet in bullets(section(pr_body, "Discovered Out-of-Scope Work")):
-              items.append({"source": "pr-body", "text": bullet})
-
-          for bullet in bullets(section(latest_review, "Deferred Findings")):
-              items.append({"source": "review", "text": bullet})
+          items = [
+              {"source": "pr-body", "text": bullet}
+              for bullet in findings(pr.get("body"), "Discovered Out-of-Scope Work")
+          ] + [
+              {"source": "review", "text": bullet}
+              for bullet in findings(latest_review, "Deferred Findings")
+          ]
 
           pathlib.Path("triage-items.json").write_text(json.dumps(items, indent=2))
 
@@ -312,11 +330,15 @@ jobs:
       # needs no code-fence guessing beyond the one form the prompt allows --
       # the same "make the contract narrow enough to check mechanically"
       # choice extract-review-verdict.py makes for VERDICT lines.
+      # One clause, not two: "Gather Findings" is itself gated on the
+      # already-triaged check, so on a pull request that was already triaged
+      # it never runs and `has-items` is left unset -- which is not 'true',
+      # and skips this step and the three below it. Re-stating the
+      # already-triaged condition here would be a second place to keep in
+      # step with that gate, and no additional protection.
       - name: Build Triage Prompt
         id: build
-        if: >-
-          steps.already.outputs.already != 'true' &&
-          steps.gather.outputs.has-items == 'true'
+        if: steps.gather.outputs.has-items == 'true'
         shell: python
         run: |
           import json
@@ -372,9 +394,7 @@ jobs:
 
       - name: Run Triage Session
         id: session
-        if: >-
-          steps.already.outputs.already != 'true' &&
-          steps.gather.outputs.has-items == 'true'
+        if: steps.gather.outputs.has-items == 'true'
         uses: ./.github/actions/run-agent-session
         with:
           vendor: ${{ env.TRIAGE_VENDOR }}
@@ -395,15 +415,22 @@ jobs:
       # as a smaller-than-expected but valid list.
       - name: Parse Triage Drafts
         id: parse
-        if: >-
-          steps.already.outputs.already != 'true' &&
-          steps.gather.outputs.has-items == 'true'
+        if: steps.gather.outputs.has-items == 'true'
         shell: python
         run: |
           import json
           import os
           import pathlib
           import sys
+
+          sys.path.insert(
+              0,
+              os.path.join(
+                  os.environ.get("GITHUB_WORKSPACE", "."), ".github", "scripts"
+              ),
+          )
+
+          import model_response
 
           items = json.loads(pathlib.Path("triage-items.json").read_text())
 
@@ -420,16 +447,13 @@ jobs:
               print(guidance)
               sys.exit(1)
 
-          # Mirrors extract-review-verdict.py's cut_off/budget_hit split:
-          # session_error means the session itself crashed or errored before
-          # producing output, which is a different fault than "ran to
-          # completion and still wrote bad JSON" -- conflating the two would
-          # send a genuine vendor/session crash back as "tighten the
+          # The same split extract-review-verdict.py applies, from the same
+          # module: session_error means the session itself crashed, which is
+          # a different fault than "ran to completion and still wrote bad
+          # JSON". Conflating them sends a vendor crash back as "tighten the
           # prompt", which is the wrong fix for that failure.
-          cut_off = bool(
-              outcome.get("unfinished_turn") or outcome.get("reason") == "session_error"
-          )
-          budget_hit = outcome.get("reason") == "budget_exhausted"
+          cut_off = model_response.was_cut_off(outcome)
+          budget_hit = model_response.hit_budget(outcome)
 
           if cut_off or budget_hit:
               fail(
@@ -442,12 +466,7 @@ jobs:
                   " JSON array as a smaller-than-expected but valid one.",
               )
 
-          if text.startswith("```"):
-              lines = text.splitlines()
-              lines = lines[1:]
-              if lines and lines[-1].strip() == "```":
-                  lines = lines[:-1]
-              text = "\n".join(lines).strip()
+          text = model_response.strip_code_fence(text)
 
           try:
               drafts = json.loads(text)
@@ -492,9 +511,7 @@ jobs:
       # session elsewhere in exchange for never silently dropping a finding.
       - name: File Issues
         id: file
-        if: >-
-          steps.already.outputs.already != 'true' &&
-          steps.gather.outputs.has-items == 'true'
+        if: steps.gather.outputs.has-items == 'true'
         shell: python
         env:
           PR_URL: ${{ steps.pr.outputs.url }}
@@ -512,40 +529,35 @@ jobs:
           pr_number = os.environ["PR_NUMBER"]
           repo = os.environ["GITHUB_REPOSITORY"]
 
-          existing = subprocess.run(
-              ["gh", "label", "list", "--repo", repo, "--limit", "200",
-               "--json", "name", "--jq", ".[].name"],
-              capture_output=True, text=True, check=True,
-          ).stdout.splitlines()
+          # Create unconditionally and read "already exists" as success,
+          # rather than listing every label first to decide. The label
+          # existing is this step's goal, not its precondition, and the
+          # create call has to tolerate that answer regardless: two pull
+          # requests merging close together run genuinely concurrent jobs
+          # (the concurrency group above is keyed per pull request, not
+          # shared), so a list-then-create pair can lose the race between
+          # its two halves anyway. One call, one answer.
+          create = subprocess.run(
+              ["gh", "label", "create", "deferred-finding",
+               "--repo", repo, "--color", "C5DEF5",
+               "--description",
+               "Filed by agent-06-triage.yml from a merged pull"
+               " request's Discovered Out-of-Scope Work or Deferred"
+               " Findings section"],
+              capture_output=True, text=True,
+          )
 
-          if "deferred-finding" not in existing:
-              # Two pull requests merging close together run genuinely
-              # concurrent jobs -- the concurrency group above is keyed per
-              # PR number, not shared -- so both can see the label absent
-              # and race to create it. The loser's create call fails with
-              # "already exists", which is this step's actual goal already
-              # met, not a real failure; only anything else here is.
-              create = subprocess.run(
-                  ["gh", "label", "create", "deferred-finding",
-                   "--repo", repo, "--color", "C5DEF5",
-                   "--description",
-                   "Filed by agent-06-triage.yml from a merged pull"
-                   " request's Discovered Out-of-Scope Work or Deferred"
-                   " Findings section"],
-                  capture_output=True, text=True,
-              )
+          already_exists = re.search(
+              r"already[_ ]exists", create.stderr, re.IGNORECASE
+          )
 
-              already_exists = re.search(
-                  r"already[_ ]exists", create.stderr, re.IGNORECASE
-              )
-
-              if create.returncode != 0 and not already_exists:
-                  pathlib.Path("triage-failure.json").write_text(json.dumps({
-                      "headline": "Failed to ensure the deferred-finding label exists",
-                      "guidance": create.stderr.strip(),
-                  }, indent=2))
-                  print(f"::error::gh label create failed: {create.stderr.strip()}")
-                  sys.exit(1)
+          if create.returncode != 0 and not already_exists:
+              pathlib.Path("triage-failure.json").write_text(json.dumps({
+                  "headline": "Failed to ensure the deferred-finding label exists",
+                  "guidance": create.stderr.strip(),
+              }, indent=2))
+              print(f"::error::gh label create failed: {create.stderr.strip()}")
+              sys.exit(1)
 
           filed = []
 

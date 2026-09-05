@@ -53,6 +53,20 @@ runs:
         import re
         import sys
 
+        # The same reading of a session's outcome every other caller uses --
+        # imported rather than re-typed, so "cut off" and "hit its ceiling"
+        # cannot come to mean different things in different workflows. The
+        # checkout is at the workspace root; see agent-01-planner.yml for the
+        # same import.
+        sys.path.insert(
+            0,
+            os.path.join(
+                os.environ.get("GITHUB_WORKSPACE", "."), ".github", "scripts"
+            ),
+        )
+
+        import model_response
+
         EVIDENCE_CHARS = 1500
 
         REQUIRED_SECTIONS = [
@@ -62,6 +76,24 @@ runs:
             "## Findings",
             "## Deferred Findings",
             "## Required Before Merge",
+        ]
+
+        # Which of those, if absent from a budget-capped session, is evidence
+        # the analysis itself was cut short rather than merely unwritten.
+        #
+        # "## Deferred Findings" is deliberately not one of them. The other
+        # five are the review's substance -- a verdict without them is a
+        # verdict without the reasoning that earned it, which is the case
+        # this gate exists to catch. Deferred Findings is an addendum for a
+        # later triage pass (agent-06-triage.yml), and a session that wrote
+        # every criterion, every constraint and a verdict, then stopped at
+        # its credit ceiling without adding it, produced a complete review.
+        # Rejecting that as "truncated" would discard a trustworthy verdict
+        # and buy a second full review to get the same answer.
+        TRUNCATION_SECTIONS = [
+            heading
+            for heading in REQUIRED_SECTIONS
+            if heading != "## Deferred Findings"
         ]
 
         outcome_path = pathlib.Path(os.environ["OUTCOME_FILE"])
@@ -101,11 +133,8 @@ runs:
             sys.exit(1)
 
 
-        cut_off = bool(
-            outcome.get("unfinished_turn") or outcome.get("reason") == "session_error"
-        )
-
-        budget_hit = outcome.get("reason") == "budget_exhausted"
+        cut_off = model_response.was_cut_off(outcome)
+        budget_hit = model_response.hit_budget(outcome)
 
         if not text:
             if cut_off or budget_hit:
@@ -122,15 +151,12 @@ runs:
                 " counts in the run-agent-session job log.",
             )
 
-        if text.startswith("```"):
-            lines = text.splitlines()[1:]
-
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-
-            text = "\n".join(lines).strip()
+        text = model_response.strip_code_fence(text)
 
         missing = [heading for heading in REQUIRED_SECTIONS if heading not in text]
+        missing_substance = [
+            heading for heading in TRUNCATION_SECTIONS if heading not in text
+        ]
 
         match = re.search(
             r"^\s*VERDICT:\s*"
@@ -169,7 +195,7 @@ runs:
         # caller. Publishing a truncated PASS is worse than publishing
         # nothing, because the label it applies looks exactly like a real
         # one.
-        if cut_off or (budget_hit and missing):
+        if cut_off or (budget_hit and missing_substance):
             fail(
                 "truncated_review",
                 f"The session returned VERDICT: {verdict} but was cut short"
@@ -177,9 +203,10 @@ runs:
                 "The verdict line comes first, so it survives a truncation"
                 " that removes the analysis behind it"
                 + (
-                    f" -- {len(missing)} of the {len(REQUIRED_SECTIONS)}"
-                    f" required sections are missing ({', '.join(missing)})."
-                    if missing
+                    f" -- {len(missing_substance)} of the"
+                    f" {len(TRUNCATION_SECTIONS)} substantive sections are"
+                    f" missing ({', '.join(missing_substance)})."
+                    if missing_substance
                     else "."
                 )
                 + " This verdict has NOT been published. Raise the credit"
