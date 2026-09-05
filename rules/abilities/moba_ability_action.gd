@@ -94,6 +94,12 @@ func execute() -> ActionResult:
 	# - channel_duration > 0: deferred to ABILITY_CHANNEL, ticks applied repeatedly
 	# - cast_time == 0 and channel_duration == 0: instant, apply immediately
 	if ability.targeting_type == MobaAbility.TargetingType.SKILLSHOT:
+		# Bend context.aim_direction through aim assist BEFORE resolve_skillshot()
+		# reads it. resolve_skillshot() and moba_projectile.gd stay untouched by
+		# this: they consume aim_direction raw, exactly as their own docstrings
+		# say, and this is the one place upstream of that call that changes it.
+		context.aim_direction = _compute_assisted_aim_direction(ability, context, actor)
+
 		# Spawning the projectile IS the resolution for a skillshot. It does
 		# not go through resolve(), the cast tracker, or the channel tracker
 		# the way self/targeted/area/ground do, because its effects are
@@ -187,6 +193,106 @@ static func _filter_live_targets(targets: Array[Node]) -> Array[Node]:
 		if is_instance_valid(target):
 			live.append(target)
 	return live
+
+
+## Compute the assisted aim direction for a SKILLSHOT activation, to be used
+## in place of the raw context.aim_direction before MobaTargeting.resolve_skillshot()
+## is called. Candidate gathering/filtering stays in MobaTargeting
+## (gather_aim_assist_candidates(), itself built on filter_valid_targets());
+## the interpolation and clamping math stays in MobaAimAssist. This function
+## only routes between them based on ability.aim_assist -- no geometry math
+## of its own.
+##
+## - FREE / NONE: raw direction unchanged, no candidate query.
+## - SOFT_LOCK: nearest-in-cone candidate (if any), blended in by
+##   effective_magnetism(ability.magnetism, device_multiplier). Falls back to
+##   raw direction when no candidate is found in-cone (MobaAimAssist.resolve_direction()
+##   already no-ops on a null target).
+## - HARD_LOCK: resolves exactly to context.locked_target's direction when it
+##   is set and valid (magnetism 1.0 -- no blend), else falls back to raw
+##   direction, identically to the soft-lock "no candidate" case.
+##
+## A zero-length raw direction is left unchanged: resolve_skillshot() already
+## treats that as "no cast" and refuses to spawn, so there is nothing useful
+## to bend it toward.
+static func _compute_assisted_aim_direction(
+	ability: MobaAbility, context: MobaCastContext, caster: Node
+) -> Vector3:
+	var raw_direction := context.aim_direction
+	if raw_direction.length_squared() <= 0.0:
+		return raw_direction
+
+	match ability.aim_assist:
+		MobaAbility.AimAssist.SOFT_LOCK:
+			return _resolve_soft_lock_direction(ability, context, caster)
+		MobaAbility.AimAssist.HARD_LOCK:
+			return _resolve_hard_lock_direction(context, caster)
+		_:
+			# FREE and NONE both use the raw direction unchanged, no candidate query.
+			return raw_direction
+
+
+## SOFT_LOCK: gather candidates via MobaTargeting, pick the nearest-in-cone one
+## via MobaAimAssist, and blend toward it by the device-scaled magnetism, read
+## live from the caster's MobaInputScheme at activation time.
+static func _resolve_soft_lock_direction(
+	ability: MobaAbility, context: MobaCastContext, caster: Node
+) -> Vector3:
+	var caster_pos := _get_position(caster)
+	var candidates := MobaTargeting.gather_aim_assist_candidates(caster, ability)
+	var target := MobaAimAssist.select_nearest_in_cone(
+		context.aim_direction, caster_pos, candidates, ability.aim_cone_degrees
+	)
+	var device_multiplier := _get_device_multiplier(caster)
+	var magnetism := MobaAimAssist.effective_magnetism(ability.magnetism, device_multiplier)
+	return MobaAimAssist.resolve_direction(context.aim_direction, target, caster_pos, magnetism)
+
+
+## HARD_LOCK: resolve exactly to context.locked_target's direction (magnetism
+## 1.0, no blend) when it is set and valid; MobaAimAssist.resolve_direction()
+## already falls back to the raw direction on a null/freed target, which is
+## exactly the fallback hard_lock needs.
+##
+## The locked_target must be resolved through _get_spatial_anchor() (MobaTargeting's
+## resolution for candidates) so MobaAimAssist can read its position. Production
+## scenes have Actor(Node) -> Body(Node3D), so the anchor is the Body.
+static func _resolve_hard_lock_direction(context: MobaCastContext, caster: Node) -> Vector3:
+	var caster_pos := _get_position(caster)
+	var resolved_target: Node = null
+	if context.locked_target != null and is_instance_valid(context.locked_target):
+		var anchor := MobaTargeting._get_spatial_anchor(context.locked_target)
+		if anchor != null:
+			resolved_target = anchor
+	return MobaAimAssist.resolve_direction(context.aim_direction, resolved_target, caster_pos, 1.0)
+
+
+## Look up the caster's MobaInputScheme (if any) and map its live scheme to the
+## mouse/gamepad/touch device key MobaAimAssist expects, reading it fresh on
+## every call rather than caching -- a mid-session scheme change must be picked
+## up on the caster's very next activation.
+##
+## NPC casters and headless fixtures carry no MobaInputScheme child. Rather
+## than guess a device for them, use the touch multiplier (1.0x, see
+## rules/data/aim_assist.json) so authored magnetism applies unmodified.
+static func _get_device_multiplier(caster: Node) -> float:
+	var scheme: MobaInputScheme = null
+	if caster != null:
+		scheme = caster.get_node_or_null("MobaInputScheme") as MobaInputScheme
+	if scheme == null:
+		return MobaAimAssist.get_device_multiplier("touch")
+	return MobaAimAssist.get_device_multiplier(_scheme_to_device_key(scheme.get_scheme()))
+
+
+## Map MobaInputScheme.Scheme to the device key MobaAimAssist.get_device_multiplier()
+## expects.
+static func _scheme_to_device_key(scheme: MobaInputScheme.Scheme) -> String:
+	match scheme:
+		MobaInputScheme.Scheme.GAMEPAD:
+			return "gamepad"
+		MobaInputScheme.Scheme.TOUCH:
+			return "touch"
+		_:
+			return "mouse"
 
 
 ## Steps 1-2 preconditions: the ability must resolve and the actor must carry a
@@ -448,7 +554,7 @@ static func _damage_type_to_moba(damage_type: int) -> int:
 
 
 ## Get world position of a node, with a default fallback.
-func _get_position(node: Node) -> Vector3:
+static func _get_position(node: Node) -> Vector3:
 	if node == null:
 		return Vector3.ZERO
 

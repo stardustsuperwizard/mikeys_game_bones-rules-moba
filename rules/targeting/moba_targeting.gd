@@ -196,6 +196,51 @@ static func resolve_ground(
 	return filter_valid_targets(candidates, caster, ability)
 
 
+## Gather aim-assist candidates for a given caster and ability: a physics
+## sphere query at the caster's position with radius ability.acquisition_range
+## and the ability's targeting_collision_mask (the same _query_area() pattern
+## resolve_area()/resolve_ground() use), filtered through the shared
+## filter_valid_targets() -- not a second allegiance/alive/stealth/caster-
+## inclusion filter.
+##
+## Candidates are resolved to their spatial anchors (Node3D) before returning
+## so MobaAimAssist can read their positions. Production scenes have Actor(Node)
+## -> Body(Node3D), so the anchor is the Body; headless fixtures pass the
+## Node3D directly.
+##
+## This does not resolve a SKILLSHOT's targets -- that stays resolve_skillshot()'s
+## job, which spawns a projectile and returns none. It exists so
+## MobaAbilityAction.execute() can find candidates for MobaAimAssist to bend
+## context.aim_direction toward, upstream of resolve_skillshot().
+##
+## Args:
+##   caster: The ability caster
+##   ability: The MobaAbility being resolved
+##
+## Returns: Array of valid targets within acquisition_range, filtered by
+##   allegiance, alive status, caster inclusion rules, and stealth. Each
+##   candidate is resolved to its spatial anchor (Node3D) so MobaAimAssist
+##   can read positions from it.
+static func gather_aim_assist_candidates(caster: Node, ability: MobaAbility) -> Array[Node]:
+	if caster == null or ability == null:
+		return []
+
+	var candidates := _query_area(
+		_get_position(caster), ability.acquisition_range, ability.targeting_collision_mask, caster
+	)
+
+	var filtered := filter_valid_targets(candidates, caster, ability)
+
+	# Resolve candidates to their spatial anchors so MobaAimAssist can read positions
+	var resolved: Array[Node] = []
+	for candidate in filtered:
+		var anchor := _get_spatial_anchor(candidate)
+		if anchor != null:
+			resolved.append(anchor)
+
+	return resolved
+
+
 ## The shared valid-target filter applied to all multi-target strategies.
 ##
 ## Filters candidates based on:

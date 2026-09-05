@@ -43,6 +43,7 @@ var _expected_suites: Array[String] = [
 	"Projectile Test",
 	"Skillshot Rewind Test",
 	"Aim Assist Test",
+	"Aim Assist Activation Test",
 	"Cast Cancel Test",
 	"Channel Test",
 	"Toggle Test",
@@ -76,17 +77,18 @@ func _ready() -> void:
 	if tree_script != null:
 		return
 
-	# The targeting, projectile, and skillshot rewind suites are the three that
-	# await physics frames: a body only registers with the physics space once a
-	# frame has been processed. All three have to finish BEFORE _finalize is
-	# queued -- call_deferred fires at the end of the current frame, so a suite
-	# that suspends after that point would have the summary printed out from
-	# under it, reporting every later suite as never run. Resolving them here
-	# keeps their _check() calls in _expected_suites order below while confining
-	# the awaits to a point where nothing is queued.
+	# The targeting, projectile, skillshot rewind, and aim assist activation
+	# suites are the four that await physics frames: a body only registers with
+	# the physics space once a frame has been processed. All four have to finish
+	# BEFORE _finalize is queued -- call_deferred fires at the end of the current
+	# frame, so a suite that suspends after that point would have the summary
+	# printed out from under it, reporting every later suite as never run.
+	# Resolving them here keeps their _check() calls in _expected_suites order
+	# below while confining the awaits to a point where nothing is queued.
 	var targeting_passed: bool = await TargetingTest.run()
 	var projectile_passed: bool = await ProjectileTest.run()
 	var skillshot_rewind_passed: bool = await SkillshotRewindTest.run()
+	var aim_assist_activation_passed: bool = await AimAssistActivationTest.run()
 
 	# Queue completion logic BEFORE any suites run, so it executes even if
 	# a suite aborts due to compilation error or runtime error.
@@ -114,6 +116,7 @@ func _ready() -> void:
 	_check("Projectile Test", projectile_passed)
 	_check("Skillshot Rewind Test", skillshot_rewind_passed)
 	_check("Aim Assist Test", AimAssistTest.run())
+	_check("Aim Assist Activation Test", aim_assist_activation_passed)
 	_check("Cast Cancel Test", CastCancelTest.run())
 	_check("Channel Test", ChannelTest.run())
 	_check("Toggle Test", ToggleTest.run())
