@@ -94,8 +94,18 @@ jobs:
       # Drafting a short title and paragraph per already-written bullet is a
       # small, bounded task -- narrower than the lint fixer's, which also has
       # to read and edit a file. The Copilot CLI rejects anything below 30.
-      TRIAGE_MAX_AI_CREDITS: "30"
-      TRIAGE_MAX_TURNS: "20"
+      #
+      # `run-agent-session`'s `read-only` capability still grants Read/Grep/
+      # Glob against the checkout (see its own note on why read-only is the
+      # fail-safe default, not a no-tools mode) even though this role never
+      # needs the checkout at all -- everything it answers from is already
+      # in the prompt. The prompt below tells it not to use any tool, but
+      # nothing enforces that at the tool-availability level, so a small
+      # margin above the bare minimum is kept here deliberately: one
+      # exploratory Read the prompt fails to prevent should not by itself
+      # turn into a budget_exhausted failure on an otherwise-trivial task.
+      TRIAGE_MAX_AI_CREDITS: "40"
+      TRIAGE_MAX_TURNS: "25"
 
     steps:
       - name: Checkout Repository
@@ -155,6 +165,40 @@ jobs:
 
           pr = json.loads(pathlib.Path("pr.json").read_text())
 
+          # Same set .github/scripts/issue_dependencies.py uses for the
+          # identical "is this cell actually empty" question, kept in step
+          # with it rather than re-deriving a narrower one here.
+          EMPTY_VALUES = {"", "none", "n/a", "na", "-", "--", "—", "–", "…", "..."}
+
+          # A bullet naming an Issue it was already filed under (e.g. "Filed
+          # as #123", "see #123", "duplicate of #123") is done, not a new
+          # finding. Deliberately narrower than a bare `#\d+` search: that
+          # also matched a hex color (#004488) or a plain number a finding's
+          # own text happened to mention ("#100 base HP"), silently dropping
+          # a real finding with no warning. Requiring one of these keywords
+          # near the `#` is a real trade -- a bullet that references another
+          # Issue without any of these words slips through -- but silently
+          # over-filtering is the worse failure mode for a workflow whose
+          # whole point is not losing findings.
+          FILED_REFERENCE = re.compile(
+              r"(?i)\b(?:filed|tracked|duplicate\s+of|see|already)\b[^#\n]{0,30}#\d+\b"
+          )
+
+          def strip_comments(text):
+              """Drop HTML comments before scanning for content.
+
+              Same helper as issue_dependencies.py's strip_comments, kept
+              local rather than imported (that module answers an unrelated
+              question about Issues, not pull requests -- see its own note
+              on why the two stay separate). Without this, an instructional
+              HTML comment inside a section -- the PR template's own
+              guidance prose lives in one -- would be scanned for bullets
+              exactly like real content the moment either ever contains an
+              example line starting with '-'.
+              """
+
+              return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+
           def section(text, heading):
               """Return the body of one '## heading' section, or ''."""
 
@@ -170,25 +214,57 @@ jobs:
               match = pattern.search(text)
               return match.group(1) if match else ""
 
+          def is_empty(item):
+              normalized = item.strip().strip("`*_").strip().casefold()
+
+              if normalized in EMPTY_VALUES:
+                  return True
+
+              # An unedited template placeholder, e.g. `<or "None">` from
+              # pull_request_template.md / 02-implementor.agent.md -- not
+              # itself a finding, whatever it says inside the brackets.
+              return bool(re.fullmatch(r"<.*>", item.strip()))
+
           def bullets(text):
-              """Top-level '- ' / '* ' bullets, skipping 'None' and anything
-              that already names an Issue -- both mean there is nothing left
-              for this workflow to file."""
+              """Merge each top-level '- ' / '* ' bullet with the plain
+              continuation lines and indented sub-bullets under it, then
+              skip anything empty or already filed.
+
+              A finding written as a wrapped sentence or with sub-bullets
+              elaborating it is one finding, not several -- splitting it
+              would file indented detail as its own context-free Issue and
+              truncate the parent to its first line. Only a line with
+              little or no indentation starts a *new* finding; anything
+              indented under it (bulleted or not) is folded into the
+              finding above, joined as a continuation of its text.
+              """
+
+              raw = []
+              current = None
+
+              for line in text.splitlines():
+                  if not line.strip():
+                      current = None
+                      continue
+
+                  indent = len(line) - len(line.lstrip())
+                  stripped = line.strip()
+                  match = re.match(r"^[-*]\s+(.*\S)\s*$", stripped)
+
+                  if match and indent < 2:
+                      current = [match.group(1).strip()]
+                      raw.append(current)
+                  elif current is not None:
+                      current.append(match.group(1).strip() if match else stripped)
+                  # A line before any top-level bullet has started belongs to
+                  # the section's own lead-in prose, not to a finding.
 
               found = []
 
-              for line in text.splitlines():
-                  match = re.match(r"^\s*[-*]\s+(.*\S)\s*$", line)
+              for parts in raw:
+                  item = " ".join(parts).strip()
 
-                  if not match:
-                      continue
-
-                  item = match.group(1).strip()
-
-                  if not item or re.fullmatch(r"(?i)none\.?", item):
-                      continue
-
-                  if re.search(r"#\d+", item):
+                  if not item or is_empty(item) or FILED_REFERENCE.search(item):
                       continue
 
                   found.append(item)
@@ -204,7 +280,10 @@ jobs:
 
           items = []
 
-          for bullet in bullets(section(pr.get("body") or "", "Discovered Out-of-Scope Work")):
+          pr_body = strip_comments(pr.get("body") or "")
+          latest_review = strip_comments(latest_review)
+
+          for bullet in bullets(section(pr_body, "Discovered Out-of-Scope Work")):
               items.append({"source": "pr-body", "text": bullet})
 
           for bullet in bullets(section(latest_review, "Deferred Findings")):
@@ -269,7 +348,9 @@ jobs:
             is vague, keep the draft vague rather than guessing specifics.
           - Do not judge priority, severity, or whether the finding is worth
             acting on -- that already happened.
-          - Do not use any tool. Respond with ONLY a JSON array, nothing
+          - Do not read, search, or explore any file. Everything you need is
+            already in this prompt; there is nothing else to look at. Do not
+            use any tool at all. Respond with ONLY a JSON array, nothing
             before or after it, not even a code fence.
 
           Each array element must be an object with exactly two string
@@ -339,9 +420,23 @@ jobs:
               print(guidance)
               sys.exit(1)
 
-          if outcome.get("unfinished_turn") or outcome.get("reason") == "budget_exhausted":
+          # Mirrors extract-review-verdict.py's cut_off/budget_hit split:
+          # session_error means the session itself crashed or errored before
+          # producing output, which is a different fault than "ran to
+          # completion and still wrote bad JSON" -- conflating the two would
+          # send a genuine vendor/session crash back as "tighten the
+          # prompt", which is the wrong fix for that failure.
+          cut_off = bool(
+              outcome.get("unfinished_turn") or outcome.get("reason") == "session_error"
+          )
+          budget_hit = outcome.get("reason") == "budget_exhausted"
+
+          if cut_off or budget_hit:
               fail(
-                  "The triage session was cut off before finishing its draft list",
+                  "The triage session was cut off before finishing its draft list"
+                  if cut_off else
+                  "The triage session stopped mid-draft, most likely on its"
+                  " AI credit limit",
                   "Raise TRIAGE_MAX_AI_CREDITS / TRIAGE_MAX_TURNS, or re-run"
                   " manually via workflow_dispatch. Do not trust a partial"
                   " JSON array as a smaller-than-expected but valid one.",
@@ -407,6 +502,7 @@ jobs:
           import json
           import os
           import pathlib
+          import re
           import subprocess
           import sys
 
@@ -423,15 +519,33 @@ jobs:
           ).stdout.splitlines()
 
           if "deferred-finding" not in existing:
-              subprocess.run(
+              # Two pull requests merging close together run genuinely
+              # concurrent jobs -- the concurrency group above is keyed per
+              # PR number, not shared -- so both can see the label absent
+              # and race to create it. The loser's create call fails with
+              # "already exists", which is this step's actual goal already
+              # met, not a real failure; only anything else here is.
+              create = subprocess.run(
                   ["gh", "label", "create", "deferred-finding",
                    "--repo", repo, "--color", "C5DEF5",
                    "--description",
                    "Filed by agent-06-triage.yml from a merged pull"
                    " request's Discovered Out-of-Scope Work or Deferred"
                    " Findings section"],
-                  check=True,
+                  capture_output=True, text=True,
               )
+
+              already_exists = re.search(
+                  r"already[_ ]exists", create.stderr, re.IGNORECASE
+              )
+
+              if create.returncode != 0 and not already_exists:
+                  pathlib.Path("triage-failure.json").write_text(json.dumps({
+                      "headline": "Failed to ensure the deferred-finding label exists",
+                      "guidance": create.stderr.strip(),
+                  }, indent=2))
+                  print(f"::error::gh label create failed: {create.stderr.strip()}")
+                  sys.exit(1)
 
           filed = []
 
