@@ -8,7 +8,12 @@ See:
   - §61 (Armor/Magic Penetration and Ability Haste Formulas) for effective_armor
     and effective_cooldown
   - §7 (Damage Types) for true damage mechanics
+  - §55 (Aim Assist) for effective_magnetism and the per-device multiplier table
 """
+
+import json
+from pathlib import Path
+from typing import Any
 
 
 def mitigation_multiplier(defense: float) -> float:
@@ -256,3 +261,57 @@ def clamped_heal(current_health: float, max_health: float, amount: float) -> flo
     min_clamp = 0.0
     max_clamp = max(0.0, max_health - current_health)
     return min(max(amount, min_clamp), max_clamp)
+
+
+def effective_magnetism(ability_magnetism: float, device_multiplier: float) -> float:
+    """Calculate the effective aim-assist magnetism after applying a device multiplier.
+
+    Per §55, the formula is: clamp(Ability Magnetism × Device Multiplier, 0.0, 1.0)
+
+    This mirrors MobaAimAssist.effective_magnetism exactly. The clamp guards against
+    a device multiplier above 1.0 (or an authored ability magnetism near 1.0 paired
+    with a multiplier above 1.0) turning into a magnetism greater than full lock,
+    which resolve_direction()'s slerp blend factor cannot meaningfully represent.
+
+    Args:
+        ability_magnetism: Magnetism value authored on the ability, in [0.0, 1.0]
+        device_multiplier: Device-specific multiplier from aim_assist.json
+
+    Returns:
+        Effective magnetism, clamped to [0.0, 1.0]
+
+    Example:
+        >>> effective_magnetism(0.5, 1.0)
+        0.5
+        >>> effective_magnetism(1.0, 1.5)
+        1.0
+        >>> effective_magnetism(0.0, 0.67)
+        0.0
+    """
+    return min(max(ability_magnetism * device_multiplier, 0.0), 1.0)
+
+
+def load_device_multipliers() -> dict[str, float]:
+    """Load the per-device aim-assist multiplier table from rules/data/aim_assist.json.
+
+    Reads the hand-authored config table directly rather than duplicating its values
+    as a Python literal, so a future tuning change to aim_assist.json cannot silently
+    drift from what this harness measures. This is hand-authored data in
+    rules/data/, not a per-ability export, so unlike sim/abilities.py's
+    rules/data/generated/ loaders, this does not require running an export tool first.
+
+    Returns:
+        Dictionary mapping device key ("mouse", "gamepad", "touch") to its multiplier
+
+    Example:
+        >>> multipliers = load_device_multipliers()
+        >>> multipliers["touch"]
+        1.0
+    """
+    repo_root = Path(__file__).parent.parent
+    file_path = repo_root / "rules" / "data" / "aim_assist.json"
+
+    with open(file_path) as f:
+        data: dict[str, Any] = json.load(f)
+
+    return {key: value for key, value in data.items() if key != "_comment"}
